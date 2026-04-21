@@ -1,0 +1,369 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T10 — Cache-aware 2-part system prompt | opencode"
+  description="Phân tích cách opencode tách system prompt thành header tĩnh (có cache_control) và rest động, giữ cache hit rate cao dù content thay đổi mỗi call."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T10 — Cache-aware 2-part system prompt"
+        subtitle="Tách system prompt thành <code>header</code> tĩnh (identity + rules + tool defs) và <code>rest</code> động (env, git status, skills) — đặt <code>cache_control: ephemeral</code> chỉ trên header để tối đa cache hit rate."
+        meta={[
+          { label: 'Nhóm',   value: 'B — Context Management' },
+          { label: 'File',   value: '<code>session/system.ts</code> + <code>session/llm.ts</code>' },
+          { label: 'Lines',  value: 'llm.ts:99–160' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      {/* ── 1. Overview ── */}
+      <Section id="overview" title="Tổng quan" themeTag="Context">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Anthropic prompt caching hoạt động theo
+          prefix matching: nếu bất kỳ byte nào trong phần được cache thay đổi, toàn bộ
+          cache đó bị invalidate. System prompt thường chứa nội dung động (git status,
+          env info, danh sách skills) — nếu concat thành 1 string, mỗi call đều cache miss
+          → chi phí tăng 10x và latency tệ hơn.
+        </WhyImportant>
+
+        <p>
+          opencode giải quyết bằng cách tách system prompt thành 2 phần:
+        </p>
+        <ul>
+          <li>
+            <strong>header</strong>: identity, rules, tool descriptions — thay đổi rất ít
+            (chỉ khi cài plugin mới). Được đánh dấu <code>cache_control: &#123; type: "ephemeral" &#125;</code>.
+          </li>
+          <li>
+            <strong>rest</strong>: env block, git status, skills list, working directory —
+            thay đổi mỗi session hoặc mỗi vài calls. Không cache.
+          </li>
+        </ul>
+
+        <p>
+          Với cấu trúc này, header (thường 5 000–15 000 token) được cache từ call thứ 2 trở đi.
+          Chỉ rest (thường 500–2 000 token) phải tính lại. Cache hit rate thực tế đạt 80–90%
+          tổng token hệ thống.
+        </p>
+
+        <Callout type="unique">
+          <strong>Plugin-safe design.</strong> Plugin nhận và trả về <code>[header, rest]</code>
+          riêng lẻ (không phải 1 string), đảm bảo breakpoint cache không bị mất khi plugin
+          inject nội dung vào <code>rest</code>.
+        </Callout>
+
+        <Callout type="info">
+          <strong>Cost saving thực tế.</strong> Anthropic cache read costs 0.1x so với
+          cache write và input thường. Với header 10k token, 100 calls/ngày:
+          không cache = 1 000 000 token/ngày; có cache = ~100 000 (write lần đầu)
+          + 900 000 * 0.1 = 190 000 token cost tương đương.
+        </Callout>
+      </Section>
+
+      {/* ── 2. Anatomy ── */}
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Bước 1 — Định nghĩa 2-part system prompt type" />
+        <CodeBlock caption="session/system.ts — type definition">
+          <Fragment is:raw>{`
+export type SystemPrompt = {
+  header: string   // static — identity, rules, tool descriptions
+  rest:   string   // dynamic — env, git status, skills list
+}
+
+// Plugin interface — nhận [header, rest], trả về [header, rest]
+// Không được concat thành 1 string — mất cache breakpoint
+export type SystemPromptTransform = (
+  prompt: SystemPrompt
+) => SystemPrompt | Promise<SystemPrompt>
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Bước 2 — Build system prompt với plugin transforms" />
+        <CodeBlock caption="session/system.ts — buildSystemPrompt">
+          <Fragment is:raw>{`
+export async function buildSystemPrompt(
+  session: Session
+): Promise<SystemPrompt> {
+  // Base system prompt: header tĩnh
+  let prompt: SystemPrompt = {
+    header: BASE_IDENTITY + RULES + formatToolDescriptions(session.tools),
+    rest:   '',
+  }
+
+  // Dynamic content vào rest
+  prompt.rest = [
+    formatEnvBlock(session.env),
+    await getGitStatus(session.cwd),
+    formatSkillsList(session.plugins),
+  ].filter(Boolean).join('\n\n')
+
+  // Plugin transforms — chỉ được sửa rest, không được sửa header
+  for (const plugin of session.plugins) {
+    if (plugin.systemPromptTransform) {
+      prompt = await plugin.systemPromptTransform(prompt)
+    }
+  }
+
+  return prompt
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Bước 3 — Serialize sang Anthropic API format" />
+        <p>
+          Anthropic API nhận <code>system</code> là array of content blocks, mỗi block
+          có thể có <code>cache_control</code> riêng.
+        </p>
+        <CodeBlock caption="session/llm.ts:99-160 — serialize 2-part prompt">
+          <Fragment is:raw>{`
+function serializeSystemPrompt(
+  prompt: SystemPrompt,
+  provider: Provider
+): AnthropicSystemBlock[] | string {
+  if (provider !== 'anthropic') {
+    // Providers khác: concat thành 1 string
+    return [prompt.header, prompt.rest].filter(Boolean).join('\n\n')
+  }
+
+  // Anthropic: array of blocks với cache_control trên header
+  const blocks: AnthropicSystemBlock[] = [
+    {
+      type:          'text',
+      text:          prompt.header,
+      cache_control: { type: 'ephemeral' },
+      // ephemeral cache TTL = 5 phút (Anthropic default)
+    },
+  ]
+
+  if (prompt.rest) {
+    blocks.push({
+      type: 'text',
+      text: prompt.rest,
+      // Không có cache_control — tính mỗi call
+    })
+  }
+
+  return blocks
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Tại sao ephemeral?" />
+        <p>
+          Anthropic prompt cache có TTL 5 phút (ephemeral) hoặc 1 giờ (persistent, beta).
+          opencode dùng ephemeral — đủ cho một coding session liên tục, không cần
+          phức tạp hóa với persistent cache management.
+        </p>
+      </Section>
+
+      {/* ── 3. Interaction ── */}
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+Build phase:
+  Plugin A, B, C ──→ systemPromptTransform([header, rest])
+                                │
+                                ▼
+                     ┌─────────────────────┐
+                     │  SystemPrompt       │
+                     │  header: static     │◄── T10 breakpoint
+                     │  rest:   dynamic    │
+                     └─────────────────────┘
+                                │
+                                ▼
+Runtime (mỗi LLM call):
+  serializeSystemPrompt()
+        │
+        ├─ Anthropic ──→ [{ text: header, cache_control: ephemeral },
+        │                 { text: rest }]
+        │
+        └─ Others ──────→ header + "\n\n" + rest (string)
+
+T7 (overflow detection):
+  cache.write tokens ← first call after cache miss (header thay đổi)
+  cache.read tokens  ← subsequent calls (header hit)
+
+T32/T33 (env injection):
+  inject vào rest (không header) → cache không bị invalidate
+`}</Diagram>
+
+        <p>
+          T10 tương tác chặt chẽ với T7: khi header thay đổi (plugin mới được install),
+          <code>cache.write</code> tăng đột biến → T7 có thể trigger compact sớm hơn dự kiến.
+          Đây là behavior chính xác — sau cache miss, tổng token tăng.
+        </p>
+      </Section>
+
+      {/* ── 4. Failure modes ── */}
+      <Section id="failure" title="Failure modes" themeTag="Risk">
+        <Subheading level="h3" text="FM-1: Concat toàn bộ thành 1 string" />
+        <CodeBlock caption="Anti-pattern — single string system prompt">
+          <Fragment is:raw>{`
+// ❌ Concat tất cả → cache miss mỗi call
+function buildSystemPrompt(session) {
+  return [
+    BASE_IDENTITY,
+    RULES,
+    formatToolDescriptions(session.tools),
+    formatEnvBlock(session.env),         // thay đổi mỗi call!
+    await getGitStatus(session.cwd),     // thay đổi mỗi call!
+  ].join('\n\n')
+  // Bất kỳ thay đổi nhỏ nào → toàn bộ cache invalidate
+  // 10-15k token × 100 calls/ngày → chi phí tăng gấp 10
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="FM-2: Plugin sửa header thay vì rest" />
+        <p>
+          Nếu plugin inject nội dung vào <code>header</code> (thường xuyên thay đổi),
+          cache sẽ miss mọi call — tương đương với không có caching.
+        </p>
+        <CodeBlock caption="Anti-pattern — plugin modify header">
+          <Fragment is:raw>{`
+// ❌ Plugin inject dynamic content vào header
+plugin.systemPromptTransform = (prompt) => ({
+  header: prompt.header + '\n\nCurrent time: ' + new Date(),  // luôn thay đổi!
+  rest:   prompt.rest,
+})
+// Đúng: inject vào rest
+plugin.systemPromptTransform = (prompt) => ({
+  header: prompt.header,  // không thay đổi
+  rest:   prompt.rest + '\n\nCurrent time: ' + new Date(),
+})
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="FM-3: Không có rest block" />
+        <p>
+          Nếu bỏ qua phần <code>rest</code> hoàn toàn và nhét tất cả vào header,
+          header sẽ thay đổi theo môi trường — mất hết lợi ích caching.
+        </p>
+
+        <ProsCons
+          pros={[
+            'Cache hit rate 80–90% trên header tĩnh',
+            'Cost reduction 5–10x cho sessions dài',
+            'Plugin-safe: chỉ được inject vào rest',
+            'Tương thích multi-provider: fallback graceful cho non-Anthropic',
+          ]}
+          cons={[
+            'Cache TTL 5 phút — cần re-warm sau khi idle lâu',
+            'Header phải thực sự tĩnh — khó khi tool list thay đổi',
+            'Chỉ có ích với Anthropic — không có lợi với OpenAI (không cache riêng)',
+          ]}
+        />
+      </Section>
+
+      {/* ── 5. Compare ── */}
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'System prompt caching', 'Static/dynamic split?', 'Plugin safe?']}
+          rows={[
+            ['<strong>opencode</strong>', '<span style="color:var(--chip-green-fg)">Có — 2-part với <code>cache_control</code></span>', '<span style="color:var(--chip-green-fg)">Có (header / rest)</span>', '<span style="color:var(--chip-green-fg)">Có (plugin nhận tuple)</span>'],
+            ['Claude Code', '<span style="color:var(--chip-green-fg)">Có (cùng Anthropic)</span>', '<span style="color:var(--chip-green-fg)">Có</span>', '<span style="color:var(--chip-amber-fg)">Không public</span>'],
+            ['Aider', '<span style="color:var(--chip-red-fg)">Không dùng Anthropic caching</span>', '<span style="color:var(--chip-red-fg)">Không</span>', '<span style="color:var(--chip-red-fg)">N/A</span>'],
+            ['Cursor', '<span style="color:var(--chip-amber-fg)">Không public chi tiết</span>', '<span style="color:var(--chip-amber-fg)">Không rõ</span>', '<span style="color:var(--chip-amber-fg)">Không rõ</span>'],
+          ]}
+        />
+
+        <Callout type="info">
+          <strong>Anthropic cookbook</strong> có ví dụ cụ thể về cách implement 2-part system
+          prompt với <code>cache_control</code> — opencode follow đúng best practice này.
+        </Callout>
+      </Section>
+
+      {/* ── 6. Recipe ── */}
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock caption="system.ts — 2-part cache-aware system prompt recipe">
+          <Fragment is:raw>{`
+// system.ts — cache-aware 2-part system prompt
+
+export type SystemPrompt = { header: string; rest: string }
+
+export function buildBasePrompt(tools: Tool[]): SystemPrompt {
+  return {
+    header: [
+      IDENTITY_BLOCK,
+      RULES_BLOCK,
+      formatToolDescriptions(tools),
+    ].join('\n\n'),
+    rest: '',
+  }
+}
+
+export async function enrichWithDynamic(
+  prompt:  SystemPrompt,
+  session: Session
+): Promise<SystemPrompt> {
+  return {
+    ...prompt,
+    rest: [
+      formatEnvBlock(process.env),
+      await getGitStatus(session.cwd),
+      formatSkillsList(session.plugins),
+    ].filter(Boolean).join('\n\n'),
+  }
+}
+
+export function toAnthropicBlocks(
+  prompt: SystemPrompt
+): AnthropicTextBlock[] {
+  const blocks: AnthropicTextBlock[] = [
+    { type: 'text', text: prompt.header, cache_control: { type: 'ephemeral' } },
+  ]
+  if (prompt.rest.trim()) {
+    blocks.push({ type: 'text', text: prompt.rest })
+  }
+  return blocks
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      {/* ── 7. Refs ── */}
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching">Anthropic docs — Prompt caching: cache_control và cache blocks</a>',
+            '<a href="https://github.com/anthropics/anthropic-cookbook/tree/main/misc/prompt_caching.ipynb">Anthropic cookbook — Prompt caching patterns</a>',
+            '<a href="https://mindstudio.ai/blog/how-to-use-anthropic-claude-prompt-caching">MindStudio blog — How to use Anthropic Claude prompt caching</a>',
+            '<a href="https://www.anthropic.com/news/prompt-caching">Anthropic — Prompt caching announcement và cost breakdown</a>',
+            '<a href="https://github.com/sst/opencode/blob/main/packages/opencode/src/session/llm.ts">opencode source — session/llm.ts (lines 99–160)</a>',
+            '<a href="https://simonwillison.net/2024/Aug/14/anthropic-prompt-caching/">Simon Willison — Anthropic prompt caching deep dive</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

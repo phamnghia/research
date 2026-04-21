@@ -1,0 +1,272 @@
+---
+// _template.astro — mẫu để tạo báo cáo mới
+//
+// HƯỚNG DẪN DÙNG:
+//   1) Copy file này thành `src/pages/reports/<slug>.astro`
+//        cp src/pages/reports/_template.astro src/pages/reports/my-report.astro
+//   2) Đổi `title`, `subtitle`, `meta`, nội dung các Section/Technique.
+//   3) Thêm entry `{ slug: 'my-report', ... }` vào `src/data/reports.ts`
+//      để card xuất hiện trên trang index.
+//   4) Tạo folder `research/<slug>/` với README.md + references.md cho notes thô.
+//
+// LƯU Ý:
+//   - File bắt đầu bằng dấu `_` không được Astro render thành route
+//     → file này chỉ dùng làm template, không bao giờ xuất hiện trong site.
+//   - CodeBlock dùng Shiki: prop `code` (plain text) hoặc slot + Fragment is:raw
+//     khi snippet có `{`/`}`. Prop `lang` tuỳ chọn (mặc định suy luận).
+//   - Các prop là HTML string (subtitle, ProsCons items, RefList items,
+//     Callout children, location) được render bằng set:html → có thể
+//     chèn `<a>`, `<code>`, `<strong>`, ...
+//
+// ─────────────────────────────────────────────────────────────────────────
+import ReportLayout from '../../layouts/ReportLayout.astro';
+import Sidebar from '../../components/Sidebar.astro';
+import Hero from '../../components/Hero.astro';
+import Breadcrumb from '../../components/Breadcrumb.astro';
+import Section from '../../components/Section.astro';
+import Subheading from '../../components/Subheading.astro';
+import Technique from '../../components/Technique.astro';
+import ProsCons from '../../components/ProsCons.astro';
+import Callout from '../../components/Callout.astro';
+import Chip from '../../components/Chip.astro';
+import Diagram from '../../components/Diagram.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
+import RefList from '../../components/RefList.astro';
+import SummaryTable from '../../components/SummaryTable.astro';
+import DataTable from '../../components/DataTable.astro';
+import LinkList from '../../components/LinkList.astro';
+import WhyImportant from '../../components/WhyImportant.astro';
+import ReportImage from '../../components/ReportImage.astro';
+import DeepDiveLink from '../../components/DeepDiveLink.astro';
+
+const title = '<Tên báo cáo>';
+const description = '<Mô tả ngắn 1-2 câu, sẽ hiển thị ở <meta name="description">>';
+---
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    {/* ─────── SIDEBAR ─────── */}
+    <Sidebar
+      intro="Mục lục"
+      groups={[
+        {
+          title: 'Mở đầu',
+          items: [
+            { href: '#intro', label: 'Tổng quan', section: true },
+            { href: '#summary', label: 'Bảng tóm tắt' },
+          ],
+        },
+        {
+          title: 'Nhóm A — Ví dụ',
+          items: [
+            { href: '#t1', label: '1. Kỹ thuật X' },
+            { href: '#t2', label: '2. Kỹ thuật Y' },
+          ],
+        },
+        {
+          title: 'Kết luận',
+          items: [
+            { href: '#wrap', label: 'Tổng kết', section: true },
+          ],
+        },
+      ]}
+    />
+
+    {/* ─────── MAIN ─────── */}
+    <main>
+      <Breadcrumb />
+
+      <Hero
+        title={title}
+        subtitle="Một dòng mô tả báo cáo. Có thể chèn <a href='https://...'>link</a> hoặc <code>tên repo</code>."
+        meta={[
+          { label: 'Ngày', value: '2026-04-20' },
+          { label: 'Repo', value: '<code>org/repo</code>' },
+          { label: 'Số kỹ thuật', value: '28' },
+        ]}
+      />
+
+      {/* ── Section intro ── */}
+      <Section id="intro" title="Tổng quan" themeTag="Intro">
+        <p>
+          Mô tả tổng thể. Bạn có thể dùng <code>&lt;p&gt;</code> thường ở đây,
+          hoặc chèn Callout / Chip bất cứ đâu.
+        </p>
+
+        {/*
+          ── ReportImage: Diagram kiến trúc tổng quan ──
+          Tìm URL ảnh khi fetch refs → embed ở đây.
+          Ảnh từ GitHub raw: https://raw.githubusercontent.com/org/repo/branch/path
+          Ảnh nền trắng: thêm bordered={true}
+        */}
+        <ReportImage
+          src="https://via.placeholder.com/960x400?text=Architecture+Diagram"
+          alt="Sơ đồ kiến trúc tổng quan — thay bằng ảnh thật từ repo/docs"
+          caption="Kiến trúc tổng quan của hệ thống. Thay bằng diagram thật từ tài liệu tham khảo."
+          source="https://github.com/org/repo"
+          sourceLabel="GitHub repo"
+        />
+
+        <Callout type="info">
+          <strong>Info callout.</strong> Dùng cho ghi chú quan trọng hoặc context.
+        </Callout>
+
+        <Callout type="warn">
+          <strong>Warn.</strong> Cho lưu ý / pitfall.
+        </Callout>
+
+        <Callout type="unique">
+          <strong>Unique.</strong> Dùng khi muốn đánh dấu điểm khác biệt so với
+          sản phẩm khác.
+        </Callout>
+
+        <Callout type="success">
+          <strong>Success.</strong> Kết luận tích cực / recommendation.
+        </Callout>
+
+        <p>
+          Inline chip: <Chip>default</Chip>
+          <Chip variant="green">green</Chip>
+          <Chip variant="amber">amber</Chip>
+          <Chip variant="purple">purple</Chip>
+          <Chip variant="cyan">cyan</Chip>
+          <Chip variant="red">red</Chip>
+          <Chip variant="unique">unique</Chip>
+        </p>
+      </Section>
+
+      {/* ── Bảng tóm tắt ── */}
+      <Section id="summary" title="Bảng tóm tắt" themeTag="Overview">
+        <SummaryTable
+          headers={['ID', 'Kỹ thuật', 'Theme']}
+          rows={[
+            { id: 'A.1', title: '<a href="#t1">Kỹ thuật X</a>', chipLabel: 'Loop', chipVariant: 'green' },
+            { id: 'A.2', title: '<a href="#t2">Kỹ thuật Y</a>', chipLabel: 'Context', chipVariant: 'amber' },
+          ]}
+        />
+      </Section>
+
+      {/* ── Technique 1 ── */}
+      <Section id="group-a" title="Nhóm A — Ví dụ nhóm kỹ thuật" themeTag="Loop">
+
+        <Technique
+          id="t1"
+          title="1. Kỹ thuật X"
+          tid="A.1"
+          location='File: <code>src/agent/loop.ts:120-180</code>'
+        >
+          <WhyImportant>
+            <strong>Tại sao quan trọng.</strong> Giải thích rationale 2-3 câu.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Cách hoạt động" />
+          <p>Mô tả ngắn gọn cách thuật toán/kỹ thuật vận hành.</p>
+
+          {/* Diagram ASCII */}
+          <Diagram>{`
+┌──────────┐     ┌──────────┐
+│  Model   │ ──▶ │  Tool    │
+└──────────┘     └──────────┘
+      ▲                │
+      └────── result ◀─┘
+          `}</Diagram>
+
+          <Subheading level="h4" text="Code từ repo" />
+          <CodeBlock caption="loop.ts">
+            {/*
+              Nếu snippet chứa `{` hoặc `}`, bọc trong Fragment is:raw + template literal.
+            */}
+            <Fragment is:raw>{`
+async function runLoop(session) {
+  while (true) {
+    const resp = await model.stream(session.messages);
+    if (resp.finishReason === "stop") break;
+    await runToolCalls(resp.toolCalls);
+  }
+}
+`}</Fragment>
+          </CodeBlock>
+
+          <ProsCons
+            pros={[
+              'Đơn giản, dễ debug',
+              'Không cần state machine phức tạp',
+              'Hoạt động với mọi SDK có streaming',
+            ]}
+            cons={[
+              'Không handle được <code>interruption</code> mid-stream',
+              'Retry logic phải gói ngoài',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://example.com/blog">Tên bài — Tác giả</a>',
+              '<a href="https://example.com/doc">SDK doc — streaming</a>',
+            ]}
+          />
+
+          {/*
+            ── DeepDiveLink: trỏ tới báo cáo deep dive nếu có ──
+            Chỉ thêm khi đã có trang deep dive tương ứng.
+            Format slug: <parent-slug>-<topic>
+          */}
+          <DeepDiveLink href="/reports/<slug>-<topic>/">
+            Phân tích sâu: Tên Topic — architecture, trade-offs & code walkthrough
+          </DeepDiveLink>
+        </Technique>
+
+        {/* ── Technique 2 ── */}
+        <Technique
+          id="t2"
+          title="2. Kỹ thuật Y"
+          tid="A.2"
+          location='File: <code>src/context/compact.ts:30-110</code>'
+        >
+          <p>Tiếp tục cấu trúc tương tự Technique 1.</p>
+
+          <CodeBlock code="const tail = messages.slice(-2);" lang="typescript" />
+
+          <ProsCons
+            pros={['Ưu 1', 'Ưu 2']}
+            cons={['Nhược 1']}
+          />
+        </Technique>
+      </Section>
+
+      {/* ── Ví dụ dùng DataTable so sánh ── */}
+      <Section id="compare" title="So sánh với alternatives" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Aspect', 'My Project', 'Alternative']}
+          rows={[
+            ['Language', '<code>TypeScript</code>', '<code>Python</code>'],
+            ['Model foundation', 'Effect-TS', 'asyncio'],
+            ['Multi-agent', 'Task tool', '<strong>Subprocess + worktree</strong>'],
+          ]}
+        />
+
+        <LinkList
+          title="Link đọc thêm"
+          items={[
+            '<a href="https://martinfowler.com/articles/harness-engineering.html">Martin Fowler — Harness Engineering</a>',
+            '<a href="https://openai.com/index/harness-engineering/">OpenAI — Harness engineering</a>',
+          ]}
+        />
+      </Section>
+
+      {/* ── Kết luận ── */}
+      <Section id="wrap" title="Tổng kết" themeTag="Wrap">
+        <p>Nhận định cuối + recommendation. Có thể tiếp nối với RefList tổng.</p>
+
+        <RefList
+          title="Tham khảo tổng"
+          items={[
+            '<a href="https://github.com/org/repo">Repo gốc</a>',
+            '<a href="https://doc.example">Tài liệu chính thức</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

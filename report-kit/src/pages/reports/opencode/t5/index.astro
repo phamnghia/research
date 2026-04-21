@@ -1,0 +1,393 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T5 — Synthetic system reminder cho mid-turn messages | opencode"
+  description="Phân tích sâu kỹ thuật synthetic system reminder của opencode: wrap user messages mới trong XML tags khi agent đang chạy multi-step để đảm bảo model không bỏ qua input."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác với T-khác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+      <Hero
+        title="T5 — Synthetic system reminder cho mid-turn messages"
+        subtitle="Khi user gõ thêm message trong lúc agent đang chạy multi-step, opencode wrap text đó trong <code>&lt;system-reminder&gt;</code> tags ở step &gt; 1 — nhấn mạnh để model không bỏ qua input mới lẫn trong history."
+        meta={[
+          { label: 'Nhóm', value: 'A — Agent Loop & Streaming' },
+          { label: 'File', value: '<code>session/prompt.ts</code>' },
+          { label: 'Lines', value: '1453–1468' },
+          { label: 'ID', value: 'A.5' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          Trong một agent session dài, user có thể gõ thêm message trong khi agent đang xử lý
+          multi-step task. Ví dụ: agent đang đọc và sửa file, user nhắn thêm "hãy thêm comment
+          tiếng Việt cho tất cả function". Nếu message này đi vào history như một user message
+          bình thường, model có thể không nhận ra rằng đây là instruction mới cần xử lý ngay.
+        </p>
+        <p>
+          opencode giải quyết bằng cách transform text của user message mới thành một block
+          được bọc trong <code>&lt;system-reminder&gt;...&lt;/system-reminder&gt;</code>. XML tag
+          này signal cho model rằng đây là instruction ưu tiên, cần được address trước khi tiếp tục.
+          Kỹ thuật này chỉ áp dụng ở <code>step &gt; 1</code> (step 1 là initial prompt, không cần reminder).
+        </p>
+
+        <WhyImportant>
+          <strong>Tại sao quan trọng:</strong> LLM attention mechanism có thể "bị kéo" về phía
+          context đầu và giữa conversation — message mới trong history dài dễ bị underweighted.
+          Wrap trong XML tag là signal rõ ràng hơn, tốn ít token hơn so với thêm message riêng,
+          và không làm phức tạp message structure.
+        </WhyImportant>
+
+        <Callout type="info">
+          <strong>Kỹ thuật tương tự ở Anthropic:</strong> Blog "Claude Code auto mode" của Anthropic
+          đề cập đến system reminder pattern. Đây là confirmation rằng Claude được train để
+          "pay attention" đặc biệt đến content trong các XML tags như <code>&lt;system-reminder&gt;</code>.
+        </Callout>
+
+        <Callout type="warn">
+          <strong>Giới hạn:</strong> Wrap text không đảm bảo model sẽ ACT on it. Model có thể
+          acknowledge ("tôi hiểu yêu cầu mới") rồi tiếp tục task cũ. Đây là giải pháp soft
+          — không phải hard interrupt như task cancellation.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Điều kiện áp dụng reminder" />
+        <p>
+          Ba điều kiện phải thỏa đồng thời để wrap được áp dụng:
+        </p>
+        <CodeBlock caption="session/prompt.ts:1453-1468 — synthetic reminder injection">
+          <Fragment is:raw>{`
+// Chỉ áp dụng từ step 2 trở đi
+if (step > 1 && lastFinished) {
+  for (const m of msgs) {
+    // Điều kiện 1: phải là user message
+    if (m.info.role !== "user") continue
+
+    // Điều kiện 2: phải là message MỚI (sau lần loop cuối hoàn thành)
+    if (m.info.id <= lastFinished.id) continue
+
+    for (const p of m.parts) {
+      // Điều kiện 3: chỉ wrap text, không wrap media/synthetic/ignored
+      if (p.type !== "text" || p.ignored || p.synthetic) continue
+      if (!p.text.trim()) continue
+
+      // Wrap trong system-reminder XML block
+      p.text = [
+        "<system-reminder>",
+        "The user sent the following message:",
+        p.text,
+        "",
+        "Please address this message and continue with your tasks.",
+        "</system-reminder>",
+      ].join("\n")
+    }
+  }
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="lastFinished — tracking loop state" />
+        <p>
+          <code>lastFinished</code> là reference đến message cuối cùng đã được process trong
+          iteration trước. Bất kỳ user message nào có <code>id &gt; lastFinished.id</code> là
+          message mới — chưa được model "see" trong context tự nhiên.
+        </p>
+        <CodeBlock caption="lastFinished tracking">
+          <Fragment is:raw>{`
+// Được update mỗi lần kết thúc một step:
+lastFinished = lastAssistant  // assistant response cuối cùng
+
+// Mỗi iteration: user messages mới (id > lastFinished.id)
+// là những message đến trong khi loop đang chạy
+const newUserMsgs = msgs.filter(
+  m => m.role === "user" && m.id > lastFinished.id
+)
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Chỉ wrap text — không wrap media hay synthetic parts" />
+        <p>
+          Điều kiện <code>p.type !== "text" || p.ignored || p.synthetic</code> bảo vệ các loại
+          part khác: image attachments, file references, và các synthetic messages được inject
+          bởi harness (vd: compaction continue message).
+        </p>
+        <CodeBlock caption="Part type filtering">
+          <Fragment is:raw>{`
+// Các loại part có thể có trong một user message:
+// - type: "text"      → ← CHỈ WRAP type này
+// - type: "image"     → skip (không wrap media)
+// - type: "file"      → skip
+// - synthetic: true   → skip (harness-injected, vd compaction)
+// - ignored: true     → skip (user đã mark là irrelevant)
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T5 chạy trong "build messages" phase của mỗi T1 iteration:
+
+T1 loop (iteration N, step > 1):
+  │
+  ├─ build messages phase
+  │    │
+  │    ├─ filterCompactedMessages()    ← lọc messages đã compact
+  │    │
+  │    ├─ T5: inject system reminders  ← CHỖ NÀY
+  │    │    │
+  │    │    └─ user messages mới (id > lastFinished.id)
+  │    │         → wrap text trong <system-reminder>
+  │    │
+  │    └─ inject system prompt (T32/T33: model-specific dispatch)
+  │
+  └─ gọi LLM với messages đã transform
+       │
+       └─ T2: stream demux → T3 → T4 → ...
+
+Timeline message IDs:
+  [msg 1: user "viết hàm X"] [msg 2: assistant "..."] [msg 3: tool_call] [msg 4: tool_result]
+  ← step 1 hoàn thành, lastFinished = msg 4 →
+  [msg 5: user "thêm comment"] ← step 2: id 5 > lastFinished.id 4 → WRAP
+`}</Diagram>
+
+        <p>
+          T5 chạy trước khi request được gửi đến LLM, sau khi messages đã được filter bởi
+          compaction logic. Nó không tương tác trực tiếp với T2-T4 (streaming), nhưng ảnh hưởng
+          đến quality của model response trong iteration đó.
+        </p>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: User message bị bỏ qua trong long loop" />
+        <p>
+          Không có reminder, user message mới lẫn vào history và model tiếp tục task cũ:
+        </p>
+        <CodeBlock caption="Không có reminder — user instruction bị miss">
+          <Fragment is:raw>{`
+// Step 3, history:
+// [user: "viết service X"]
+// [assistant: "OK tôi sẽ..."]
+// [tool: read_file result]
+// [tool: write_file result]
+// [user: "hãy dùng TypeScript strict mode"] ← message mới!
+// [assistant: ...] ← model có thể không address vì nó "buried"
+
+// Với reminder:
+// [user: "<system-reminder>The user sent:\nhãy dùng TypeScript strict mode\nPlease address...</system-reminder>"]
+// Model NOW sees it as priority instruction
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: Wrap ở step 1 — không cần thiết" />
+        <p>
+          Nếu áp dụng reminder ngay cả ở step 1, initial user message sẽ bị wrap không cần thiết
+          — overhead token và có thể confuse model về context:
+        </p>
+        <CodeBlock caption="Sai: wrap ở step 1">
+          <Fragment is:raw>{`
+// WRONG: không check step > 1
+for (const m of msgs) {
+  if (m.role === "user") wrapWithReminder(m)
+}
+// Initial user message cũng bị wrap:
+// "<system-reminder>The user sent:\nViết hàm sort\nPlease address...</system-reminder>"
+// → unneccesary và verbose
+
+// CORRECT:
+if (step > 1 && lastFinished) {  // chỉ step > 1
+  // ...
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 3: Wrap media parts — format error" />
+        <p>
+          Nếu vô tình wrap image attachment hoặc file content trong system-reminder text,
+          model sẽ nhận string biểu diễn của binary data:
+        </p>
+        <CodeBlock caption="Wrap sai part type">
+          <Fragment is:raw>{`
+// WRONG: wrap tất cả parts
+for (const p of m.parts) {
+  p.text = wrapReminder(p.text || p.toString())
+  // Image part: p.text = undefined → "undefined" được wrap
+}
+
+// CORRECT: chỉ text parts không phải synthetic/ignored
+if (p.type !== "text" || p.ignored || p.synthetic) continue
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Mid-turn message handling', 'XML wrapping', 'Step-aware']}
+          rows={[
+            [
+              '<strong>opencode</strong>',
+              '<Chip variant="green">System reminder wrap</Chip>',
+              '<Chip variant="green">Có — &lt;system-reminder&gt;</Chip>',
+              '<Chip variant="green">Có — chỉ step &gt; 1</Chip>',
+            ],
+            [
+              'Claude Code',
+              '<Chip variant="amber">Có tương tự (Anthropic blog)</Chip>',
+              '<Chip variant="amber">Có thể có, không public</Chip>',
+              '<Chip variant="amber">Không rõ</Chip>',
+            ],
+            [
+              'Aider',
+              '<Chip variant="red">Không có pattern này</Chip>',
+              '<Chip variant="red">Không</Chip>',
+              '<Chip variant="red">Không</Chip>',
+            ],
+            [
+              'Cline',
+              '<Chip variant="red">Không có</Chip>',
+              '<Chip variant="red">Không</Chip>',
+              '<Chip variant="red">Không</Chip>',
+            ],
+            [
+              'AutoGPT',
+              '<Chip variant="red">Human input chờ turn mới</Chip>',
+              '<Chip variant="red">Không</Chip>',
+              '<Chip variant="red">Không</Chip>',
+            ],
+          ]}
+        />
+
+        <p>
+          opencode và Claude Code (theo Anthropic documentation) là hai harness duy nhất trong
+          danh sách có explicit mid-turn message handling. Aider và Cline xử lý user input theo
+          turn-based model truyền thống — agent xong mới nhận input mới.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>
+          Message transformer function — có thể integrate vào bất kỳ agent loop nào:
+        </p>
+        <CodeBlock caption="system-reminder-injector.ts">
+          <Fragment is:raw>{`
+interface Message {
+  id: string
+  role: "user" | "assistant" | "tool"
+  parts: MessagePart[]
+}
+
+interface MessagePart {
+  type: "text" | "image" | "file"
+  text?: string
+  ignored?: boolean
+  synthetic?: boolean
+}
+
+function injectSystemReminders(
+  messages: Message[],
+  lastFinishedId: string | null,
+  step: number
+): Message[] {
+  // Chỉ áp dụng từ step 2 trở đi
+  if (step <= 1 || lastFinishedId === null) {
+    return messages
+  }
+
+  return messages.map((msg) => {
+    // Chỉ xử lý user messages
+    if (msg.role !== "user") return msg
+
+    // Chỉ xử lý messages MỚI (sau lastFinished)
+    if (msg.id <= lastFinishedId) return msg
+
+    // Transform text parts
+    const newParts = msg.parts.map((part) => {
+      // Bỏ qua non-text, synthetic, ignored, empty
+      if (
+        part.type !== "text" ||
+        part.ignored ||
+        part.synthetic ||
+        !part.text?.trim()
+      ) {
+        return part
+      }
+
+      // Wrap trong system-reminder
+      return {
+        ...part,
+        text: [
+          "<system-reminder>",
+          "The user sent the following message:",
+          part.text,
+          "",
+          "Please address this message and continue with your tasks.",
+          "</system-reminder>",
+        ].join("\n"),
+      }
+    })
+
+    return { ...msg, parts: newParts }
+  })
+}
+
+// Usage trong agent loop:
+// const processedMessages = injectSystemReminders(
+//   rawMessages,
+//   lastAssistantMessage?.id ?? null,
+//   currentStep
+// )
+// // Gửi processedMessages cho LLM
+`}</Fragment>
+        </CodeBlock>
+
+        <Callout type="info">
+          Recipe trên là pure function (immutable) — không mutate messages gốc. opencode
+          mutate trực tiếp <code>p.text</code> vì messages đã được clone trong build phase.
+          Cả hai approach đều đúng — immutable version an toàn hơn cho testing.
+        </Callout>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic — Claude Code auto mode</a> · Đề cập system reminder pattern trong production harness',
+            '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Harness Engineering for Coding Agents</a> · Context re-injection patterns',
+            '<a href="https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-xml-tags">Anthropic docs — Use XML tags</a> · Tại sao XML tags hiệu quả với Claude',
+            '<a href="https://react-lm.github.io/">ReAct paper</a> · Reasoning và observation trong multi-step agent',
+            '<a href="https://github.com/anomalyco/opencode">anomalyco/opencode — session/prompt.ts:1453-1468</a> · Source tham chiếu chính',
+            '<a href="https://platform.openai.com/docs/guides/prompt-engineering">OpenAI — Prompt engineering guide</a> · Strategies để emphasize instructions',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

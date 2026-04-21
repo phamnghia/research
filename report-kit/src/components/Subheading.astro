@@ -1,0 +1,18 @@
+---
+// Subheading.astro — h3/h4 phụ trong nội dung báo cáo (anchor optional)
+type Level = 'h3' | 'h4';
+
+interface Props {
+  level: Level;
+  id?: string;
+  /** Tiêu đề thuần text (không HTML) */
+  text: string;
+}
+
+const { level, id, text } = Astro.props;
+---
+{level === 'h3' ? (
+  <h3 id={id}>{text}</h3>
+) : (
+  <h4 id={id}>{text}</h4>
+)}

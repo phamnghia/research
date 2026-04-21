@@ -1,0 +1,413 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T2 — Streaming event demultiplexer | opencode"
+  description="Phân tích sâu kỹ thuật streaming event demultiplexer của opencode: switch theo event type, Effect.Stream wrap để có interrupt và cancellation."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác với T-khác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+      <Hero
+        title="T2 — Streaming event demultiplexer"
+        subtitle="opencode bọc async iterable stream từ AI SDK trong <code>Effect.Stream</code>, sau đó demultiplex từng event theo type vào handler riêng — cho phép UI update real-time, cancel mid-stream, và composable retry."
+        meta={[
+          { label: 'Nhóm', value: 'A — Agent Loop & Streaming' },
+          { label: 'File', value: '<code>session/processor.ts</code>' },
+          { label: 'Hàm', value: '<code>handleEvent()</code>' },
+          { label: 'Lines', value: '216–461' },
+          { label: 'ID', value: 'A.2' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          LLM streaming API trả về một chuỗi events không đồng nhất: có lúc là text delta,
+          có lúc là reasoning fragment, có lúc là tool call bắt đầu, có lúc là finish signal.
+          Naive implementation thường xử lý tất cả như nhau hoặc chỉ quan tâm đến text.
+        </p>
+        <p>
+          opencode dùng mẫu <strong>demultiplexer</strong>: một switch lớn phân loại từng event
+          theo <code>value.type</code>, rồi route vào handler state riêng. Mỗi handler mutate
+          một phần của <code>ctx</code> (context object) — tách biệt hoàn toàn state của
+          reasoning, text, tool calls, và finish reason.
+        </p>
+
+        <WhyImportant>
+          <strong>Tại sao quan trọng:</strong> Nếu không demux, bạn không thể: (1) hiển thị
+          reasoning riêng với text chính, (2) track từng tool call độc lập, (3) cancel chỉ
+          một loại event mà không ảnh hưởng loại khác. opencode dùng pattern này để drive
+          UI update real-time với granularity cao nhất có thể.
+        </WhyImportant>
+
+        <Callout type="info">
+          <strong>AI SDK event types:</strong> Vercel AI SDK 5 trả 7+ event types trong stream:
+          <code>reasoning-start</code>, <code>reasoning-delta</code>, <code>text-delta</code>,
+          <code>tool-input-start</code>, <code>tool-input-delta</code>, <code>tool-call</code>,
+          <code>finish</code>. opencode handle toàn bộ.
+        </Callout>
+
+        <Callout type="unique">
+          <strong>Effect.Stream khác gì async iterator?</strong> Effect.Stream có built-in
+          interrupt, backpressure, composable operators (<code>takeUntil</code>, <code>tap</code>,
+          <code>retry</code>). Async iterator thuần không có interrupt semantics — phải tự quản lý
+          AbortController.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="handleEvent — switch theo event type" />
+        <p>
+          Hàm <code>handleEvent</code> được wrap trong <code>Effect.fnUntraced</code> —
+          không trace từng event (quá nhiều), nhưng vẫn chạy trong Effect runtime:
+        </p>
+        <CodeBlock caption="session/processor.ts:216-300 — handleEvent core">
+          <Fragment is:raw>{`
+const handleEvent = Effect.fnUntraced(function* (value: StreamEvent) {
+  switch (value.type) {
+
+    case "reasoning-start":
+      ctx.reasoningMap[value.id] = {
+        id: PartID.ascending(),
+        text: "",
+        time: { start: Date.now() }
+      }
+      yield* session.updatePart(ctx.reasoningMap[value.id])
+      return
+
+    case "reasoning-delta":
+      ctx.reasoningMap[value.id].text += value.text
+      yield* session.updatePartDelta({ delta: value.text })
+      return
+
+    case "text-delta":
+      ctx.currentText = (ctx.currentText ?? "") + value.text
+      yield* session.updatePartDelta({ delta: value.text })
+      return
+
+    case "tool-input-start":
+      const part = yield* session.updatePart({ status: "pending", input: {} })
+      ctx.toolcalls[value.id] = {
+        done: yield* Deferred.make<void>(),  // ← T3: Deferred sync point
+        partID: part.id
+      }
+      return
+
+    case "tool-call":
+      yield* updateToolCall(value.toolCallId, (m) => ({
+        ...m, status: "running", input: value.input
+      }))
+      // Doom loop check — T6
+      yield* checkDoomLoop(value.toolName, value.input)
+      return
+
+    case "finish":
+      ctx.finish = value.finishReason
+      return
+  }
+})
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Effect.Stream wrapping — interrupt và takeUntil" />
+        <p>
+          Stream được bọc với <code>Stream.tap</code> (side-effect mỗi event) và
+          <code>Stream.takeUntil</code> (dừng khi cần compact):
+        </p>
+        <CodeBlock caption="session/processor.ts:544-554 — stream pipeline">
+          <Fragment is:raw>{`
+// llm.stream() trả Effect.Stream từ AI SDK async iterable
+const stream = llm.stream(streamInput)
+
+yield* stream.pipe(
+  Stream.tap((event) => handleEvent(event)),     // route mỗi event
+  Stream.takeUntil(() => ctx.needsCompaction),   // stop sớm nếu overflow
+  Stream.runDrain,                                // consume toàn bộ
+)
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Context object — mutable state per-stream" />
+        <p>
+          <code>ctx</code> là object được tạo mới mỗi lần stream bắt đầu, chứa tất cả
+          mutable state cho iteration đó:
+        </p>
+        <CodeBlock caption="Context object structure">
+          <Fragment is:raw>{`
+const ctx = {
+  currentText: undefined as string | undefined,
+  reasoningMap: {} as Record<string, ReasoningPart>,
+  toolcalls: {} as Record<string, ToolCall>,   // T3 Deferred entries
+  finish: undefined as string | undefined,
+  needsCompaction: false,
+  assistantMessage: ...,
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <p>T2 là điểm hội tụ của nhiều kỹ thuật — nó kết nối hầu hết nhóm A:</p>
+
+        <Diagram>{`
+AI SDK stream (async iterable)
+         │
+         ▼
+  llm.stream() — Effect.Stream wrapper
+         │
+  Stream.tap(handleEvent)
+         │
+  ┌──────┴──────────────────────────────────────┐
+  │           switch (value.type)                │
+  │                                              │
+  │  "reasoning-*" ──► ctx.reasoningMap update  │
+  │  "text-delta"  ──► ctx.currentText update   │
+  │  "tool-input-start" ──► T3: Deferred.make   │
+  │  "tool-call"   ──► T6: doom loop check      │
+  │                     ──► tool execute trigger │
+  │  "finish"      ──► ctx.finish = reason      │
+  └──────────────────────────────────────────────┘
+         │
+  Stream.takeUntil(ctx.needsCompaction)  ← T1: compaction signal
+         │
+  T4: Effect.ensuring(cleanup())  ← bọc bên ngoài toàn bộ stream
+         │
+  T3: await all Deferreds (tools done)
+         │
+  T1: loop tiếp iteration tiếp theo
+`}</Diagram>
+
+        <p>
+          Khi case <code>tool-input-start</code> được trigger, T2 tạo một <code>Deferred</code>
+          entry mới trong <code>ctx.toolcalls</code> — đây là sync point cho T3. Khi stream finish,
+          T3 sẽ <code>await</code> tất cả Deferred này. T4 bọc toàn bộ pipeline với
+          <code>Effect.ensuring</code>, đảm bảo cleanup dù stream bị interrupt hay lỗi.
+        </p>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: Buffer toàn bộ response — mất real-time" />
+        <p>
+          Nhiều harness không stream — chờ full response rồi mới xử lý. Điều này mất hoàn toàn
+          khả năng hiển thị progress cho user:
+        </p>
+        <CodeBlock caption="Anti-pattern: buffer toàn bộ">
+          <Fragment is:raw>{`
+// WRONG: không streaming
+const response = await llm.generate(messages)  // block đến khi done
+
+// Hậu quả:
+// - User thấy màn hình trắng trong 10-30 giây
+// - Không thể cancel giữa chừng
+// - Reasoning text bị mất nếu error xảy ra giữa stream
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: Không handle tool-input-start riêng" />
+        <p>
+          Nếu không tách <code>tool-input-start</code> khỏi <code>tool-call</code>, không thể
+          hiển thị tool đang "loading" (trước khi có đủ input). UI sẽ nhảy đột ngột từ không
+          có gì sang "tool complete".
+        </p>
+        <CodeBlock caption="Thiếu tool-input-start handling">
+          <Fragment is:raw>{`
+// Nhiều SDK chỉ expose:
+case "tool_call":  // đã có đủ name + input
+  execute(tc)
+
+// opencode tách làm 2 phase:
+case "tool-input-start":  // UI hiển thị "pending"
+  ctx.toolcalls[id] = { done: Deferred.make(), status: "pending" }
+case "tool-call":          // UI chuyển sang "running"
+  updateToolCall(id, { status: "running" })
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 3: Không cooperative cancel" />
+        <p>
+          Nếu stream không có cancel mechanism, user phải đợi toàn bộ response xong
+          mới thoát được. opencode dùng <code>Stream.takeUntil</code> và Effect interrupt.
+        </p>
+        <CodeBlock caption="Thiếu cancel — stream chạy đến hết dù user đã thoát">
+          <Fragment is:raw>{`
+// WRONG: không có cancel mechanism
+for await (const event of stream) {
+  handle(event)
+  // nếu user cancel, vòng lặp vẫn tiếp tục
+  // cho đến khi stream kết thúc tự nhiên
+}
+
+// CORRECT: cooperative cancel
+for await (const event of stream) {
+  if (abortSignal.aborted) break  // check mỗi event
+  handle(event)
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Streaming mode', 'Event demux', 'Cancel support']}
+          rows={[
+            [
+              '<strong>opencode</strong>',
+              '<Chip variant="green">Full streaming + Effect.Stream</Chip>',
+              '<Chip variant="green">7 event types, per-type state</Chip>',
+              '<Chip variant="green">Stream.takeUntil + interrupt</Chip>',
+            ],
+            [
+              'Aider',
+              '<Chip variant="red">Buffer full response</Chip>',
+              '<Chip variant="red">Không — xử lý sau khi done</Chip>',
+              '<Chip variant="red">Không</Chip>',
+            ],
+            [
+              'Cursor Composer',
+              '<Chip variant="amber">Stream text delta only</Chip>',
+              '<Chip variant="amber">Chỉ text, không tool-input-start</Chip>',
+              '<Chip variant="amber">AbortController cơ bản</Chip>',
+            ],
+            [
+              'Cline',
+              '<Chip variant="amber">Stream nhưng forEach</Chip>',
+              '<Chip variant="amber">Không wrap trong cancellable stream</Chip>',
+              '<Chip variant="amber">Partial</Chip>',
+            ],
+            [
+              'Claude Code',
+              '<Chip variant="green">Streaming</Chip>',
+              '<Chip variant="amber">Không rõ per-type state</Chip>',
+              '<Chip variant="green">AbortController</Chip>',
+            ],
+          ]}
+        />
+
+        <p>
+          opencode là harness duy nhất trong danh sách handle <code>tool-input-start</code>
+          như một event riêng biệt, cho phép UI hiển thị "pending" state trước khi tool
+          có đủ input để chạy.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>
+          Minimal TypeScript demultiplexer không cần Effect dependency — dùng async iterator
+          và AbortController:
+        </p>
+        <CodeBlock caption="stream-demux.ts">
+          <Fragment is:raw>{`
+type StreamEvent =
+  | { type: "text-delta"; text: string }
+  | { type: "tool-input-start"; id: string; toolName: string }
+  | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
+  | { type: "reasoning-start"; id: string }
+  | { type: "reasoning-delta"; id: string; text: string }
+  | { type: "finish"; finishReason: string }
+
+interface DemuxContext {
+  currentText: string
+  reasoningMap: Record<string, { text: string }>
+  pendingTools: Map<string, { resolve: () => void; promise: Promise<void> }>
+  finishReason: string | null
+  needsStop: boolean
+}
+
+async function demuxStream(
+  stream: AsyncIterable<StreamEvent>,
+  ctx: DemuxContext,
+  signal?: AbortSignal
+) {
+  for await (const event of stream) {
+    // Cooperative cancel
+    if (signal?.aborted || ctx.needsStop) break
+
+    switch (event.type) {
+      case "reasoning-start":
+        ctx.reasoningMap[event.id] = { text: "" }
+        break
+
+      case "reasoning-delta":
+        ctx.reasoningMap[event.id].text += event.text
+        break
+
+      case "text-delta":
+        ctx.currentText += event.text
+        break
+
+      case "tool-input-start": {
+        // Track deferred cho T3 pattern
+        let resolve!: () => void
+        const promise = new Promise<void>((r) => { resolve = r })
+        ctx.pendingTools.set(event.id, { resolve, promise })
+        break
+      }
+
+      case "tool-call":
+        // Execute async, resolve deferred khi done
+        const deferred = ctx.pendingTools.get(event.toolCallId)
+        executeToolAsync(event).then(() => deferred?.resolve())
+        break
+
+      case "finish":
+        ctx.finishReason = event.finishReason
+        break
+    }
+  }
+}
+
+// Tách execute async — không block stream consumer
+async function executeToolAsync(tc: Extract<StreamEvent, { type: "tool-call" }>) {
+  // tool execution logic
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Callout type="info">
+          Recipe trên là simplified. Production cần thêm error handling per-event,
+          reasoning text accumulation, và integration với T3 (Deferred coordination) và T4 (cleanup).
+        </Callout>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text">Vercel AI SDK — streamText lifecycle events</a> · Danh sách đầy đủ event types',
+            '<a href="https://vercel.com/blog/ai-sdk-5">Vercel AI SDK 5 blog</a> · onInputStart/onInputDelta/onInputAvailable hooks mới',
+            '<a href="https://effect.website/docs/stream/introduction">Effect — Stream introduction</a> · Effect.Stream concepts và operators',
+            '<a href="https://medium.com/data-science/how-to-build-a-streaming-agent-with-burr-fastapi-and-react-e2459ef527a8">TDS — Building a Streaming Agent</a> · Demux pattern trong practice',
+            '<a href="https://developer.mozilla.org/en-US/docs/Web/API/Streams_API">MDN — Streams API</a> · Web native streaming primitives',
+            '<a href="https://github.com/anomalyco/opencode">anomalyco/opencode — session/processor.ts</a> · Source tham chiếu chính',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

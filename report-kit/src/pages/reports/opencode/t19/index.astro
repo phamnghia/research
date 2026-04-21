@@ -1,0 +1,254 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T19 — Sub-agent delegation via Task tool | opencode"
+  description="Phân tích sâu kỹ thuật spawn child session qua Task tool — agent con làm task cụ thể với clean context, trả lại compact summary, không ô nhiễm parent context."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T19 — Sub-agent delegation via Task tool"
+        subtitle="Parent agent spawn child session qua Task tool — agent con làm search/explore/plan với <strong>clean context riêng</strong>, trả lại compact summary. Parent không bị ô nhiễm bởi tool output của sub-task."
+        meta={[
+          { label: 'Nhóm',  value: 'C — Tool Design' },
+          { label: 'File',  value: '<code>tool/task.ts</code> · Lines 69–145' },
+          { label: 'ID',    value: 'C.7 / T19' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Tool Design">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Agent chính (parent) thường có context đã đầy một phần — history conversation, tool outputs, code context. Nếu dùng parent để explore thêm (search, read nhiều file) → context overflow nhanh. Sub-agent là "thread ephemeral": bắt đầu với clean context, tập trung làm 1 task cụ thể (search code, plan steps, verify assumption), sau đó trả lại compact summary (100–500 tokens). Parent chỉ thêm summary vào context — không phải toàn bộ tool output của sub-agent.
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>Agent type specialization:</strong> Task tool nhận <code>subagent_type</code>: <code>"general-purpose"</code>, <code>"explore"</code>, hoặc <code>"plan"</code>. Mỗi type có system prompt tối ưu cho use case — explore agent giỏi search/read, plan agent giỏi break down task thành steps.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Task tool definition" />
+        <CodeBlock caption="tool/task.ts — TaskTool definition" lang="typescript"><Fragment is:raw>{`
+export const TaskTool = Tool.define(
+  "task",
+  Effect.gen(function* () {
+    const ops = yield* Session.Ops
+
+    return {
+      description: TASK_DESCRIPTION,
+      parameters: z.object({
+        description: z.string().describe("3-5 word task summary"),
+        prompt:      z.string().describe("Self-contained task for sub-agent"),
+        subagent_type: z.enum(["general-purpose", "explore", "plan"])
+          .default("general-purpose"),
+      }),
+
+      async execute(args, ctx) {
+        // Child session thừa hưởng permission rules nhưng CÓ restrictions
+        const childSession = yield* ops.createChildSession(ctx.sessionId, {
+          agent:             args.subagent_type,
+          inheritPermissions: true,
+          // Deny task + todowrite để tránh recursion và scope creep
+          deniedTools:       ["task", "todowrite"],
+        })
+
+        // Recursive: gọi lại ops.prompt() trên child session
+        const result = yield* ops.prompt(childSession.id, {
+          message:     args.prompt,
+          description: args.description,
+        })
+
+        // Chỉ trả về SUMMARY — không toàn bộ conversation của child
+        return {
+          summary:    result.finalMessage.text,
+          toolCalls:  result.toolCalls.length,
+          tokensUsed: result.usage.total,
+        }
+      },
+    }
+  })
+)
+`}</Fragment></CodeBlock>
+
+        <Diagram>{`
+Parent Agent (context: 40k tokens)
+    │
+    │  model: "I need to search for all usages of X"
+    │
+    ▼
+Task tool call:
+  { description: "Search X usages",
+    prompt: "Find all files that import X and list them",
+    subagent_type: "explore" }
+    │
+    ▼
+Child Session (clean context: 0 tokens)
+    ├── read file A.ts
+    ├── grep pattern B
+    ├── read file C.ts
+    └── ... (20+ tool calls, 15k tokens used)
+    │
+    ▼  returns compact summary:
+"Found 8 files importing X: src/a.ts, src/b.ts, ..."
+(500 tokens — not 15k)
+    │
+    ▼
+Parent context += 500 tokens (not 15k)
+    ← context contamination avoided!
+        `}</Diagram>
+
+        <Subheading level="h3" text="Generic sub-agent pattern" />
+        <CodeBlock caption="Generic spawn sub-agent" lang="typescript"><Fragment is:raw>{`
+async function spawnSubAgent(opts: {
+  prompt:  string
+  type:    "explore" | "plan" | "general-purpose"
+  parent:  Session
+}) {
+  const child = await createSession({
+    agent:       opts.type,
+    system:      getAgentSystem(opts.type),
+    permissions: inheritFrom(opts.parent).deny(["task", "todowrite"]),
+    parent:      opts.parent.id,
+  })
+
+  const result = await runLoop(child, opts.prompt)
+
+  // ONLY return summary to parent — not full conversation
+  return {
+    summary: result.finalText,
+    cost:    result.cost,
+  }
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T7 (Overflow detection):</strong> Sub-agent là giải pháp chủ động tránh overflow: thay vì parent accumulate context từ explore tools, delegate cho child có clean context.</li>
+          <li><strong>T8 (Tail-turn compaction):</strong> Khi parent context vẫn đầy dù dùng sub-agent, T8 compact history. Sub-agent + compaction là 2 defense layer bổ sung nhau.</li>
+          <li><strong>T24–T25 (Permission model):</strong> Child session inherit permission rules từ parent nhưng deny thêm một số tool (task, todowrite). Đảm bảo child không tự spawn sub-sub-agent (recursion) hoặc claim task của parent.</li>
+          <li><strong>T14 (Effect lazy tool init):</strong> TaskTool được define qua Effect — <code>Session.Ops</code> service được inject tự động tại define-time.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. Prompt không self-contained" />
+        <p>
+          Sub-agent không có context của parent — nếu prompt dùng pronoun như "the file we just discussed" hoặc "that variable", sub-agent không hiểu. Prompt phải self-contained hoàn toàn.
+        </p>
+        <Callout type="warn">
+          <strong>Fix:</strong> Tool description dạy model cung cấp đủ context trong <code>prompt</code> — bao gồm file path, variable name, project context cụ thể.
+        </Callout>
+
+        <Subheading level="h3" text="2. Cost nhân đôi" />
+        <p>
+          Parent token để frame task + child token để làm task = 2x cost tổng. Với task nhỏ (search 1 file), cost overhead có thể vượt benefit. Nên dùng Task tool cho task thật sự cần nhiều tool calls.
+        </p>
+
+        <Subheading level="h3" text="3. Debug khó" />
+        <p>
+          Khi sub-agent trả về summary sai, parent không thấy được reasoning và tool calls của child. Cần logging cho child session để investigate production issues.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Sub-agent support', 'Context isolation', 'Notes']}
+          rows={[
+            ['opencode', 'Task tool → child session, deny task/todowrite', '✅ clean context', 'Recursive calls via ops.prompt()'],
+            ['Claude Code', 'Task tool tương tự', '✅ clean context', 'Pattern giống nhất'],
+            ['OpenHarness', 'Subprocess + mailbox IPC', '✅ process-level isolation', 'Mạnh hơn nhưng phức tạp hơn'],
+            ['Aider', 'Không có sub-agent native', '❌', 'Single-agent only'],
+            ['Cline', 'Không có sub-agent native', '❌', 'Single-agent only'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+// Minimal sub-agent implementation
+interface SubAgentResult {
+  summary:   string
+  toolCalls: number
+  tokens:    number
+}
+
+async function runSubAgent(opts: {
+  prompt:      string
+  agentType?:  "explore" | "plan" | "general"
+  parentPerms: PermissionRules
+}): Promise<SubAgentResult> {
+  const childPerms = opts.parentPerms.withDenied(["spawn_agent", "create_todo"])
+
+  const session = new Session({
+    systemPrompt: getSystemForType(opts.agentType ?? "general"),
+    permissions:  childPerms,
+    // Không có memory của parent
+  })
+
+  const loop   = new AgentLoop(session)
+  const result = await loop.run(opts.prompt)
+
+  // Parent nhận summary ngắn gọn, không phải full conversation
+  return {
+    summary:   result.lastAssistantMessage,
+    toolCalls: result.totalToolCalls,
+    tokens:    result.tokensUsed,
+  }
+}
+
+// Tool definition trong parent
+const TaskTool = defineTool({
+  name: "task",
+  description: "Delegate a specific sub-task to an agent with a clean context.",
+  schema: z.object({
+    description: z.string().describe("3-5 word description of the task"),
+    prompt:      z.string().describe("Self-contained prompt for the sub-agent"),
+  }),
+  execute: async (args) => runSubAgent({ prompt: args.prompt, parentPerms: currentSession.perms }),
+})
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic — How we built our multi-agent research system</a>',
+            '<a href="https://dev.to/aws/build-multi-agent-systems-using-the-agents-as-tools-pattern-jce">DEV — Build Multi-Agent Systems Using the Agents as Tools Pattern</a>',
+            '<a href="https://google.github.io/adk-docs/agents/multi-agents/">Google ADK — Multi-agent systems</a>',
+            '<a href="https://arxiv.org/html/2601.13671v1">arXiv — The Orchestration of Multi-Agent Systems</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

@@ -1,0 +1,200 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T22 — Provider-specific message transformation | opencode"
+  description="Phân tích sâu kỹ thuật centralize quirk của từng LLM provider vào transform layer riêng biệt — Anthropic split tool_use, Mistral truncate toolCallId, Gemini sanitize tool name."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T22 — Provider-specific message transformation"
+        subtitle="Centralize quirk của từng provider vào <code>transform.ts</code>: Anthropic split <code>tool_use</code> khỏi text, Mistral giới hạn <code>toolCallId</code> 9 chars, Gemini chỉ cho alphanumeric tool name."
+        meta={[
+          { label: 'Nhóm',  value: 'D — Provider Abstraction' },
+          { label: 'File',  value: '<code>provider/transform.ts</code> · Lines 48–150' },
+          { label: 'ID',    value: 'D.2 / T22' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Provider">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Mỗi LLM provider có quirks riêng trong format request/response mà không được document rõ hoặc thay đổi theo version. Nếu scatter quirk handling vào core logic → conditional spaghetti khó maintain. Centralize vào <code>transform.ts</code> — 1 file, 1 function per provider quirk → core logic clean; thêm provider mới chỉ cần thêm transform function, không touch core.
+        </WhyImportant>
+
+        <Callout type="info">
+          <strong>Quirks thực tế (production-discovered):</strong> Những quirks này được tìm ra qua production debugging, không phải documentation. Mỗi quirk trong transform.ts là "lesson learned" từ một lần provider API trả lỗi kỳ lạ.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="3 quirk chính được document" />
+        <CodeBlock caption="provider/transform.ts — per-provider transforms" lang="typescript"><Fragment is:raw>{`
+// ── Anthropic quirk: tool_use phải tách khỏi text content ──
+// Nếu assistant message có cả text VÀ tool_use trong cùng content array
+// → Anthropic API reject với lỗi không rõ ràng
+function anthropicTransform(msgs: Message[]): AnthropicMessage[] {
+  return msgs.flatMap((m) => {
+    if (m.role !== "assistant") return [m as AnthropicMessage]
+
+    const toolUses = m.content.filter((c) => c.type === "tool_use")
+    const nonTool  = m.content.filter((c) => c.type !== "tool_use")
+
+    // Split thành 2 messages riêng nếu có cả hai
+    if (toolUses.length && nonTool.length) {
+      return [
+        { role: "assistant", content: nonTool  },
+        { role: "assistant", content: toolUses },
+      ]
+    }
+    return [m as AnthropicMessage]
+  })
+}
+
+// ── Mistral quirk: toolCallId phải <= 9 chars, alphanumeric ──
+function mistralTransform(msgs: Message[]) {
+  return msgs.map((m) => ({
+    ...m,
+    content: m.content.map((c) => {
+      if ("toolCallId" in c) {
+        return { ...c, toolCallId: padToolCallId(c.toolCallId) }
+        // padToolCallId: truncate to 9 + pad với zeros nếu ngắn hơn
+      }
+      return c
+    }),
+  }))
+}
+
+// ── Claude/Gemini quirk: tool name chỉ được có [a-zA-Z0-9_-] ──
+function sanitizeToolName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, "_")
+}
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="Transform registry — 1 file mọi quirks" />
+        <CodeBlock caption="Transform dispatch" lang="typescript"><Fragment is:raw>{`
+const TRANSFORMS: Record<Provider, Transform> = {
+  anthropic: anthropicTransform,
+  openai:    identity,          // OpenAI chuẩn nhất, ít quirks
+  mistral:   mistralTransform,
+  google:    googleTransform,   // move system message to start
+  bedrock:   bedrockTransform,  // XML content formatting
+  // ...
+}
+
+export function prepareMessages(provider: Provider, msgs: Message[]): Message[] {
+  const transform = TRANSFORMS[provider] ?? identity
+  return transform(msgs)
+}
+
+// Core call function — không biết gì về quirks
+async function callModel(provider: Provider, messages: Msg[]) {
+  const prepared = prepareMessages(provider, messages)  // ← quirks handled
+  return getClient(provider).stream({ messages: prepared })
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T21 (Provider lazy loading):</strong> Transform được apply sau khi provider đã được loaded. <code>prepareMessages(provider, messages)</code> dùng provider ID để lookup transform.</li>
+          <li><strong>T23 (Overflow + retry):</strong> Transform xảy ra trước khi gọi API — nếu transform fail (vd không sanitize được tool name), lỗi xảy ra trước API call, không cần retry.</li>
+          <li><strong>T10 (Cache-aware prompt):</strong> Anthropic transform phải chú ý không phá vỡ cache breakpoint khi split messages — split sai vị trí = invalidate cache = cost tăng.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. Provider thay spec không thông báo" />
+        <p>
+          Provider update message format (vd Anthropic thêm restriction mới với tool_use), transform cũ không xử lý → API lỗi. Cần monitor API errors để detect transform mismatch sớm.
+        </p>
+
+        <Subheading level="h3" text="2. Transform làm mất fidelity" />
+        <p>
+          Truncate Mistral toolCallId từ <code>"call_abc123xyz"</code> → <code>"call_abc1"</code> (9 chars) → khó trace tool call trong logging/debugging. Cần map ngược toolCallId trong response processing.
+        </p>
+        <Callout type="warn">
+          <strong>Debug workflow:</strong> Khi debug provider-specific issue, luôn log messages <em>trước</em> và <em>sau</em> transform để thấy rõ quirk nào đã được applied.
+        </Callout>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Quirk handling', 'Centralization']}
+          rows={[
+            ['opencode', 'transform.ts — 1 function per provider', '✅ highly centralized'],
+            ['Aider', 'litellm xử lý quirks', '✅ outsourced to litellm'],
+            ['Claude Code', 'Provider-specific code sections', '⚠️ moderate'],
+            ['Cline', 'Inline conditional trong call path', '❌ scattered'],
+            ['OpenHarness', 'SDK-level handling (Anthropic/OpenAI SDK)', '⚠️ SDK-dependent'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+type Message = { role: string; content: ContentBlock[] }
+type Transform = (msgs: Message[]) => Message[]
+const identity: Transform = (msgs) => msgs
+
+// Thêm quirk mới: chỉ cần thêm 1 function + register
+function geminiTransform(msgs: Message[]): Message[] {
+  // Gemini không cho system message sau user message
+  const system = msgs.filter(m => m.role === "system")
+  const rest   = msgs.filter(m => m.role !== "system")
+  return [...system, ...rest]
+}
+
+const TRANSFORMS: Record<string, Transform> = {
+  anthropic:  anthropicSplitToolUse,
+  mistral:    mistralTruncateToolCallId,
+  google:     geminiTransform,
+  openai:     identity,
+  // Thêm provider mới = thêm 1 dòng
+}
+
+export function applyProviderTransform(provider: string, msgs: Message[]): Message[] {
+  return (TRANSFORMS[provider] ?? identity)(msgs)
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://vercel.com/blog/ai-sdk-5">Vercel AI SDK 5 — provider abstraction design</a>',
+            '<a href="https://gist.github.com/Haseeb-Qureshi/2213cc0487ea71d62572a645d7582518">Gist — AI Coding Agent Architecture Multi-model comparison</a>',
+            '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Anthropic — Prompt caching (cache breakpoint behavior)</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

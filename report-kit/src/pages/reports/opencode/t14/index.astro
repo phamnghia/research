@@ -1,0 +1,269 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T14 — Effect-based lazy tool init | opencode"
+  description="Phân tích sâu kỹ thuật dùng Effect.gen để resolve service dependencies một lần lúc define tool — tự động gắn truncation, OTel tracing mà không cần tool author can thiệp."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T14 — Effect-based lazy tool init với service injection"
+        subtitle="<code>Tool.define(id, Effect.gen(...))</code> resolve service dependencies (<code>Truncate</code>, <code>Agent</code>) một lần tại define-time, sau đó wrap <code>execute</code> để gắn truncation + OTel span tự động."
+        meta={[
+          { label: 'Nhóm',  value: 'C — Tool Design' },
+          { label: 'File',  value: '<code>tool/tool.ts</code> · Lines 119–142' },
+          { label: 'ID',    value: 'C.2 / T14' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Tool Design">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Mỗi tool cần dùng các service: <code>Truncate</code> để giới hạn output, <code>Agent</code> config để biết model đang dùng, logger, tracer... Nếu inject tại mỗi lần <code>execute()</code> → overhead mỗi call + code lặp lại ở mọi tool. Ngược lại, dùng global singleton → không testable. Effect's service resolution giải quyết: resolve <em>một lần</em> tại define-time, sau đó <code>wrap()</code> intercept execute để gắn cross-cutting concerns (truncation, tracing) — tool author chỉ viết business logic thuần.
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>Effect-TS specific:</strong> Đây là ứng dụng của <em>Reader Monad</em> pattern — khả năng "inject dependencies qua type channel" thay vì function argument. R channel của Effect type encode dependencies cần thiết, compiler enforce phải resolve trước khi run.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Tool.define — resolve services once at definition time" />
+        <CodeBlock caption="tool/tool.ts — Tool.define + wrap" lang="typescript"><Fragment is:raw>{`
+export namespace Tool {
+  export const define = <P extends z.ZodType, R>(
+    id: string,
+    // init là Effect, R channel = services cần thiết (Truncate, Agent)
+    init: Effect.Effect<Definition<P, R>, never, Truncate | Agent>,
+  ) => {
+    return Effect.gen(function* () {
+      // Resolve services MỘT LẦN tại define-time
+      const def     = yield* init
+      const truncate = yield* Truncate
+      const agent   = yield* Agent
+
+      // Trả về tool đã được wrap — execute luôn có truncation + tracing
+      return wrap(id, def, truncate, agent)
+    })
+  }
+
+  // wrap intercepts execute cho mọi tool
+  function wrap<P, R>(
+    id: string,
+    def: Definition<P, R>,
+    truncate: Truncate,
+    agent: Agent,
+  ) {
+    return {
+      ...def,
+      execute: (args: z.infer<P>, ctx: ExecuteCtx) =>
+        Effect.withSpan(`Tool.execute`, {
+          attributes: { "tool.name": id, "session.id": ctx.sessionId },
+        })(
+          def.execute(args, ctx).pipe(
+            Effect.tap((result) => truncate.apply(id, result)),
+          ),
+        ),
+    }
+  }
+}
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="Cách tool author dùng Tool.define" />
+        <CodeBlock caption="tool/bash.ts — tool sử dụng Tool.define" lang="typescript"><Fragment is:raw>{`
+export const BashTool = Tool.define(
+  "bash",
+  Effect.gen(function* () {
+    // Tool author chỉ cần yield services mà TOOL CỤ THỂ cần
+    const session = yield* Session.Ops
+
+    return {
+      description: renderTemplate(DESCRIPTION, { PLATFORM: process.platform }),
+      parameters: z.object({ command: z.string(), timeout: z.number().optional() }),
+
+      // execute KHÔNG cần nghĩ về truncation hay tracing — wrap lo hết
+      async execute(args, ctx) {
+        const result = await runBash(args.command, args.timeout)
+        await session.setToolStatus(ctx.callId, "completed")
+        return result  // ← sẽ tự động bị truncate bởi wrap()
+      },
+    }
+  })
+)
+`}</Fragment></CodeBlock>
+
+        <Diagram>{`
+Tool.define("bash", Effect.gen(...))
+     │
+     ▼
+ [Effect resolve services]
+     │
+     ├─► Truncate service
+     ├─► Agent service
+     └─► Tool-specific services (Session.Ops, etc.)
+     │
+     ▼
+ wrap(id, def, truncate, agent)
+     │
+     ▼
+ { ...def, execute: (args, ctx) => withSpan(truncate(def.execute(args, ctx))) }
+                                   ────────  ──────────────────────────────
+                                   OTel      truncation auto-applied
+        `}</Diagram>
+
+        <Subheading level="h3" text="Generic equivalent không dùng Effect" />
+        <CodeBlock caption="Pattern tương đương dùng factory function" lang="typescript"><Fragment is:raw>{`
+function defineTool<A>(id: string, factory: (deps: Deps) => ToolDef<A>) {
+  // Resolve deps một lần
+  const deps = resolveDeps()   // Truncate, Agent, etc.
+  const base = factory(deps)
+
+  return {
+    ...base,
+    execute: async (args: A, ctx: Ctx) => {
+      const span = tracer.startSpan(`tool.${id}`)
+      try {
+        const raw = await base.execute(args, ctx)
+        return deps.truncate(raw)    // auto truncate
+      } finally {
+        span.end()
+      }
+    },
+  }
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T15 (Output truncation):</strong> <code>truncate.apply(id, result)</code> trong wrap là trực tiếp invoke T15. Tool author không cần biết truncation tồn tại.</li>
+          <li><strong>T13 (Tool description .txt):</strong> Description được render và truyền vào definition object bên trong Effect.gen block — cùng scope với service resolution.</li>
+          <li><strong>T21 (OTel tracing):</strong> <code>Effect.withSpan</code> trong wrap đặt span tự động cho mọi tool. Metadata (tool.name, session.id, call.id) được attach mà không cần tool author làm gì.</li>
+          <li><strong>T4 (Interruption-safe cleanup):</strong> Effect scope propagation đảm bảo nếu tool bị interrupt, Effect sẽ finalize span và log abort.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. Effect learning curve" />
+        <p>
+          Dev mới gặp Effect.gen <code>yield*</code> syntax lần đầu thường bị bối rối. Error message của Effect khi service không được provide có thể cryptic. Onboarding cần time để hiểu R channel và service layer.
+        </p>
+
+        <Subheading level="h3" text="2. Vô tình bỏ qua truncation" />
+        <p>
+          Nếu tool trả về stream thay vì string, <code>truncate.apply</code> có thể không hoạt động đúng hoặc bị bypass. Cần escape hatch cho streaming tools.
+        </p>
+
+        <Subheading level="h3" text="3. Service không được provide" />
+        <p>
+          Nếu run Effect mà không provide <code>Truncate</code> layer, Effect sẽ throw type error (tốt — compile-time) hoặc runtime error (tệ — nếu dùng <code>Effect.runPromise</code> không qua layer). Cần đảm bảo bootstrap layer đầy đủ.
+        </p>
+        <Callout type="warn">
+          <strong>Quan trọng:</strong> Không bao giờ dùng <code>Effect.runPromise</code> trực tiếp trong tool execute — luôn để Effect runtime của opencode handle. Nếu cần gọi async, dùng <code>Effect.tryPromise</code>.
+        </Callout>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'DI cho tool', 'Auto truncate', 'Auto trace']}
+          rows={[
+            ['opencode (Effect)', 'Service layer R channel, resolve once at define-time', '✅ wrap() tự động', '✅ withSpan tự động'],
+            ['Claude Code', 'Module-level singleton hoặc param injection', '✅ có nhưng explicit', '✅ OpenTelemetry manual'],
+            ['Aider', 'Global config object', '⚠️ manual trong từng tool', '❌ không'],
+            ['Cline', 'Constructor injection', '✅ có wrapper', '⚠️ partial'],
+            ['OpenHarness', 'Python DI đơn giản qua constructor', '⚠️ manual', '❌ không'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>Nếu không dùng Effect, đây là cách implement pattern tương đương với factory + wrapper:</p>
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+// 1. Định nghĩa interface Deps
+interface ToolDeps {
+  truncate: (toolId: string, output: string) => string
+  tracer: Tracer
+  config: AgentConfig
+}
+
+// 2. Factory function nhận deps một lần
+function createTools(deps: ToolDeps) {
+  function define<Args>(id: string, def: ToolDef<Args>) {
+    return {
+      ...def,
+      execute: async (args: Args, ctx: Ctx) => {
+        const span = deps.tracer.startSpan(`tool.${id}`, { sessionId: ctx.sessionId })
+        try {
+          const raw = await def.execute(args, ctx)
+          return deps.truncate(id, raw)
+        } catch (err) {
+          span.recordException(err)
+          throw err
+        } finally {
+          span.end()
+        }
+      },
+    }
+  }
+
+  return {
+    bash: define("bash", { description: "...", execute: bashHandler }),
+    edit: define("edit", { description: "...", execute: editHandler }),
+  }
+}
+
+// 3. Bootstrap một lần khi start
+const tools = createTools({
+  truncate: createTruncate({ maxLines: 2000, maxBytes: 50_000 }),
+  tracer: opentelemetry.trace.getTracer("opencode"),
+  config: await loadAgentConfig(),
+})
+`}</Fragment></CodeBlock>
+
+        <Callout type="success">
+          <strong>Key insight:</strong> Mục tiêu là <em>tool author không phải nghĩ đến cross-cutting concerns</em>. Dù dùng Effect hay factory pattern, nguyên tắc là: resolve dependencies một lần, wrap execute để inject behavior, tool author chỉ viết business logic.
+        </Callout>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://effect.website/">Effect — official site và docs</a>',
+            '<a href="https://blog.type-driven.com/effect-ts-new-standard/">Type Driven Blog — Why Effect is Becoming the Go-To Choice for TypeScript APIs</a>',
+            '<a href="https://opentelemetry.io/blog/2025/ai-agent-observability/">OpenTelemetry — AI Agent Observability (2025)</a>',
+            '<a href="https://github.com/PaulJPhilp/EffectPatterns">PaulJPhilp/EffectPatterns — community patterns</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

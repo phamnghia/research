@@ -1,0 +1,242 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T13 — Tool description .txt pattern | opencode"
+  description="Phân tích sâu kỹ thuật tách tool description thành file .txt riêng với template variable injection — giúp A/B test prompt, version control sạch, và non-dev có thể edit."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T13 — Tool description .txt pattern"
+        subtitle="Tách description ra file <code>.txt</code> riêng với template variable injection — description đóng vai trò như 'mini system prompt' cho từng tool."
+        meta={[
+          { label: 'Nhóm',   value: 'C — Tool Design' },
+          { label: 'File',   value: '<code>tool/*.txt</code> (mỗi tool 1 file)' },
+          { label: 'ID',     value: 'C.1 / T13' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Tool Design">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Tool description thường dài 100–300 dòng và đóng vai trò như một "mini system prompt" chuyên biệt cho tool đó — quyết định model biết tool làm gì, nên dùng khi nào, và không nên dùng khi nào. Nhét text dài vào source TypeScript gây ra vấn đề: khó đọc diff khi review, escape ký tự phức tạp, và engineering team bị bottleneck khi muốn thử nghiệm prompt.
+        </WhyImportant>
+
+        <p>
+          opencode giải quyết bằng cách <strong>tách description ra file <code>.txt</code> bên cạnh file <code>.ts</code></strong>.
+          Bun (runtime của opencode) hỗ trợ import text file trực tiếp. Description hỗ trợ template variable như
+          <code>{`{PLATFORM}`}</code>, <code>{`{SHELL}`}</code>, <code>{`{MAX_LINES}`}</code> — được inject lúc tool khởi tạo.
+        </p>
+
+        <Callout type="unique">
+          <strong>Điểm đặc biệt so với harness khác:</strong> Đây là pattern hiếm — hầu hết harness nhúng description thẳng vào code (Python docstring, TypeScript template literal). opencode <em>coi description như artifact riêng</em> có lifecycle độc lập, giúp prompt engineer và software engineer làm việc song song không conflict.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Cặp .ts + .txt cho mỗi tool" />
+        <p>Mỗi tool trong opencode có cặp file:</p>
+        <Diagram>{`
+tool/
+├── bash.ts          ← implementation, schema, handler
+├── bash.txt         ← description (template với {PLATFORM}, {SHELL})
+├── edit.ts
+├── edit.txt
+├── read.ts
+├── read.txt
+...
+        `}</Diagram>
+
+        <CodeBlock caption="tool/bash.ts — import và inject template" lang="typescript"><Fragment is:raw>{`
+import DESCRIPTION from "./bash.txt"
+import { Tool } from "./tool"
+
+export const BashTool = Tool.define("bash", Effect.gen(function* () => {
+  const agent = yield* Agent
+  return {
+    description: renderTemplate(DESCRIPTION, {
+      PLATFORM: process.platform,
+      SHELL:    process.env.SHELL ?? "bash",
+      MAX_LINES: 2000,
+    }),
+    parameters: z.object({
+      command: z.string(),
+      timeout: z.number().optional(),
+    }),
+    // execute: ...
+  }
+}))
+`}</Fragment></CodeBlock>
+
+        <CodeBlock caption="tool/bash.txt — excerpt" lang="text"><Fragment is:raw>{`
+Execute shell commands in a persistent {SHELL} session on {PLATFORM}.
+
+<important-rules>
+- DO NOT use `find` or `grep` — use the dedicated Grep/Glob tools instead.
+- Quote paths with spaces: cd "path with spaces"
+- Output is truncated to {MAX_LINES} lines. Full output saved to disk.
+- Prefer absolute paths to avoid cwd ambiguity.
+</important-rules>
+
+<when-to-use>
+Use when you need to run build commands, install packages, execute tests,
+or any shell operation not covered by specialized tools.
+</when-to-use>
+
+<when-not-to-use>
+- Reading files: use Read tool instead (structured output)
+- Searching code: use Grep/Glob tools instead (faster, scoped)
+- Editing files: use Edit tool instead (fuzzy matching + validation)
+</when-not-to-use>
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="Template variable injection" />
+        <p>
+          Hàm <code>renderTemplate</code> đơn giản — thay thế <code>{`{KEY}`}</code> trong text bằng giá trị tương ứng.
+          Điểm mạnh: description có thể tự điều chỉnh theo môi trường (Windows vs macOS vs Linux, bash vs zsh vs fish).
+        </p>
+
+        <CodeBlock caption="renderTemplate — generic implementation" lang="typescript"><Fragment is:raw>{`
+function renderTemplate(
+  template: string,
+  vars: Record<string, string | number>
+): string {
+  return template.replace(/\{(\w+)\}/g, (_, key) => {
+    const val = vars[key]
+    if (val === undefined) throw new Error(`Template var {${key}} not provided`)
+    return String(val)
+  })
+}
+
+// A/B test: swap file nội dung mà không đổi code
+const descriptionV2 = renderTemplate(await readFile("bash-v2.txt", "utf8"), vars)
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <p>T13 kết hợp chặt với các kỹ thuật sau:</p>
+        <ul>
+          <li><strong>T14 (Effect lazy tool init):</strong> Template rendering xảy ra bên trong Effect.gen block — chỉ chạy 1 lần lúc define tool, không phải mỗi lần execute.</li>
+          <li><strong>T16 (Zod validation):</strong> Description và schema đi cùng nhau — description dạy model format args, Zod validate args nhận được.</li>
+          <li><strong>T27 (Model-specific system prompt):</strong> System prompt cũng dùng pattern .txt file (anthropic.txt, gpt.txt...) — T13 là ứng dụng của pattern đó cho tool-level.</li>
+        </ul>
+        <Callout type="info">
+          <strong>Cache behavior:</strong> Description là static sau khi tool init — Anthropic prompt cache có thể cache description trong system block. Thay đổi description (swap .txt) chỉ invalidate cache 1 lần khi tool được define lại.
+        </Callout>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. Template variable typo" />
+        <p>
+          Nếu .txt file dùng <code>{`{PLATFROM}`}</code> (typo) thay vì <code>{`{PLATFORM}`}</code>, hàm renderTemplate sẽ:
+          — Nếu strict: throw lúc tool init (tốt, fail fast). — Nếu không strict: để nguyên literal <code>{`{PLATFROM}`}</code> trong description → model thấy text rác.
+        </p>
+        <Callout type="warn">
+          <strong>Fix:</strong> Luôn validate template vars sau render — assert không còn <code>{`{...}`}</code> nào trong output.
+        </Callout>
+
+        <Subheading level="h3" text="2. Bundler không bundle .txt" />
+        <p>
+          Bun hỗ trợ text import native. Node.js không — cần loader hoặc đọc file thủ công lúc runtime. Nếu quên config, import sẽ trả <code>undefined</code> hoặc throw.
+        </p>
+
+        <Subheading level="h3" text="3. Description drift" />
+        <p>
+          Engineer sửa behavior của tool (code) nhưng quên update .txt → description mô tả sai hành vi thực → model dùng tool sai cách. Cần test đảm bảo description sync với behavior.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Cách quản lý tool description', 'Nhận xét']}
+          rows={[
+            ['opencode', 'File <code>.txt</code> riêng, template vars, import static', 'Sạch nhất, dễ A/B test'],
+            ['Claude Code', 'TypeScript template literal trong file source', 'Dài nhưng type-safe, khó version control riêng'],
+            ['Aider', 'Python docstring trong class', 'Gắn chặt với code, không template'],
+            ['Cline', 'Hardcoded string trong register() call', 'Đơn giản, không tách được'],
+            ['OpenHarness', 'Python string constant + f-string', 'Tương tự Aider nhưng hỗ trợ interpolation'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <Subheading level="h3" text="Áp dụng pattern này vào dự án của bạn" />
+        <p>Nếu dùng Bun:</p>
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+// tsconfig.json — thêm để TypeScript hiểu text import
+{
+  "compilerOptions": {
+    "moduleResolution": "bundler"
+  }
+}
+
+// my-tool.ts
+import DESCRIPTION from "./my-tool.txt"
+
+export const MyTool = defineTool({
+  name: "my_tool",
+  description: renderTemplate(DESCRIPTION, {
+    MAX_OUTPUT: 5000,
+    PLATFORM: process.platform,
+  }),
+  // ...
+})
+`}</Fragment></CodeBlock>
+
+        <p>Nếu dùng Node.js (không có Bun text import):</p>
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+import { readFileSync } from "node:fs"
+import { join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const DESCRIPTION = readFileSync(join(__dirname, "my-tool.txt"), "utf8")
+`}</Fragment></CodeBlock>
+
+        <Callout type="success">
+          <strong>Recommendation:</strong> Dùng pattern này cho bất kỳ tool nào có description &gt; 5 dòng. Đặt .txt cùng thư mục với .ts. Template vars cho platform, shell, và bất kỳ giá trị runtime nào cần inject.
+        </Callout>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic — Claude Code auto mode (tool description patterns)</a>',
+            '<a href="https://blog.dailydoseofds.com/p/the-anatomy-of-an-agent-harness">Avi Chawla — The Anatomy of an Agent Harness</a>',
+            '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Harness Engineering: Skill Issue</a>',
+            '<a href="https://github.com/anomalyco/opencode">anomalyco/opencode — source code</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

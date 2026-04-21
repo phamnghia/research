@@ -1,0 +1,86 @@
+---
+import Section from "../../../../components/Section.astro";
+import LinkList from "../../../../components/LinkList.astro";
+---
+
+<Section id={"sources"} title={"Tổng hợp nguồn tham khảo"}>
+  <p class="lead">
+    Tất cả các link được trích dẫn trong báo cáo, nhóm theo chủ đề. File
+    references chi tiết:
+    <code>sources/opencode-harness/references.md</code>.
+  </p>
+  <LinkList
+    title="Repo gốc & docs"
+    items={[
+      '<a href="https://github.com/anomalyco/opencode">anomalyco/opencode — GitHub</a>',
+      '<a href="https://opencode.ai/">OpenCode — Official site</a>',
+      '<a href="https://opencode.ai/docs/agents/">OpenCode Agents docs</a>',
+      '<a href="https://opencode.ai/docs/permissions/">OpenCode Permissions docs</a>',
+    ]}
+  />
+  <LinkList
+    title="Harness engineering (tổng quan)"
+    items={[
+      '<a href="https://martinfowler.com/articles/harness-engineering.html">Martin Fowler — Harness engineering for coding agent users</a>',
+      '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Skill Issue: Harness Engineering</a>',
+      '<a href="https://openai.com/index/harness-engineering/">OpenAI — Harness engineering</a>',
+      '<a href="https://blog.dailydoseofds.com/p/the-anatomy-of-an-agent-harness">Avi Chawla — The Anatomy of an Agent Harness</a>',
+      '<a href="https://arxiv.org/html/2603.05344v1">arXiv — Building AI Coding Agents for the Terminal</a>',
+      '<a href="https://github.com/ai-boost/awesome-harness-engineering">Awesome Harness Engineering list</a>',
+      '<a href="https://gist.github.com/Haseeb-Qureshi/2213cc0487ea71d62572a645d7582518">Gist — Claude Code vs Codex vs Cline vs OpenCode</a>',
+    ]}
+  />
+  <LinkList
+    title="Agent loop, ReAct, streaming"
+    items={[
+      '<a href="https://www.ibm.com/think/topics/react-agent">IBM — What is a ReAct Agent</a>',
+      '<a href="https://medium.com/data-science-collective/a-super-simple-react-agent-87913949f69f">Medium — A Super Simple ReAct Agent from Scratch</a>',
+      '<a href="https://docs.llamaindex.ai/en/stable/examples/agent/react_agent/">LlamaIndex — ReAct Agent</a>',
+      '<a href="https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text">Vercel AI SDK — streamText reference</a>',
+      '<a href="https://vercel.com/blog/ai-sdk-5">Vercel AI SDK 5 — tool lifecycle hooks</a>',
+    ]}
+  />
+  <LinkList
+    title="Context compaction & prompt caching"
+    items={[
+      '<a href="https://learn.microsoft.com/en-us/agent-framework/agents/conversations/compaction">Microsoft — Compaction</a>',
+      '<a href="https://blog.jetbrains.com/research/2025/12/efficient-context-management/">JetBrains Research — Smarter Context Management</a>',
+      '<a href="https://factory.ai/news/compressing-context">Factory.ai — Compressing Context</a>',
+      '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Anthropic — Prompt caching</a>',
+      '<a href="https://arxiv.org/html/2511.22729v1">arXiv — Solving Context Window Overflow</a>',
+    ]}
+  />
+  <LinkList
+    title="Permission, bash safety, AGENTS.md"
+    items={[
+      '<a href="https://code.claude.com/docs/en/permissions">Claude Code — Configure permissions</a>',
+      '<a href="https://adversa.ai/blog/claude-code-security-bypass-deny-rules-disabled/">Adversa — Claude Code deny rules bypass vulnerability</a>',
+      '<a href="https://agents.md/">agents.md — official format</a>',
+      '<a href="https://www.humanlayer.dev/blog/writing-a-good-claude-md">HumanLayer — Writing a good CLAUDE.md</a>',
+    ]}
+  />
+  <LinkList
+    title="Sub-agents & multi-agent"
+    items={[
+      '<a href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic — Multi-agent research system</a>',
+      '<a href="https://google.github.io/adk-docs/agents/multi-agents/">Google ADK — Multi-agent systems</a>',
+      '<a href="https://arxiv.org/html/2601.13671v1">arXiv — The Orchestration of Multi-Agent Systems</a>',
+    ]}
+  />
+  <LinkList
+    title="Observability, Effect-TS, tree-sitter"
+    items={[
+      '<a href="https://opentelemetry.io/blog/2025/ai-agent-observability/">OpenTelemetry — AI Agent Observability</a>',
+      '<a href="https://effect.website/">Effect — official site</a>',
+      '<a href="https://blog.type-driven.com/effect-ts-new-standard/">Why Effect is the Go-To Choice for TypeScript APIs</a>',
+      '<a href="https://tree-sitter.github.io/tree-sitter/">Tree-sitter — official intro</a>',
+    ]}
+  />
+  <LinkList
+    title="Doom loop & failure modes"
+    items={[
+      '<a href="https://github.com/anomalyco/opencode/pull/3445">opencode PR #3445 — doom loop detection</a>',
+      '<a href="https://www.agentpatterns.tech/en/failures/infinite-loop">Agent Patterns — Infinite Loop</a>',
+    ]}
+  />
+</Section>

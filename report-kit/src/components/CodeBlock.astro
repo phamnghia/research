@@ -1,0 +1,98 @@
+---
+/**
+ * CodeBlock — highlight bằng Shiki (TextMate), hỗ trợ light/dark theo report.css.
+ * - `code`: chuỗi (plain hoặc legacy HTML span.kw/str/… — tự strip).
+ * - `lang`: id ngôn ngữ Shiki (mặc định suy luận từ nội dung).
+ * - Slot: vẫn dùng được (vd Fragment is:raw + template literal).
+ */
+import { codeToHtml } from "shiki";
+import { toPlainCodeForShiki } from "../lib/codeBlockPlain";
+
+interface Props {
+  code?: string;
+  caption?: string;
+  /** Ví dụ: typescript, tsx, bash, shell, markdown, html, json, txt */
+  lang?: string;
+}
+
+const { code: codeProp, caption, lang: langProp } = Astro.props as Props;
+
+let raw = (codeProp ?? "").trim();
+if (!raw && Astro.slots.has("default")) {
+  raw = (await Astro.slots.render("default")).trim();
+}
+
+const plain = toPlainCodeForShiki(raw);
+
+function inferLang(source: string, explicit?: string): string {
+  if (explicit?.trim()) return explicit.trim();
+  const head = source.trimStart().slice(0, 120);
+  if (/^#\s/.test(head)) return "markdown";
+  if (/^\s*<\?xml|^\s*<!DOCTYPE|^\s*<[a-z][\s\S]*xmlns=/i.test(head))
+    return "xml";
+  if (/^\s*\{[\s\S]*"[^"]+"\s*:/m.test(head)) return "json";
+  if (/^\s*SELECT\s+/i.test(head)) return "sql";
+  if (/^\s*def\s+\w+\s*\(|^\s*import\s+\w+/m.test(head)) return "python";
+  return "typescript";
+}
+
+const lang = inferLang(plain, langProp);
+
+const shikiOpts = {
+  lang,
+  themes: { light: "github-light", dark: "github-dark" },
+} as const;
+
+let highlighted = "";
+if (plain.length > 0) {
+  try {
+    highlighted = await codeToHtml(plain, shikiOpts);
+  } catch {
+    try {
+      highlighted = await codeToHtml(plain, {
+        ...shikiOpts,
+        lang: "txt",
+      });
+    } catch {
+      highlighted = `<pre class="shiki"><code>${plain.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code></pre>`;
+    }
+  }
+}
+---
+
+{caption && <h4>{caption}</h4>}
+<div class="code-block-root" set:html={highlighted} />
+
+<style is:global>
+  .code-block-root {
+    margin: 10px 0;
+  }
+  .code-block-root :global(pre.shiki) {
+    margin: 0;
+    padding: 14px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.55;
+    tab-size: 2;
+  }
+  .code-block-root :global(pre.shiki code) {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+      "Liberation Mono", monospace;
+    font-size: inherit;
+    background: transparent !important;
+    padding: 0;
+    border: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    .code-block-root :global(.shiki),
+    .code-block-root :global(.shiki span) {
+      color: var(--shiki-dark) !important;
+      background-color: var(--shiki-dark-bg, transparent) !important;
+      font-style: var(--shiki-dark-font-style) !important;
+      font-weight: var(--shiki-dark-font-weight) !important;
+      text-decoration: var(--shiki-dark-text-decoration) !important;
+    }
+  }
+</style>

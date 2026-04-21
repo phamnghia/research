@@ -1,0 +1,47 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import {
+  title,
+  description,
+  sidebarGroups,
+  heroMeta,
+} from '../../../data/reports/openharness-report';
+import OpenharnessIntroSection from './_components/OpenharnessIntroSection.astro';
+import OpenharnessAgentLoopSection from './_components/OpenharnessAgentLoopSection.astro';
+import OpenharnessContextMemorySection from './_components/OpenharnessContextMemorySection.astro';
+import OpenharnessToolDesignSection from './_components/OpenharnessToolDesignSection.astro';
+import OpenharnessExtensionEcosystemSection from './_components/OpenharnessExtensionEcosystemSection.astro';
+import OpenharnessPermissionSafetySection from './_components/OpenharnessPermissionSafetySection.astro';
+import OpenharnessMultiAgentSwarmSection from './_components/OpenharnessMultiAgentSwarmSection.astro';
+import OpenharnessExternalIntegrationsSection from './_components/OpenharnessExternalIntegrationsSection.astro';
+import OpenharnessConclusionSection from './_components/OpenharnessConclusionSection.astro';
+import OpenharnessSourcesSection from './_components/OpenharnessSourcesSection.astro';
+---
+
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar groups={sidebarGroups} />
+    <main>
+      <Breadcrumb />
+      <Hero
+        title={'HKUDS/OpenHarness — Nghiên cứu sâu các kỹ thuật Harness'}
+        subtitle={'Phân tích chi tiết scaffolding agent-loop trong <a href="https://github.com/HKUDS/OpenHarness">HKUDS/OpenHarness</a> — "Open-source Python port of Claude Code" kèm bộ <code>ohmo</code> personal agent tích hợp Feishu/Slack/Telegram/Discord. 30 kỹ thuật, kèm code thật từ repo, pros/cons và bài viết tham khảo.'}
+        meta={heroMeta}
+      />
+
+      <OpenharnessIntroSection />
+      <OpenharnessAgentLoopSection />
+      <OpenharnessContextMemorySection />
+      <OpenharnessToolDesignSection />
+      <OpenharnessExtensionEcosystemSection />
+      <OpenharnessPermissionSafetySection />
+      <OpenharnessMultiAgentSwarmSection />
+      <OpenharnessExternalIntegrationsSection />
+      <OpenharnessConclusionSection />
+      <OpenharnessSourcesSection />
+    </main>
+  </div>
+</ReportLayout>

@@ -1,0 +1,313 @@
+---
+import Section from "../../../../components/Section.astro";
+import Callout from "../../../../components/Callout.astro";
+import Diagram from "../../../../components/Diagram.astro";
+import SummaryTable from "../../../../components/SummaryTable.astro";
+---
+
+<Section id={"intro"} title={"1. Tổng quan OpenHarness"} themeTag={"Intro"}>
+  <Fragment is:raw>
+    <p><strong>HKUDS/OpenHarness</strong> là một implementation Python
+    open-source mô phỏng (và mở rộng) kiến trúc của Claude Code.
+    Self-description ngắn trong <code>pyproject.toml</code>: <em>"Open-source
+    Python port of Claude Code - an AI-powered CLI coding assistant"</em>. Repo
+    publish hai CLI chính:
+    <code>openharness</code>/<code>oh</code>/<code>openh</code> cho coding
+    agent, và <code>ohmo</code> cho personal agent tích hợp messaging.</p>
+    <p>Báo cáo này phân tích <strong>harness của OpenHarness</strong> — các lớp
+    "scaffolding" xoay quanh LLM call để biến một model trần thành một coding
+    agent có thể chạy trong terminal, điều phối subagents, xử lý channel
+    messaging, và tự động chạy CI. Scope gồm 7 chủ đề với 15+ subsystem:</p>
+    <ul> <li><code>engine/</code> — agent loop (<code>query.py</code> 805 LOC),
+    stream events, cost tracker</li> <li><code>tools/</code> — 42 tools (Bash,
+    Read, Edit, Grep, WebFetch, Task...) + Pydantic base</li>
+    <li><code>permissions/</code> — 3-mode checker, sensitive path protection,
+    path rules</li> <li><code>hooks/</code>, <code>plugins/</code>,
+    <code>skills/</code>, <code>mcp/</code> — 4 extension surfaces</li>
+    <li><code>memory/</code>, <code>prompts/</code> — per-project memory +
+    multi-layer system prompt</li> <li><code>swarm/</code>,
+    <code>coordinator/</code> — subprocess multi-agent với git worktree +
+    mailbox <strong>(unique vs opencode)</strong></li>
+    <li><code>channels/</code>, <code>services/</code>, <code>sandbox/</code>,
+    <code>tasks/</code>, <code>autopilot/</code> — Slack/Feishu/Telegram/Discord
+    bus, LSP AST, Docker sandbox, cron, repo autopilot <strong>(unique vs
+    opencode)</strong></li> </ul> <h3 id="what-is-harness">Harness là gì?</h3>
+    <p>Cộng đồng coding-agent đang dần dùng thuật ngữ "harness" như một
+    shorthand cho <em>tất cả những gì không phải model</em> — tức là:
+    <strong>Agent = Model + Harness</strong>. Harness engineering là subset của
+    context engineering, xoay quanh việc quản lý context window, tool
+    orchestration, state persistence, error recovery, verification, safety, và
+    lifecycle.</p>
+  </Fragment>
+  <Callout type="info">
+    <Fragment is:raw>
+      <strong>Tham khảo về khái niệm harness:</strong> Martin Fowler — <a
+      href="https://martinfowler.com/articles/harness-engineering.html">Harness
+      engineering for coding agent users</a> · OpenAI — <a
+      href="https://openai.com/index/harness-engineering/">Harness engineering:
+      leveraging Codex in an agent-first world</a> · HumanLayer — <a
+      href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">Skill
+      Issue: Harness Engineering for Coding Agents</a> · Avi Chawla — <a
+      href="https://blog.dailydoseofds.com/p/the-anatomy-of-an-agent-harness">The
+      Anatomy of an Agent Harness</a>.
+    </Fragment>
+  </Callout>
+  <Callout type="unique">
+    <Fragment is:raw>
+      <strong>Điểm khác biệt OpenHarness:</strong> So với opencode (TypeScript
+      fork của sst/opencode) vốn xoay quanh một single-process agent,
+      OpenHarness mở rộng sang "agent organization" — nhiều agent subprocess có
+      <em>mailbox</em>, <em>worktree</em>, <em>channel</em> riêng, được điều
+      phối bởi một coordinator YAML-based. Nó không chỉ là một coding agent; nó
+      là một runtime cho nhiều coding agent chạy song song.
+    </Fragment>
+  </Callout>
+  <Fragment is:raw> <h3 id="architecture">Kiến trúc tổng thể</h3> </Fragment>
+  <Diagram>
+    <Fragment is:raw>
+      ┌──────────────────────────────────────────────────────────────────────────────┐
+      │        User CLI (Typer)   │   Channels (Slack, Feishu, Discord, Telegram)   │
+      └────────────┬──────────────┴──────────────────────────┬───────────────────────┘
+                   │                                         │
+                   ▼                                         ▼
+          ┌────────────────────┐                 ┌─────────────────────────┐
+          │  engine/query.py   │  ◀─── inbox ── │  swarm/mailbox (file)    │
+          │  run_query loop    │                 │  swarm/subprocess_backend│
+          │  async ReAct       │                 └────────┬────────────────┘
+          └────┬───────────────┘                          │
+               │                                          │
+               │  stream events                           │  coordinator spawns
+               ▼                                          │
+          ┌────────────────────┐                          ▼
+          │  stream_events.py  │              ┌────────────────────────┐
+          │  7 event types     │              │  Subagent subprocess   │
+          │  + CompactProgress │              │  (git worktree isolated)│
+          └────┬───────────────┘              └────────────────────────┘
+               │                                          │
+         ┌─────▼──────┐   ┌──────▼──────┐      ┌──────────▼────────────┐
+         │  tools/    │   │ permissions/│      │ mcp/client/manager    │
+         │  42 tools  │   │ checker     │      │ stdio + HTTP transport│
+         │  Pydantic  │   │ 6-layer eval│      └──────────┬────────────┘
+         │  schema    │   │ sensitive   │                 │
+         └────┬───────┘   │ path block  │       ┌─────────▼──────────┐
+              │           └─────────────┘       │ services/lsp        │
+              │                                 │ (Python AST)        │
+         ┌────▼──────────┐   ┌──────────────┐   │ services/cron       │
+         │ hooks/executor│   │  memory/     │   │ sandbox/docker      │
+         │ 4 hook types  │   │  per-project │   └─────────────────────┘
+         │ 6 events      │   │  MEMORY.md   │
+         │ hot reload    │   │  SHA1 hash   │
+         └───────────────┘   └──────────────┘
+    </Fragment>
+  </Diagram>
+  <Fragment is:raw>
+    <h3 id="tech-stack">Tech stack</h3> <table> <tr><th>Layer</th><th>Công
+    nghệ</th><th>Ghi chú</th></tr> <tr><td>Runtime</td><td>Python
+    ≥3.10</td><td>asyncio toàn bộ, Pydantic v2 strict</td></tr>
+    <tr><td>Language</td><td>Python</td><td>mypy strict, ruff lint (line
+    100)</td></tr> <tr><td>AI SDKs</td><td>Anthropic ≥0.40 + OpenAI
+    ≥1.0</td><td>Provider abstraction qua <code>api_client</code></td></tr>
+    <tr><td>CLI</td><td>Typer ≥0.12</td><td>Subcommand layout</td></tr>
+    <tr><td>TUI</td><td>Rich + Textual ≥0.80 + React Ink</td><td>Dual TUI:
+    Python native + React-based</td></tr> <tr><td>Validation</td><td>Pydantic
+    v2</td><td>Tool input models sinh JSON schema</td></tr>
+    <tr><td>HTTP</td><td>httpx ≥0.27 + websockets ≥12</td><td>Async; Feishu
+    WebSocket long-connection</td></tr> <tr><td>MCP</td><td>mcp ≥1.0 (Python
+    SDK)</td><td>stdio + HTTP transport</td></tr>
+    <tr><td>Channels</td><td>slack-sdk, discord.py, python-telegram-bot,
+    lark-oapi</td><td>4 bot SDKs first-class</td></tr>
+    <tr><td>Cron</td><td>croniter ≥2.0 + watchfiles</td><td>Persistent job
+    scheduler</td></tr> <tr><td>Sandbox</td><td>Docker SDK
+    (optional)</td><td>Tool execution isolation</td></tr> </table> <h3
+    id="summary-table">Bảng tóm tắt 30 kỹ thuật</h3>
+  </Fragment>
+  <SummaryTable
+    rows={[
+      {
+        id: "T1",
+        title: "Async ReAct + branching single/parallel tool execution",
+        chipLabel: "Loop",
+        chipVariant: "purple",
+      },
+      {
+        id: "T2",
+        title: "Auto-compact before-turn + reactive on overflow",
+        chipLabel: "Loop",
+        chipVariant: "purple",
+      },
+      {
+        id: "T3",
+        title: "Stream events union + CompactProgressEvent 9-phase",
+        chipLabel: "Loop",
+        chipVariant: "purple",
+      },
+      {
+        id: "T4",
+        title: "Pre/Post tool hook interception",
+        chipLabel: "Loop",
+        chipVariant: "purple",
+      },
+      {
+        id: "T5",
+        title: "Tool metadata carryover across turns",
+        chipLabel: "Loop",
+        chipVariant: "purple",
+      },
+      {
+        id: "T6",
+        title: "Multi-layer system prompt assembly (9 sections)",
+        chipLabel: "Context",
+        chipVariant: "cyan",
+      },
+      {
+        id: "T7",
+        title: "CLAUDE.md cascading discovery upward",
+        chipLabel: "Context",
+        chipVariant: "cyan",
+      },
+      {
+        id: "T8",
+        title: "Per-project memory isolation (SHA1 hash)",
+        chipLabel: "Context",
+        chipVariant: "cyan",
+      },
+      {
+        id: "T9",
+        title: "Token-based memory search + CJK tokenizer",
+        chipLabel: "Context",
+        chipVariant: "cyan",
+      },
+      {
+        id: "T10",
+        title: "Pydantic tool base + auto JSON schema",
+        chipLabel: "Tool",
+        chipVariant: "green",
+      },
+      {
+        id: "T11",
+        title: "Per-tool output truncation + UTF-8 normalization",
+        chipLabel: "Tool",
+        chipVariant: "green",
+      },
+      {
+        id: "T12",
+        title: "Bash interactive preflight + PTY + graceful timeout",
+        chipLabel: "Tool",
+        chipVariant: "green",
+      },
+      {
+        id: "T13",
+        title: "Ripgrep-first Glob/Grep + Python fallback",
+        chipLabel: "Tool",
+        chipVariant: "green",
+      },
+      {
+        id: "T14",
+        title: "Markdown skill system + frontmatter",
+        chipLabel: "Ecosystem",
+        chipVariant: "amber",
+      },
+      {
+        id: "T15",
+        title: "Hook lifecycle (6 events · 4 types · hot reload)",
+        chipLabel: "Ecosystem",
+        chipVariant: "amber",
+      },
+      {
+        id: "T16",
+        title: "Plugin manifest-based loading",
+        chipLabel: "Ecosystem",
+        chipVariant: "amber",
+      },
+      {
+        id: "T17",
+        title: "MCP stdio + HTTP + dynamic Pydantic adapter",
+        chipLabel: "Ecosystem",
+        chipVariant: "amber",
+      },
+      {
+        id: "T18",
+        title: "3-mode permission (DEFAULT / PLAN / FULL_AUTO)",
+        chipLabel: "Permission",
+        chipVariant: "red",
+      },
+      {
+        id: "T19",
+        title: "Built-in sensitive path protection (hardcoded glob)",
+        chipLabel: "Permission",
+        chipVariant: "red",
+      },
+      {
+        id: "T20",
+        title: "6-layer hierarchical permission evaluation",
+        chipLabel: "Permission",
+        chipVariant: "red",
+      },
+      {
+        id: "T21",
+        title: "Async interactive approval + UUID + 300s timeout",
+        chipLabel: "Permission",
+        chipVariant: "red",
+      },
+      {
+        id: "T22",
+        title: "Subprocess-based subagent spawning",
+        chipLabel: "Swarm ★",
+        chipVariant: "unique",
+      },
+      {
+        id: "T23",
+        title: "File-based async mailbox với atomic writes",
+        chipLabel: "Swarm ★",
+        chipVariant: "unique",
+      },
+      {
+        id: "T24",
+        title: "Dual-channel permission sync protocol",
+        chipLabel: "Swarm ★",
+        chipVariant: "unique",
+      },
+      {
+        id: "T25",
+        title: "Git worktree isolation per agent",
+        chipLabel: "Swarm ★",
+        chipVariant: "unique",
+      },
+      {
+        id: "T26",
+        title: "YAML agent definitions + coordinator",
+        chipLabel: "Swarm ★",
+        chipVariant: "unique",
+      },
+      {
+        id: "T27",
+        title: "Multi-channel bus (Slack/Feishu/Discord/Telegram/Matrix)",
+        chipLabel: "Integrations ★",
+        chipVariant: "unique",
+      },
+      {
+        id: "T28",
+        title: "LSP-based code intelligence via Python AST",
+        chipLabel: "Integrations ★",
+        chipVariant: "unique",
+      },
+      {
+        id: "T29",
+        title: "Docker sandbox cho tool execution",
+        chipLabel: "Integrations ★",
+        chipVariant: "unique",
+      },
+      {
+        id: "T30",
+        title: "Cron scheduler + persistent background tasks",
+        chipLabel: "Integrations ★",
+        chipVariant: "unique",
+      },
+    ]}
+  />
+  <Fragment is:raw>
+    <p class="toc-intro">★ = feature chỉ có ở OpenHarness (không có ở opencode
+    core). Tổng: 9 kỹ thuật unique, 21 kỹ thuật chia sẻ chung ý tưởng với
+    opencode/Claude Code nhưng implement theo Python idiom.</p>
+  </Fragment>
+</Section>

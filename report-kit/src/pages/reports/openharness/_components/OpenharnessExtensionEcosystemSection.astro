@@ -1,0 +1,433 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import Callout from "../../../../components/Callout.astro";
+---
+
+<Section
+  id={"section-d"}
+  title={"D. Extension Ecosystem"}
+  themeTag={"4 kỹ thuật"}
+>
+  <Fragment is:raw>
+    <p>OpenHarness có 4 surface để mở rộng: <em>skills</em> (markdown),
+    <em>hooks</em> (policy/observability), <em>plugins</em> (bundle
+    skill+hook+mcp), <em>MCP</em> (external tool server). Tất cả đều được
+    discover từ filesystem, zero dependency configuration registry.</p>
+  </Fragment>
+  <Technique
+    id={"t14"}
+    title={"T14. Markdown-based skill system + frontmatter"}
+    tid={"D.1"}
+    location={"<strong>File:</strong> <code>src/openharness/skills/loader.py</code> · <strong>Lines:</strong> 27–51 · <strong>Scan paths:</strong> bundled + <code>~/.openharness/skills/&lt;skill&gt;/SKILL.md</code> + plugin skills"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      yaml, re <span class="kw">from</span> pathlib <span
+      class="kw">import</span> Path <span class="kw">from</span> dataclasses
+      <span class="kw">import</span> dataclass FRONTMATTER_RE = re.compile(<span
+      class="fn">r</span><span class="str">"^---\n(.*?)\n---\n(.*)"</span>,
+      re.DOTALL) <span class="fn">@dataclass</span> <span
+      class="kw">class</span> <span class="type">Skill</span>: name: str
+      description: str path: Path body: str <span class="kw">def</span> <span
+      class="fn">load_skills</span>(cwd: Path) -&gt; list[Skill]: skills:
+      list[Skill] = [] seen_names: set[str] = <span class="kw">set</span>()
+      <span class="kw">for</span> base <span class="kw">in</span>
+      _skill_roots(cwd): <span class="com"># bundled + ~/.openharness/skills +
+      plugins</span> <span class="kw">if not</span> base.is_dir(): <span
+      class="kw">continue</span> <span class="kw">for</span> skill_dir <span
+      class="kw">in</span> sorted(base.iterdir()): manifest = skill_dir / <span
+      class="str">"SKILL.md"</span> <span class="kw">if not</span>
+      manifest.exists(): <span class="kw">continue</span> raw =
+      manifest.read_text(encoding=<span class="str">"utf-8"</span>) match =
+      FRONTMATTER_RE.match(raw) <span class="kw">if</span> match: meta =
+      yaml.safe_load(match.group(<span class="num">1</span>)) <span
+      class="kw">or</span> {} body = match.group(<span
+      class="num">2</span>).strip() name = meta.get(<span
+      class="str">"name"</span>) <span class="kw">or</span> skill_dir.name
+      description = meta.get(<span class="str">"description"</span>, <span
+      class="str">""</span>) <span class="kw">else</span>: <span class="com">#
+      Fallback: derive from first heading + first paragraph</span> name =
+      skill_dir.name first_heading = re.search(<span class="fn">r</span><span
+      class="str">"^# (.+)$"</span>, raw, re.M) title =
+      first_heading.group(<span class="num">1</span>) <span class="kw">if</span>
+      first_heading <span class="kw">else</span> name first_para =
+      raw.split(<span class="str">"\n\n"</span>)[<span class="num">1</span>]
+      <span class="kw">if</span> <span class="str">"\n\n"</span> <span
+      class="kw">in</span> raw <span class="kw">else</span> <span
+      class="str">""</span> description = first_para[:<span
+      class="num">200</span>] body = raw <span class="com"># Dedup by name,
+      first wins (bundled &gt; user &gt; plugin priority)</span> <span
+      class="kw">if</span> name <span class="kw">in</span> seen_names: <span
+      class="kw">continue</span> seen_names.add(name)
+      skills.append(Skill(name=name, description=description, path=manifest,
+      body=body)) <span class="kw">return</span> skills</code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> Skill = một folder chứa
+      <code>SKILL.md</code> với frontmatter mô tả. System prompt sẽ inject
+      description của tất cả skills có sẵn — LLM đọc description rồi "kích hoạt"
+      skill nếu relevant (tức LLM request read file SKILL.md để đọc full
+      instruction). Thiết kế này giống Claude Code skills. Fallback khi thiếu
+      frontmatter giúp test dễ (chỉ cần một file <code>SKILL.md</code> là
+      enough). Priority <em>first-wins</em>: built-in ưu tiên, user override
+      sau, plugin cuối.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">import</span> yaml, re <span class="kw">from</span> pathlib
+      <span class="kw">import</span> Path <span class="kw">def</span> <span
+      class="fn">discover_skills</span>(roots: list[Path]): skills = []; seen =
+      <span class="kw">set</span>() <span class="kw">for</span> root <span
+      class="kw">in</span> roots: <span class="kw">if not</span> root.is_dir():
+      <span class="kw">continue</span> <span class="kw">for</span> d <span
+      class="kw">in</span> sorted(root.iterdir()): mf = d / <span
+      class="str">"SKILL.md"</span> <span class="kw">if not</span> mf.exists():
+      <span class="kw">continue</span> raw = mf.read_text() m = re.match(<span
+      class="fn">r</span><span class="str">"^---\n(.*?)\n---\n(.*)"</span>, raw,
+      re.DOTALL) meta, body = (yaml.safe_load(m.group(<span
+      class="num">1</span>)), m.group(<span class="num">2</span>)) <span
+      class="kw">if</span> m <span class="kw">else</span> ({}, raw) name =
+      meta.get(<span class="str">"name"</span>, d.name) <span
+      class="kw">if</span> name <span class="kw">in</span> seen: <span
+      class="kw">continue</span> <span class="com"># first-wins</span>
+      seen.add(name) skills.append({<span class="str">"name"</span>: name, <span
+      class="str">"description"</span>: meta.get(<span
+      class="str">"description"</span>, <span class="str">""</span>), <span
+      class="str">"body"</span>: body}) <span class="kw">return</span>
+      skills</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "User-friendly — chỉ cần biết markdown",
+        "Git-friendly — diff/review dễ",
+        "Frontmatter machine-readable, body human-readable",
+        "Layered priority (builtin/user/plugin)",
+      ]}
+      cons={[
+        "Skill lớn tốn token khi LLM load body",
+        "Không có versioning / dependency giữa skills",
+        "Priority có thể surprise (first-wins khó debug khi nhiều plugin)",
+        "Fallback parse bất định khi heading không chuẩn",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://pyyaml.org/">PyYAML docs</a>',
+        '<a href="https://agents.md/">agents.md — markdown-first instruction file</a>',
+        '<a href="https://code.claude.com/docs/en/plugins">Claude Code — Plugins docs (skill reference)</a>',
+      ]}
+    />
+    <p><a href="/reports/openharness/t14/">→ Phân tích sâu T14: Markdown-based skill system + frontmatter discovery</a></p>
+  </Technique>
+  <Technique
+    id={"t15"}
+    title={"T15. Hook lifecycle system (6 events · 4 types · hot reload)"}
+    tid={"D.2"}
+    location={"<strong>Files:</strong> <code>src/openharness/hooks/events.py</code>, <code>hooks/executor.py</code> · <strong>Reloader:</strong> <code>HookReloader</code> watches mtime"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">from</span> enum
+      <span class="kw">import</span> Enum <span class="kw">class</span> <span
+      class="type">HookEvent</span>(Enum): SESSION_START = <span
+      class="str">"session_start"</span> SESSION_END = <span
+      class="str">"session_end"</span> PRE_COMPACT = <span
+      class="str">"pre_compact"</span> POST_COMPACT = <span
+      class="str">"post_compact"</span> PRE_TOOL_USE = <span
+      class="str">"pre_tool_use"</span> POST_TOOL_USE = <span
+      class="str">"post_tool_use"</span> <span class="kw">class</span> <span
+      class="type">HookType</span>(Enum): COMMAND = <span
+      class="str">"command"</span> <span class="com"># exec shell command, check
+      exit code</span> PROMPT = <span class="str">"prompt"</span> <span
+      class="com"># LLM judges payload vs policy</span> HTTP = <span
+      class="str">"http"</span> <span class="com"># POST payload to
+      webhook</span> AGENT = <span class="str">"agent"</span> <span
+      class="com"># spawn subagent for decision</span> <span
+      class="kw">class</span> <span class="type">HookExecutor</span>: <span
+      class="kw">async def</span> <span class="fn">execute</span>(self, event:
+      HookEvent, payload: dict) -&gt; HookResult: self._maybe_reload() <span
+      class="com"># hot-reload when files changed</span> blocked, reasons =
+      <span class="kw">False</span>, [] <span class="kw">for</span> hook <span
+      class="kw">in</span> self._hooks_for(event): res = <span
+      class="kw">await</span> hook.run(payload) reasons.append(res.message)
+      <span class="kw">if</span> res.blocked: blocked = <span
+      class="kw">True</span> <span class="kw">if</span> hook.type ==
+      HookType.COMMAND: <span class="kw">break</span> <span class="com">#
+      short-circuit for command hooks</span> <span class="kw">return</span>
+      HookResult(blocked=blocked, reason=<span class="str">";
+      "</span>.join(reasons)) <span class="kw">class</span> <span
+      class="type">HookReloader</span>: <span class="str">"""Watch hook file
+      mtime; reload config when modified."""</span> <span class="kw">def</span>
+      <span class="fn">maybe_reload</span>(self): <span class="kw">for</span>
+      path, old_mtime <span class="kw">in</span> <span
+      class="kw">list</span>(self._mtimes.items()): new_mtime =
+      path.stat().st_mtime <span class="kw">if</span> new_mtime != old_mtime:
+      log.info(<span class="str">"reloading hooks from %s"</span>, path)
+      self._hooks = self._parse(path) self._mtimes[path] =
+      new_mtime</code></pre> <div class="why"><strong>Tại sao quan
+      trọng:</strong> Hook lifecycle 6 event là đủ cho hầu hết policy scenarios:
+      session bound (SESSION_START/END), compaction tracking (PRE/POST_COMPACT),
+      tool enforcement (PRE/POST_TOOL_USE). 4 hook types cho phép user chọn cơ
+      chế: command = simple shell, prompt = LLM-based policy, HTTP = remote
+      SIEM, agent = sophisticated reasoning. Hot reload qua mtime watch — sửa
+      <code>hooks.yaml</code> không cần restart session.</div> <h4>Code example
+      (generic)</h4> <pre><code><span class="kw">import</span> asyncio,
+      subprocess <span class="kw">from</span> enum <span
+      class="kw">import</span> Enum <span class="kw">class</span> <span
+      class="type">HookEvent</span>(Enum): PRE_TOOL = <span
+      class="str">"pre_tool"</span>; POST_TOOL = <span
+      class="str">"post_tool"</span> <span class="kw">class</span> <span
+      class="type">CommandHook</span>: <span class="kw">def</span> <span
+      class="fn">__init__</span>(self, cmd): self.cmd = cmd <span
+      class="kw">async def</span> <span class="fn">run</span>(self, payload):
+      proc = <span class="kw">await</span> asyncio.create_subprocess_shell(
+      self.cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+      stderr=asyncio.subprocess.PIPE, ) out, err = <span class="kw">await</span>
+      proc.communicate(json.dumps(payload).encode()) <span
+      class="kw">return</span> {<span class="str">"blocked"</span>:
+      proc.returncode != <span class="num">0</span>, <span
+      class="str">"reason"</span>: err.decode()} <span class="kw">class</span>
+      <span class="type">HookExecutor</span>: <span class="kw">def</span> <span
+      class="fn">__init__</span>(self, hooks_by_event): self.hooks =
+      hooks_by_event <span class="kw">async def</span> <span
+      class="fn">fire</span>(self, event, payload): <span class="kw">for</span>
+      h <span class="kw">in</span> self.hooks.get(event, []): r = <span
+      class="kw">await</span> h.run(payload) <span class="kw">if</span> r[<span
+      class="str">"blocked"</span>]: <span class="kw">return</span> r <span
+      class="kw">return</span> {<span class="str">"blocked"</span>: <span
+      class="kw">False</span>}</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "6 lifecycle events covers compaction + tool + session",
+        "Hot reload — no session restart",
+        "4 hook types — flexible (simple → sophisticated)",
+        "Short-circuit for command hooks — perf-friendly",
+      ]}
+      cons={[
+        "LLM-based prompt hook tốn API call — latency + cost",
+        "Hot reload race với hook đang chạy",
+        'Không có "chain" semantics — mỗi hook độc lập',
+        "Agent hook có thể recursive call trở lại main agent",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://code.claude.com/docs/en/hooks">Claude Code — Hooks documentation</a>',
+        '<a href="https://dev.to/klement_gunndu/lock-down-claude-code-with-5-permission-patterns-4gcn">DEV — 5 Permission Patterns in Claude Code</a>',
+        '<a href="https://watchfiles.helpmanual.io/">watchfiles — mtime-based reloading</a>',
+      ]}
+    />
+    <p><a href="/reports/openharness/t15/">→ Phân tích sâu T15: Hook lifecycle system (6 events · 4 types · hot reload)</a></p>
+  </Technique>
+  <Technique
+    id={"t16"}
+    title={"T16. Plugin manifest-based loading"}
+    tid={"D.3"}
+    location={"<strong>File:</strong> <code>src/openharness/plugins/loader.py</code> · <strong>Lines:</strong> 104–157 · <strong>Paths:</strong> <code>~/.openharness/plugins/</code> (user) + <code>.openharness/plugins/</code> (project)"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      yaml <span class="kw">from</span> pathlib <span class="kw">import</span>
+      Path <span class="kw">from</span> dataclasses <span
+      class="kw">import</span> dataclass, field <span
+      class="fn">@dataclass</span> <span class="kw">class</span> <span
+      class="type">PluginManifest</span>: name: str version: str description:
+      str skills_dir: str | <span class="kw">None</span> = <span
+      class="kw">None</span> <span class="com"># relative path to skills/</span>
+      hooks_file: str | <span class="kw">None</span> = <span
+      class="kw">None</span> <span class="com"># relative path to
+      hooks.yaml</span> mcp_file: str | <span class="kw">None</span> = <span
+      class="kw">None</span> <span class="com"># relative path to
+      mcp.json</span> commands_dir: str | <span class="kw">None</span> = <span
+      class="kw">None</span> <span class="com"># relative path to
+      commands/</span> <span class="kw">def</span> <span
+      class="fn">load_plugins</span>(cwd: Path) -&gt; list[Plugin]: plugins = []
+      roots = [ Path.home() / <span class="str">".openharness"</span> / <span
+      class="str">"plugins"</span>, cwd / <span
+      class="str">".openharness"</span> / <span class="str">"plugins"</span>, ]
+      <span class="kw">for</span> root <span class="kw">in</span> roots: <span
+      class="kw">if not</span> root.is_dir(): <span class="kw">continue</span>
+      <span class="kw">for</span> plugin_dir <span class="kw">in</span>
+      sorted(root.iterdir()): manifest_path = plugin_dir / <span
+      class="str">"plugin.yaml"</span> <span class="kw">if not</span>
+      manifest_path.exists(): <span class="kw">continue</span> data =
+      yaml.safe_load(manifest_path.read_text()) manifest =
+      PluginManifest(**data) <span class="com"># Resolve relative paths to
+      absolute</span> skills = [] <span class="kw">if</span>
+      manifest.skills_dir: skills_path = plugin_dir / manifest.skills_dir skills
+      = _load_skills_from(skills_path) hooks = [] <span class="kw">if</span>
+      manifest.hooks_file: hooks_path = plugin_dir / manifest.hooks_file hooks =
+      _parse_hooks_yaml(hooks_path) mcp_servers = [] <span class="kw">if</span>
+      manifest.mcp_file: mcp_path = plugin_dir / manifest.mcp_file mcp_servers =
+      _parse_mcp_json(mcp_path) commands = [] <span class="kw">if</span>
+      manifest.commands_dir: <span class="com"># Namespace:
+      "plugin:&lt;plugin_name&gt;:&lt;file_stem&gt;"</span> commands_path =
+      plugin_dir / manifest.commands_dir <span class="kw">for</span> cmd_file
+      <span class="kw">in</span> sorted(commands_path.glob(<span
+      class="str">"*.md"</span>)): commands.append(Command( name=<span
+      class="fn">f</span><span
+      class="str">"plugin:{manifest.name}:{cmd_file.stem}"</span>,
+      body=cmd_file.read_text(), )) plugins.append(Plugin( manifest=manifest,
+      skills=skills, hooks=hooks, mcp_servers=mcp_servers, commands=commands, ))
+      <span class="kw">return</span> plugins</code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> Một plugin bundle được
+      nhiều loại extension: skills + hooks + MCP + commands. Manifest
+      <code>plugin.yaml</code> chỉ list các path relative — không embed content.
+      Command có namespace <code>plugin:&lt;name&gt;:&lt;file&gt;</code> để
+      tránh conflict. Hai root: user global + project local — project override
+      user. Đây là pattern quen thuộc của Claude Code plugins, port sang
+      Python.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">import</span> yaml <span class="kw">from</span> pathlib <span
+      class="kw">import</span> Path <span class="kw">def</span> <span
+      class="fn">load_plugins</span>(roots: list[Path]) -&gt; <span
+      class="kw">list</span>: out = [] <span class="kw">for</span> root <span
+      class="kw">in</span> roots: <span class="kw">for</span> d <span
+      class="kw">in</span> sorted(root.glob(<span class="str">"*"</span>)) <span
+      class="kw">if</span> root.is_dir() <span class="kw">else</span> []: mf = d
+      / <span class="str">"plugin.yaml"</span> <span class="kw">if not</span>
+      mf.exists(): <span class="kw">continue</span> data =
+      yaml.safe_load(mf.read_text()) plugin = { <span class="str">"name"</span>:
+      data[<span class="str">"name"</span>], <span class="str">"root"</span>: d,
+      <span class="str">"skills"</span>: load_skills_dir(d / data.get(<span
+      class="str">"skills_dir"</span>, <span class="str">"skills"</span>)),
+      <span class="str">"hooks"</span>: load_hooks(d / data[<span
+      class="str">"hooks_file"</span>]) <span class="kw">if</span>
+      data.get(<span class="str">"hooks_file"</span>) <span
+      class="kw">else</span> [], <span class="str">"mcp"</span>: load_mcp(d /
+      data[<span class="str">"mcp_file"</span>]) <span class="kw">if</span>
+      data.get(<span class="str">"mcp_file"</span>) <span class="kw">else</span>
+      [], } out.append(plugin) <span class="kw">return</span> out</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Single manifest declare everything",
+        "Bundle skill + hook + MCP coherently",
+        "Namespace tránh command conflict",
+        "Git/filesystem distributable",
+      ]}
+      cons={[
+        "Không có semver / dependency resolution",
+        "Security: plugin hook có thể exec arbitrary shell",
+        "No signing / verification",
+        "Bundled layout cứng nhắc (skills_dir fixed name)",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://code.claude.com/docs/en/plugins">Claude Code — Plugins documentation</a>',
+        '<a href="https://www.deployhq.com/blog/ai-coding-config-files-guide">DeployHQ — Configure Every AI Coding Assistant</a>',
+        '<a href="https://docs.python.org/3/library/pkgutil.html">Python pkgutil (alternative plugin discovery)</a>',
+      ]}
+    />
+    <p><a href="/reports/openharness/t16/">→ Phân tích sâu T16: Plugin manifest-based loading</a></p>
+  </Technique>
+  <Technique
+    id={"t17"}
+    title={"T17. MCP stdio + HTTP transport + dynamic Pydantic adapter"}
+    tid={"D.4"}
+    location={"<strong>File:</strong> <code>src/openharness/mcp/client.py</code> · <strong>Lines:</strong> 29–95 · <strong>Aggregator:</strong> <code>McpClientManager</code> uses <code>AsyncExitStack</code>"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">from</span>
+      contextlib <span class="kw">import</span> AsyncExitStack <span
+      class="kw">from</span> mcp <span class="kw">import</span> ClientSession,
+      StdioServerParameters <span class="kw">from</span> mcp.client.stdio <span
+      class="kw">import</span> stdio_client <span class="kw">from</span>
+      mcp.client.sse <span class="kw">import</span> sse_client <span
+      class="kw">from</span> pydantic <span class="kw">import</span>
+      create_model <span class="kw">class</span> <span
+      class="type">McpClientManager</span>: <span class="kw">def</span> <span
+      class="fn">__init__</span>(self, server_configs): self._configs =
+      server_configs self._stack: AsyncExitStack | <span class="kw">None</span>
+      = <span class="kw">None</span> self._sessions: <span
+      class="kw">dict</span>[str, ClientSession] = {} self._tools: <span
+      class="kw">list</span>[McpTool] = [] <span class="kw">async def</span>
+      <span class="fn">__aenter__</span>(self): self._stack = AsyncExitStack()
+      <span class="kw">await</span> self._stack.__aenter__() <span
+      class="kw">for</span> name, cfg <span class="kw">in</span>
+      self._configs.items(): <span class="kw">if</span> cfg.transport == <span
+      class="str">"stdio"</span>: params =
+      StdioServerParameters(command=cfg.command, args=cfg.args, env=cfg.env)
+      stream_ctx = stdio_client(params) <span class="kw">elif</span>
+      cfg.transport == <span class="str">"http"</span>: stream_ctx =
+      sse_client(cfg.url, headers=cfg.headers) <span class="kw">else</span>:
+      <span class="kw">raise</span> ValueError(<span class="fn">f</span><span
+      class="str">"Unknown MCP transport: {cfg.transport}"</span>) streams =
+      <span class="kw">await</span> self._stack.enter_async_context(stream_ctx)
+      session = ClientSession(*streams) <span class="kw">await</span>
+      self._stack.enter_async_context(session) <span class="kw">await</span>
+      session.initialize() self._sessions[name] = session <span class="com">#
+      Discover tools + build Pydantic adapter for each</span> resp = <span
+      class="kw">await</span> session.list_tools() <span class="kw">for</span>
+      tool <span class="kw">in</span> resp.tools: InputModel =
+      _build_pydantic_from_schema(tool.inputSchema, name=tool.name)
+      self._tools.append(McpTool( server=name, name=<span
+      class="fn">f</span><span class="str">"mcp__{name}__{tool.name}"</span>,
+      <span class="com"># namespaced tool id</span>
+      description=tool.description, input_model=InputModel, session=session, ))
+      <span class="kw">return</span> self <span class="kw">async def</span>
+      <span class="fn">__aexit__</span>(self, *exc): <span class="kw">if</span>
+      self._stack: <span class="kw">await</span> self._stack.__aexit__(*exc)
+      <span class="kw">def</span> <span
+      class="fn">_build_pydantic_from_schema</span>(schema: dict, *, name: str):
+      <span class="str">"""Convert JSON schema to a dynamic Pydantic
+      model."""</span> fields = {} <span class="kw">for</span> prop, spec <span
+      class="kw">in</span> schema.get(<span class="str">"properties"</span>,
+      {}).items(): py_type = _json_type_to_python(spec.get(<span
+      class="str">"type"</span>, <span class="str">"string"</span>))
+      fields[prop] = (py_type, ...) <span class="com"># required</span> <span
+      class="kw">return</span> create_model(<span class="fn">f</span><span
+      class="str">"Mcp_{name}_Input"</span>, **fields)</code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> MCP cho phép OpenHarness
+      dùng tool từ nhiều server độc lập (GitHub, Jira, Slack MCPs...).
+      <code>AsyncExitStack</code> per-server đảm bảo cleanup đúng ngay cả khi
+      một server fail init. <code>create_model</code> build Pydantic từ JSON
+      schema runtime — tức tool được validate như tool native. Namespace
+      <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> tránh conflict giữa server
+      có cùng tool name. Dual transport stdio+HTTP cho local subprocess hoặc
+      remote SaaS MCP.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">from</span> contextlib <span class="kw">import</span>
+      AsyncExitStack <span class="kw">from</span> pydantic <span
+      class="kw">import</span> create_model <span class="kw">class</span> <span
+      class="type">McpManager</span>: <span class="kw">async def</span> <span
+      class="fn">__aenter__</span>(self): self.stack = <span
+      class="kw">await</span> AsyncExitStack().__aenter__() self.sessions = {}
+      self.tools = [] <span class="kw">for</span> name, cfg <span
+      class="kw">in</span> self.configs.items(): ctx = stdio_client(cfg) <span
+      class="kw">if</span> cfg.transport == <span class="str">"stdio"</span>
+      <span class="kw">else</span> sse_client(cfg) streams = <span
+      class="kw">await</span> self.stack.enter_async_context(ctx) sess = <span
+      class="kw">await</span>
+      self.stack.enter_async_context(ClientSession(*streams)) <span
+      class="kw">await</span> sess.initialize() <span class="kw">for</span> t
+      <span class="kw">in</span> (<span class="kw">await</span>
+      sess.list_tools()).tools: self.tools.append({<span
+      class="str">"name"</span>: <span class="fn">f</span><span
+      class="str">"mcp__{name}__{t.name}"</span>, <span
+      class="str">"model"</span>: create_model(<span class="fn">f</span><span
+      class="str">"M_{t.name}"</span>, **...)}) <span class="kw">return</span>
+      self</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Dual transport — stdio (local) + HTTP (remote)",
+        "AsyncExitStack → nested cleanup an toàn",
+        "Dynamic Pydantic — tool MCP validate như native",
+        "Namespace tránh conflict",
+      ]}
+      cons={[
+        "JSON schema → Pydantic chưa hỗ trợ allOf/oneOf phức tạp",
+        "Một server stuck block toàn bộ init (không có per-server timeout)",
+        "SSE transport không có retry built-in",
+        "Schema không support descriptions for enum values",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://modelcontextprotocol.io/">MCP — official spec</a>',
+        '<a href="https://github.com/modelcontextprotocol/python-sdk">MCP Python SDK</a>',
+        '<a href="https://modelcontextprotocol.io/docs/concepts/transports">MCP Transport spec (stdio, HTTP)</a>',
+        '<a href="https://www.anthropic.com/news/model-context-protocol">Anthropic — Introducing the MCP</a>',
+      ]}
+    />
+    <p><a href="/reports/openharness/t17/">→ Phân tích sâu T17: MCP stdio + HTTP transport + dynamic Pydantic adapter</a></p>
+  </Technique>
+</Section>

@@ -1,0 +1,391 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import Callout from "../../../../components/Callout.astro";
+---
+
+<Section id={"section-c"} title={"C. Tool Design"} themeTag={"4 kỹ thuật"}>
+  <Fragment is:raw>
+    <p>OpenHarness có 42 tools (<code>tools/</code> folder, một file per tool).
+    Base class Pydantic đảm bảo type-safety và auto-generate JSON schema cho
+    Anthropic/OpenAI SDK. Mỗi tool có truncation giới hạn riêng, bash được bảo
+    vệ bằng preflight + PTY, Glob/Grep ưu tiên ripgrep.</p>
+  </Fragment>
+  <Technique
+    id={"t10"}
+    title={"T10. Pydantic tool base + auto JSON schema"}
+    tid={"C.1"}
+    location={"<strong>File:</strong> <code>src/openharness/tools/base.py</code> · <strong>Lines:</strong> 30–52"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">from</span> abc
+      <span class="kw">import</span> ABC, abstractmethod <span class="kw">from
+      typing import</span> ClassVar <span class="kw">from</span> pydantic <span
+      class="kw">import</span> BaseModel <span class="kw">class</span> <span
+      class="type">BaseTool</span>(ABC): name: ClassVar[str] description:
+      ClassVar[str] input_model: ClassVar[type[BaseModel]] is_read_only:
+      ClassVar[bool] = <span class="kw">False</span> <span
+      class="fn">@classmethod</span> <span class="kw">def</span> <span
+      class="fn">to_schema</span>(cls) -&gt; dict: <span class="str">"""JSON
+      Schema auto-generated from Pydantic input model."""</span> <span
+      class="kw">return</span> { <span class="str">"name"</span>: cls.name,
+      <span class="str">"description"</span>: cls.description, <span
+      class="str">"input_schema"</span>: cls.input_model.model_json_schema(), }
+      <span class="fn">@abstractmethod</span> <span class="kw">async def</span>
+      <span class="fn">execute</span>(self, args: BaseModel, ctx: ToolContext)
+      -&gt; ToolResult: <span class="str">"""Execute tool with validated args;
+      return result or error."""</span> ... <span class="com"># Concrete
+      usage</span> <span class="kw">class</span> <span
+      class="type">ReadInput</span>(BaseModel): file_path: str offset: int |
+      <span class="kw">None</span> = <span class="kw">None</span> limit: int |
+      <span class="kw">None</span> = <span class="kw">None</span> <span
+      class="kw">class</span> <span class="type">ReadTool</span>(BaseTool): name
+      = <span class="str">"Read"</span> description = <span class="str">"Read a
+      file..."</span> input_model = ReadInput is_read_only = <span
+      class="kw">True</span> <span class="kw">async def</span> <span
+      class="fn">execute</span>(self, args: ReadInput, ctx) -&gt; ToolResult:
+      ...</code></pre> <div class="why"><strong>Tại sao quan trọng:</strong>
+      Viết tool Pydantic-first cho 3 lợi ích: (1) <em>validation free</em> —
+      args đến tool đã pass schema; (2) <em>JSON schema auto</em> — không cần
+      viết tay schema cho mỗi tool (chống drift); (3) <em>IDE friendly</em> —
+      tool method có type hints đúng. Hằng <code>is_read_only</code> đặc biệt
+      quan trọng: permission checker dùng nó để quyết định có cần confirm hay
+      không (read tool luôn OK trong DEFAULT mode).</div> <h4>Code example
+      (generic)</h4> <pre><code><span class="kw">from</span> pydantic <span
+      class="kw">import</span> BaseModel, Field <span class="kw">from</span> abc
+      <span class="kw">import</span> ABC, abstractmethod <span
+      class="kw">class</span> <span class="type">BaseTool</span>(ABC): name:
+      <span class="type">str</span> input_model: <span
+      class="kw">type</span>[BaseModel] <span class="fn">@classmethod</span>
+      <span class="kw">def</span> <span class="fn">schema</span>(cls): <span
+      class="kw">return</span> {<span class="str">"name"</span>: cls.name, <span
+      class="str">"input_schema"</span>: cls.input_model.model_json_schema()}
+      <span class="fn">@abstractmethod</span> <span class="kw">async def</span>
+      <span class="fn">execute</span>(self, args: BaseModel) -&gt; <span
+      class="kw">dict</span>: ... <span class="kw">class</span> <span
+      class="type">GrepInput</span>(BaseModel): pattern: <span
+      class="type">str</span> = Field(description=<span class="str">"regex
+      pattern"</span>) path: <span class="type">str</span> | <span
+      class="kw">None</span> = <span class="kw">None</span> <span
+      class="kw">class</span> <span class="type">GrepTool</span>(BaseTool): name
+      = <span class="str">"Grep"</span> input_model = GrepInput <span
+      class="kw">async def</span> <span class="fn">execute</span>(self, args:
+      GrepInput): <span class="kw">return</span> <span class="kw">await</span>
+      run_ripgrep(args.pattern, args.path)</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Single-source-of-truth schema (model_json_schema)",
+        "Validation errors có chất lượng cao của Pydantic",
+        "mypy strict chấp nhận mọi path",
+        "Field descriptions vào docstring LLM-readable",
+      ]}
+      cons={[
+        "Pydantic v2 còn đầu jump từ v1 (breaking changes)",
+        "JSON schema đôi khi generate quá phức tạp (Union types), confuse model",
+        "Không có cơ chế <code>description_template</code> như opencode .txt",
+        "Overhead minor cho mỗi validation call",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://docs.pydantic.dev/latest/">Pydantic — Models docs</a>',
+        '<a href="https://ai.pydantic.dev/tools/">Pydantic AI — Tools</a>',
+        '<a href="https://pydantic.dev/docs/ai/core-concepts/agent/">Pydantic AI — Agents</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t11"}
+    title={"T11. Per-tool output truncation + UTF-8 normalization"}
+    tid={"C.2"}
+    location={"<strong>Files:</strong> <code>tools/bash_tool.py</code> L129 · <code>tools/web_fetch_tool.py</code> L61 · <code>tools/file_read_tool.py</code> L57 · <strong>Limits:</strong> bash 12KB, web 50KB, file 200 lines default"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="com">#
+      tools/bash_tool.py</span> MAX_BASH_OUTPUT_BYTES = <span
+      class="num">12</span> * <span class="num">1024</span> <span class="com">#
+      12KB</span> <span class="kw">def</span> <span
+      class="fn">_truncate_output</span>(raw: bytes, limit: int =
+      MAX_BASH_OUTPUT_BYTES) -&gt; str: <span class="com"># 1. Decode UTF-8 with
+      replace policy (never raise on bad bytes)</span> text = raw.decode(<span
+      class="str">"utf-8"</span>, errors=<span class="str">"replace"</span>)
+      <span class="kw">if</span> len(text) &lt;= limit: <span
+      class="kw">return</span> text <span class="com"># 2. Keep head + tail,
+      drop middle with clear marker</span> half = limit // <span
+      class="num">2</span> <span class="kw">return</span> ( text[:half] + <span
+      class="fn">f</span><span class="str">"\n\n... [output truncated:
+      {len(text) - limit} bytes omitted] ...\n\n"</span> + text[-half:] ) <span
+      class="com"># tools/web_fetch_tool.py</span> MAX_WEB_FETCH_BYTES = <span
+      class="num">50</span> * <span class="num">1024</span> <span class="com">#
+      50KB — web pages can be larger</span> <span class="com">#
+      tools/file_read_tool.py — different strategy: line-based not
+      byte-based</span> DEFAULT_READ_LIMIT = <span class="num">200</span> <span
+      class="com"># lines</span> MAX_LINE_LENGTH = <span class="num">2000</span>
+      <span class="com"># truncate long lines</span> <span class="kw">def</span>
+      <span class="fn">_read_with_limits</span>(path: Path, offset: int, limit:
+      int) -&gt; str: lines = [] <span class="kw">with</span> path.open(<span
+      class="str">"r"</span>, encoding=<span class="str">"utf-8"</span>,
+      errors=<span class="str">"replace"</span>) <span class="kw">as</span> f:
+      <span class="kw">for</span> i, line <span class="kw">in</span>
+      enumerate(f): <span class="kw">if</span> i &lt; offset: <span
+      class="kw">continue</span> <span class="kw">if</span> i &gt;= offset +
+      limit: <span class="kw">break</span> <span class="kw">if</span> len(line)
+      &gt; MAX_LINE_LENGTH: line = line[:MAX_LINE_LENGTH] + <span
+      class="str">"... [line truncated]\n"</span> lines.append(<span
+      class="fn">f</span><span class="str">"{i+1}\t{line}"</span>) <span
+      class="kw">return</span> <span
+      class="str">""</span>.join(lines)</code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> Tool output <em>luôn</em>
+      có nguy cơ overflow — build log 100MB, CSV 1GB, binary file. Mỗi tool có
+      policy riêng: bash 12KB (keep head+tail vì error hay ở cuối), web 50KB
+      (HTML parse), read 200 lines (code reading UX). UTF-8
+      <code>errors="replace"</code> bất biến — không bao giờ raise
+      UnicodeDecodeError giữa stream (phòng khi binary file lẫn vào
+      input).</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">def</span> <span class="fn">truncate_mid</span>(text: str,
+      limit: int) -&gt; str: <span class="kw">if</span> len(text) &lt;= limit:
+      <span class="kw">return</span> text half = limit // <span
+      class="num">2</span> dropped = len(text) - limit <span
+      class="kw">return</span> text[:half] + <span class="fn">f</span><span
+      class="str">"\n... [{dropped} chars truncated] ...\n"</span> +
+      text[-half:] <span class="kw">def</span> <span
+      class="fn">safe_decode</span>(raw: bytes) -&gt; str: <span
+      class="kw">return</span> raw.decode(<span class="str">"utf-8"</span>,
+      errors=<span class="str">"replace"</span>) <span class="com"># Per-tool
+      policy</span> LIMITS = {<span class="str">"Bash"</span>: <span
+      class="num">12</span>*<span class="num">1024</span>, <span
+      class="str">"WebFetch"</span>: <span class="num">50</span>*<span
+      class="num">1024</span>, <span class="str">"Read"</span>: <span
+      class="num">200</span>} <span class="com"># line count for
+      Read</span></code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Prevent context bomb from single tool call",
+        "Per-tool tuning — code reading khác build log",
+        "UTF-8 replace → never crash trên binary",
+        "Head+tail cho bash — error thường ở cuối, command ở đầu",
+      ]}
+      cons={[
+        "12KB cho bash có thể cắt ngay giữa JSON object",
+        'Không có "spill to file" như opencode (truncate → file path)',
+        "Limit hardcoded — không config per session",
+        "Line-based cho Read kém khi file 1 dòng siêu dài",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://github.com/BurntSushi/ripgrep">BurntSushi/ripgrep — output handling</a>',
+        '<a href="https://docs.python.org/3/library/codecs.html">Python codecs — error handling modes</a>',
+        '<a href="https://blog.dailydoseofds.com/p/the-anatomy-of-an-agent-harness">Avi Chawla — Anatomy of Agent Harness</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t12"}
+    title={"T12. Bash interactive preflight + PTY + graceful timeout"}
+    tid={"C.3"}
+    location={"<strong>File:</strong> <code>src/openharness/tools/bash_tool.py</code> · <strong>Lines:</strong> 145–208 · <strong>Timeout:</strong> 600s · <strong>Terminate grace:</strong> 2s"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      pty, os, shlex, signal, asyncio INTERACTIVE_MARKERS = ( (<span
+      class="str">"npm create"</span>, <span class="str">"--yes"</span>), (<span
+      class="str">"npx create"</span>, <span class="str">"--yes"</span>), (<span
+      class="str">"pnpm create"</span>, <span class="str">"--yes"</span>),
+      (<span class="str">"yarn create"</span>, <span
+      class="str">"--yes"</span>), (<span class="str">"bun create"</span>, <span
+      class="str">"--yes"</span>), (<span class="str">"pip install"</span>,
+      <span class="str">"--quiet"</span>), <span class="com"># may prompt for
+      confirmation</span> ... ) <span class="kw">def</span> <span
+      class="fn">_preflight_interactive_command</span>(cmd: str) -&gt; str |
+      <span class="kw">None</span>: <span class="str">"""Return error msg if cmd
+      would prompt interactively."""</span> tokens = shlex.split(cmd) joined =
+      <span class="str">" "</span>.join(tokens).lower() <span
+      class="kw">for</span> marker, required_flag <span class="kw">in</span>
+      INTERACTIVE_MARKERS: <span class="kw">if</span> marker <span
+      class="kw">in</span> joined <span class="kw">and</span> required_flag
+      <span class="kw">not in</span> joined: <span class="kw">return</span>
+      <span class="fn">f</span><span class="str">"Command likely requires
+      interaction. Add {required_flag} or equivalent."</span> <span
+      class="kw">return None</span> <span class="kw">async def</span> <span
+      class="fn">run_bash</span>(cmd: str, timeout: float = <span
+      class="num">600</span>) -&gt; BashResult: <span class="com"># 1. Preflight
+      check — reject scaffolds without --yes/--ci</span> <span
+      class="kw">if</span> err := _preflight_interactive_command(cmd): <span
+      class="kw">return</span> BashResult(exit_code=<span class="num">2</span>,
+      stderr=err, is_error=<span class="kw">True</span>) <span class="com"># 2.
+      Allocate PTY so that TTY-detecting programs work (vim -c, ansi
+      colors)</span> master_fd, slave_fd = pty.openpty() proc = <span
+      class="kw">await</span> asyncio.create_subprocess_exec( <span
+      class="str">"bash"</span>, <span class="str">"-c"</span>, cmd,
+      stdin=slave_fd, stdout=slave_fd, stderr=slave_fd, <span class="com">#
+      merge stderr→stdout</span> preexec_fn=os.setsid, <span class="com"># own
+      process group</span> ) <span class="com"># 3. Read from master fd with
+      overall timeout</span> output = bytearray() <span class="kw">try</span>:
+      <span class="kw">await</span> asyncio.wait_for(_read_pty(master_fd,
+      output), timeout=timeout) <span class="kw">except</span>
+      asyncio.TimeoutError: <span class="com"># 4. Graceful: SIGTERM → wait 2s →
+      SIGKILL</span> os.killpg(os.getpgid(proc.pid), signal.SIGTERM) <span
+      class="kw">try</span>: <span class="kw">await</span>
+      asyncio.wait_for(proc.wait(), timeout=<span class="num">2.0</span>) <span
+      class="kw">except</span> asyncio.TimeoutError:
+      os.killpg(os.getpgid(proc.pid), signal.SIGKILL) <span
+      class="kw">return</span> BashResult(exit_code=-<span class="num">1</span>,
+      output=bytes(output), timed_out=<span class="kw">True</span>) <span
+      class="kw">return</span> BashResult(exit_code=proc.returncode,
+      output=bytes(output))</code></pre> <div class="why"><strong>Tại sao quan
+      trọng:</strong> 3 trick sống còn khi LLM chạy bash: (1)
+      <strong>Preflight</strong> reject <code>npm create X</code> không có
+      <code>--yes</code> → tránh agent stuck chờ user confirm mãi; (2)
+      <strong>PTY</strong> cho tool như <code>git</code>, <code>pip</code>,
+      <code>npm</code> chạy đúng mode (khác khi chạy trong TTY vs pipe); (3)
+      <strong>Process group + graceful terminate</strong> → child process cũng
+      bị kill, tránh zombie. Timeout 600s dài nhưng 2s grace terminate trước khi
+      SIGKILL.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">import</span> asyncio, shlex, os, signal, pty INTERACTIVE =
+      (<span class="str">"npm create"</span>, <span class="str">"npx
+      create"</span>, <span class="str">"yarn create"</span>) <span
+      class="kw">async def</span> <span class="fn">safe_bash</span>(cmd: str,
+      timeout=<span class="num">600</span>): <span class="kw">for</span> m <span
+      class="kw">in</span> INTERACTIVE: <span class="kw">if</span> m <span
+      class="kw">in</span> cmd.lower() <span class="kw">and</span> <span
+      class="str">"--yes"</span> <span class="kw">not in</span> cmd: <span
+      class="kw">return</span> {<span class="str">"error"</span>: <span
+      class="fn">f</span><span class="str">"'{m}' requires --yes to run
+      non-interactively"</span>} master, slave = pty.openpty() proc = <span
+      class="kw">await</span> asyncio.create_subprocess_exec( <span
+      class="str">"bash"</span>, <span class="str">"-c"</span>, cmd,
+      stdin=slave, stdout=slave, stderr=slave, preexec_fn=os.setsid, ) <span
+      class="kw">try</span>: <span class="kw">await</span>
+      asyncio.wait_for(proc.wait(), timeout) <span class="kw">except</span>
+      asyncio.TimeoutError: os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+      <span class="kw">try</span>: <span class="kw">await</span>
+      asyncio.wait_for(proc.wait(), <span class="num">2</span>) <span
+      class="kw">except</span> asyncio.TimeoutError:
+      os.killpg(os.getpgid(proc.pid), signal.SIGKILL) <span
+      class="kw">return</span> {<span class="str">"exit"</span>:
+      proc.returncode}</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Preflight bắt được phần lớn scaffold prompts",
+        "PTY làm <code>git</code>/<code>pip</code>/<code>npm</code> output đúng format",
+        "Process group kill — zombie-free",
+        "Graceful 2s terminate cho chance process flush stdout",
+      ]}
+      cons={[
+        "INTERACTIVE_MARKERS không đầy đủ — dễ miss tool mới",
+        "PTY không chạy trên Windows (cần alternative)",
+        "Stderr merge vào stdout — mất tín hiệu tách biệt",
+        "600s timeout quá dài cho nhiều command nhanh",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://docs.python.org/3/library/pty.html">Python pty module</a>',
+        '<a href="https://docs.python.org/3/library/shlex.html">Python shlex — parsing bash tokens</a>',
+        '<a href="https://adversa.ai/blog/claude-code-security-bypass-deny-rules-disabled/">Adversa — Claude Code Deny rules silently bypassed</a> (bash safety context)',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t13"}
+    title={"T13. Ripgrep-first Glob/Grep với Python fallback"}
+    tid={"C.4"}
+    location={"<strong>Files:</strong> <code>tools/glob_tool.py</code> L65–122 · <code>tools/grep_tool.py</code> L37–83"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      shutil, subprocess, fnmatch <span class="kw">from</span> pathlib <span
+      class="kw">import</span> Path RG_BIN = shutil.which(<span
+      class="str">"rg"</span>) <span class="com"># detect at import time</span>
+      <span class="kw">async def</span> <span
+      class="fn">glob_files</span>(pattern: str, root: Path, *,
+      respect_gitignore: bool = <span class="kw">True</span>) -&gt; list[Path]:
+      <span class="kw">if</span> RG_BIN: <span class="com"># rg --files --glob
+      PATTERN — respects .gitignore by default</span> args = [RG_BIN, <span
+      class="str">"--files"</span>, <span class="str">"--glob"</span>, pattern,
+      <span class="kw">str</span>(root)] <span class="kw">if not</span>
+      respect_gitignore: args.insert(<span class="num">1</span>, <span
+      class="str">"--no-ignore"</span>) <span class="com"># Include hidden files
+      if inside a git repo</span> <span class="kw">if</span> (root / <span
+      class="str">".git"</span>).is_dir(): args.insert(<span
+      class="num">1</span>, <span class="str">"--hidden"</span>) proc = <span
+      class="kw">await</span> asyncio.create_subprocess_exec( *args,
+      stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL )
+      stdout, _ = <span class="kw">await</span> proc.communicate() <span
+      class="kw">return</span> [Path(line) <span class="kw">for</span> line
+      <span class="kw">in</span> stdout.decode().splitlines()] <span
+      class="com"># --- Python fallback ---</span> <span class="com"># Respect
+      .gitignore via pathspec library; else just glob</span> results = [] <span
+      class="kw">for</span> p <span class="kw">in</span> root.rglob(<span
+      class="str">"*"</span>): <span class="kw">if not</span> p.is_file(): <span
+      class="kw">continue</span> <span class="kw">if</span>
+      fnmatch.fnmatch(p.name, pattern) <span class="kw">or</span>
+      fnmatch.fnmatch(<span class="kw">str</span>(p), pattern): <span
+      class="kw">if</span> respect_gitignore <span class="kw">and</span>
+      _is_gitignored(p, root): <span class="kw">continue</span>
+      results.append(p) <span class="kw">return</span> results <span
+      class="kw">async def</span> <span class="fn">grep_content</span>(pattern:
+      str, root: Path, *, case_insensitive=<span class="kw">False</span>) -&gt;
+      list[GrepMatch]: <span class="kw">if</span> RG_BIN: args = [RG_BIN, <span
+      class="str">"--json"</span>, <span class="str">"--with-filename"</span>,
+      pattern, <span class="kw">str</span>(root)] <span class="kw">if</span>
+      case_insensitive: args.append(<span class="str">"-i"</span>) ... <span
+      class="kw">else</span>: <span class="com"># Python fallback with
+      re.compile()</span> regex = re.compile(pattern, re.IGNORECASE <span
+      class="kw">if</span> case_insensitive <span class="kw">else</span> <span
+      class="num">0</span>) ...</code></pre> <div class="why"><strong>Tại sao
+      quan trọng:</strong> Ripgrep nhanh hơn Python ~10-100x, lại tôn trọng
+      <code>.gitignore</code> mặc định. OpenHarness detect <code>rg</code> tại
+      import time (<code>shutil.which</code>) — có thì dùng, không có fallback
+      Python. Special: trong git repo thì <code>--hidden</code> tự động (để tìm
+      <code>.github/</code>, <code>.vscode/</code>). Python fallback dùng
+      <code>fnmatch</code> + <code>rglob</code> — chậm nhưng không đòi hỏi
+      dependency.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">import</span> shutil, asyncio <span class="kw">from</span>
+      pathlib <span class="kw">import</span> Path RG = shutil.which(<span
+      class="str">"rg"</span>) <span class="kw">async def</span> <span
+      class="fn">fast_glob</span>(pattern: str, root: Path): <span
+      class="kw">if</span> RG: args = [RG, <span class="str">"--files"</span>,
+      <span class="str">"--glob"</span>, pattern, <span
+      class="kw">str</span>(root)] <span class="kw">if</span> (root/<span
+      class="str">".git"</span>).is_dir(): args.insert(<span
+      class="num">1</span>, <span class="str">"--hidden"</span>) proc = <span
+      class="kw">await</span> asyncio.create_subprocess_exec(*args,
+      stdout=asyncio.subprocess.PIPE) out, _ = <span class="kw">await</span>
+      proc.communicate() <span class="kw">return</span> [Path(l) <span
+      class="kw">for</span> l <span class="kw">in</span>
+      out.decode().splitlines()] <span class="com"># fallback</span> <span
+      class="kw">import</span> fnmatch <span class="kw">return</span> [p <span
+      class="kw">for</span> p <span class="kw">in</span> root.rglob(<span
+      class="str">"*"</span>) <span class="kw">if</span> p.is_file() <span
+      class="kw">and</span> fnmatch.fnmatch(p.name, pattern)]</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "10-100x nhanh hơn Python glob trên repo lớn",
+        ".gitignore respect out-of-box",
+        "Graceful fallback khi không có rg",
+        "JSON output dễ parse",
+      ]}
+      cons={[
+        "Hidden file behavior khác giữa rg và Python fallback (inconsistent)",
+        "Không có rg-specific features trong Python fallback (PCRE2, multiline)",
+        "Subprocess overhead cho query nhỏ",
+        "Path với space phải quote cẩn thận",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://github.com/BurntSushi/ripgrep">BurntSushi/ripgrep — README</a>',
+        '<a href="https://docs.python.org/3/library/pathlib.html">Python pathlib — rglob</a>',
+        '<a href="https://martinfowler.com/articles/harness-engineering.html">Martin Fowler — Harness engineering (tool design patterns)</a>',
+      ]}
+    />
+  </Technique>
+</Section>

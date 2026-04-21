@@ -1,0 +1,282 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+import DeepDiveLink from '../../../../components/DeepDiveLink.astro';
+
+const code1 = `\
+export async function discoverPluginTools(configDirs: string[]) {
+  const tools: Tool[] = []
+
+  for (const dir of configDirs) {
+    // Glob scan: cả "tool/" và "tools/" folder
+    const files = await glob("{tool,tools}/*.{js,ts,mjs}", {
+      cwd:      dir,
+      absolute: true,
+    })
+
+    for (const file of files) {
+      try {
+        const mod     = await import(file)
+        const toolDef = mod.default ?? mod.tool
+
+        if (!toolDef) {
+          log.warn(\`Plugin file \${file} has no default export or .tool export — skipping\`)
+          continue
+        }
+
+        // Wrap với fromPlugin: auto-truncate + sandboxed permission
+        tools.push(Tool.fromPlugin(toolDef, { source: file }))
+      } catch (err) {
+        // Silent fail per plugin — 1 bad plugin không block others
+        log.warn(\`Plugin tool load failed: \${file}\`, err)
+      }
+    }
+  }
+
+  return tools
+}`;
+
+const code2 = `\
+// Plugin tool format: default export object với name + description + execute
+export default {
+  name: "query_db",
+  description: "Query the internal PostgreSQL database. Use SQL SELECT only.",
+
+  parameters: {
+    type: "object",
+    properties: {
+      sql: { type: "string", description: "SQL SELECT query" },
+    },
+    required: ["sql"],
+  },
+
+  async execute(args: { sql: string }) {
+    // Tool author implement business logic
+    const rows = await db.query(args.sql)
+    return JSON.stringify(rows, null, 2)
+    // ↑ sẽ bị wrap với truncate tự động
+  },
+}`;
+
+const code3 = `\
+import { glob } from "fast-glob"
+import { pathToFileURL } from "node:url"
+
+async function loadUserTools(pluginDirs: string[]): Promise<Tool[]> {
+  const out: Tool[] = []
+
+  for (const dir of pluginDirs) {
+    const files = await glob(["tool/*.{js,ts}", "tools/*.{js,ts}"], { cwd: dir })
+
+    for (const f of files) {
+      try {
+        const mod = await import(pathToFileURL(f).href)
+        const def = mod.default
+        if (def?.name && def?.execute) {
+          out.push(wrapTool(def))  // auto-apply truncate / perm / trace
+        }
+      } catch (err) {
+        console.warn(\`Failed to load plugin: \${f}\`, err)
+      }
+    }
+  }
+
+  return out
+}`;
+
+const code4 = `\
+// Minimal plugin discovery system
+import { glob } from "fast-glob"
+
+interface PluginTool {
+  name:        string
+  description: string
+  parameters:  Record<string, unknown>  // JSON Schema object
+  execute:     (args: unknown) => Promise<string>
+}
+
+async function discoverTools(baseDirs: string[]): Promise<PluginTool[]> {
+  const tools: PluginTool[] = []
+
+  for (const dir of baseDirs) {
+    // Convention: tool/ hoặc tools/ folder
+    const files = await glob("{tool,tools}/*.{js,mjs,ts}", {
+      cwd:      dir,
+      absolute: true,
+    })
+
+    for (const file of files) {
+      try {
+        const mod = await import(file)
+        const def = mod.default ?? mod.tool
+
+        // Validate minimal shape
+        if (!def?.name || !def?.execute || typeof def.execute !== "function") {
+          console.warn(\`[plugin] \${file}: invalid shape, skipping\`)
+          continue
+        }
+
+        // Wrap với safety: truncate output
+        tools.push({
+          ...def,
+          execute: async (args: unknown) => {
+            const raw = await def.execute(args)
+            return typeof raw === "string" ? truncate(raw) : JSON.stringify(raw)
+          },
+        })
+
+        console.log(\`[plugin] Loaded tool: \${def.name} from \${file}\`)
+      } catch (err) {
+        console.warn(\`[plugin] Failed to load \${file}:\`, err)
+      }
+    }
+  }
+
+  return tools
+}`;
+---
+<ReportLayout
+  title="T20 — Plugin tool dynamic discovery | opencode"
+  description="Phân tích sâu kỹ thuật glob scan folder convention để discover và load user-defined plugin tools tại runtime — extensibility mà không cần fork repo hay PR core."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T20 — Plugin tool dynamic discovery"
+        subtitle="Glob scan <code>&#123;tool,tools&#125;/*.&#123;js,ts&#125;</code> trong config directories, dynamic import, wrap với safety wrapper — user/org thêm tool riêng (Slack, Jira, DB) mà không fork core."
+        meta={[
+          { label: 'Nhóm',  value: 'C — Tool Design' },
+          { label: 'File',  value: '<code>tool/registry.ts</code> · Lines 152–173' },
+          { label: 'ID',    value: 'C.8 / T20' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Tool Design">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Hard-code tool list trong core = mỗi lần muốn thêm tool tích hợp Slack, Jira, internal database, hoặc custom workflow → phải PR core repo hoặc fork. Discovery pattern giải quyết: scan folder convention quen thuộc (<code>tool/</code>, <code>tools/</code>), dynamic import module bất kỳ, wrap với safety wrapper (truncate, permission). User hoặc org có thể inject tool riêng vào bất kỳ opencode installation nào.
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>Convention over configuration:</strong> Pattern này quen thuộc từ Next.js pages/, VSCode extensions, Vim plugins. Developer biết ngay "đặt file vào đây, tool sẽ được load" — không cần đọc config documentation.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Discovery + dynamic import" />
+        <CodeBlock caption="tool/registry.ts — discoverPluginTools" lang="typescript" code={code1} />
+
+        <Diagram>{`
+configDirs: [~/.opencode/, ./.opencode/]
+    │
+    ▼
+glob("{tool,tools}/*.{js,ts,mjs}")
+    │
+    ├── ~/.opencode/tools/slack.ts
+    ├── ~/.opencode/tools/jira.ts
+    └── ./.opencode/tool/my-db.ts
+    │
+    ▼
+dynamic import (each file)
+    │
+    ▼
+Tool.fromPlugin(toolDef, { source: file })
+    │  ← wrap với:
+    │  ← truncate (T15)
+    │  ← permission check (T24)
+    │  ← OTel span (T14)
+    ▼
+[SlackTool, JiraTool, MyDbTool]  ← available to model
+        `}</Diagram>
+
+        <Subheading level="h3" text="Plugin tool format đơn giản" />
+        <CodeBlock caption="~/.opencode/tools/my-db.ts — minimal plugin tool" lang="typescript" code={code2} />
+
+        <Subheading level="h3" text="Generic plugin loader" />
+        <CodeBlock lang="typescript" code={code3} />
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T14 (Effect lazy init):</strong> <code>Tool.fromPlugin</code> wrap plugin tool với cùng mechanism như built-in tools — truncate + OTel được gắn tự động dù tool là plugin hay core.</li>
+          <li><strong>T15 (Output truncation):</strong> Plugin tool output được truncate qua <code>fromPlugin</code> wrapper — plugin author không cần implement truncation.</li>
+          <li><strong>T24–T25 (Permission):</strong> Plugin tool được đặt trong sandbox permission riêng — <code>fromPlugin</code> tag source file, permission system có thể apply rule riêng cho plugin tools.</li>
+          <li><strong>T27 (System prompt):</strong> Model chỉ thấy plugin tool trong skill list nếu permission cho phép — <code>renderSkills(ctx.skills, &#123; permissionGate: ctx.perm &#125;)</code> filter ra plugin tools không được phép.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. Security: plugin chạy với process quyền" />
+        <p>
+          Plugin là arbitrary JavaScript chạy với quyền của opencode process. Malicious plugin có thể exfiltrate data, modify files ngoài permission scope, hoặc phá hoại session state.
+        </p>
+        <Callout type="warn">
+          <strong>Mitigation quan trọng:</strong> Chỉ load plugin từ trusted directories (<code>~/.opencode/</code>, <code>./.opencode/</code>). Không load plugin từ <code>node_modules</code> hay arbitrary path. Cần user confirm khi install plugin mới từ external source.
+        </Callout>
+
+        <Subheading level="h3" text="2. Silent load failure" />
+        <p>
+          <code>try/catch</code> với <code>log.warn</code> đảm bảo 1 plugin lỗi không block plugin khác. Nhưng user có thể không biết tool của mình không được load. Cần UI notification rõ hơn.
+        </p>
+
+        <Subheading level="h3" text="3. Type safety yếu" />
+        <p>
+          Plugin format chỉ được validate runtime — nếu plugin thiếu <code>execute</code> hoặc parameters format sai, chỉ biết lúc load hoặc khi model gọi tool.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Plugin/Extension system', 'Convention', 'Safety wrapper']}
+          rows={[
+            ['opencode', 'Glob scan tool/ folder, dynamic import', '✅ glob tool/*.ts', '✅ fromPlugin wrap'],
+            ['Claude Code', 'MCP (Model Context Protocol)', '✅ config-based', '✅ MCP protocol'],
+            ['OpenHarness', 'MCP + Python plugin', '✅', '⚠️ process-level'],
+            ['Aider', 'Không có plugin system', '❌', '❌'],
+            ['Cline', 'MCP tools', '✅ config-based', '✅ MCP protocol'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript" code={code4} />
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://opencode.ai/docs/agents/">OpenCode — Agents &amp; plugin docs</a>',
+            '<a href="https://dev.to/apssouza22/building-a-production-ready-ai-agent-harness-2570">DEV — Building a Production-Ready AI Agent Harness</a>',
+            '<a href="https://martinfowler.com/articles/harness-engineering.html">Martin Fowler — Harness engineering for coding agents</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

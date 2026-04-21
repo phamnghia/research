@@ -1,0 +1,302 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T28 — AGENTS.md / CLAUDE.md cascading (findUp) | opencode"
+  description="Phân tích sâu kỹ thuật findUp từ cwd lên worktree root để tìm file instruction (AGENTS.md, CLAUDE.md, CONTEXT.md) — first-match-wins + claims tracking ngăn re-attach cùng file trong session."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T28 — AGENTS.md / CLAUDE.md cascading (findUp)"
+        subtitle="Walk từ <code>cwd</code> lên đến <code>worktree root</code> tìm <code>AGENTS.md → CLAUDE.md → CONTEXT.md</code>. First-match-wins. Claims tracking <code>attachedFiles: Set&lt;string&gt;</code> ngăn re-attach trong session dài."
+        meta={[
+          { label: 'Nhóm',  value: 'F — System Prompt' },
+          { label: 'File',  value: '<code>session/instruction.ts</code> · Lines 52–62, 120–228' },
+          { label: 'ID',    value: 'F.2 / T28' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="System Prompt">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Trong monorepo nhiều package, mỗi package có thể có quy tắc coding riêng. Nếu đọc tất cả AGENTS.md từ cwd lên tận home directory → conflict rules + token bloat. First-match-wins từ cwd lên worktree root (không vượt qua boundary của git repo) cho phép package-level rules override root-level rules — rule gần scope nhất thắng, giống CSS specificity. Claims tracking ngăn model nhận lại cùng instruction block nhiều lần trong session dài (khi cwd thay đổi hoặc user hỏi nhiều message liên tiếp).
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>3 filename candidates:</strong> <code>AGENTS.md</code> (OpenAI convention), <code>CLAUDE.md</code> (Anthropic convention), <code>CONTEXT.md</code> (generic). Thứ tự ưu tiên rõ ràng trong array — user dùng convention quen thuộc, opencode đều hỗ trợ.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="findProjectInstructions() — findUp + boundary check" />
+        <CodeBlock caption="session/instruction.ts — findProjectInstructions()" lang="typescript"><Fragment is:raw>{`
+const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md", "CONTEXT.md"]
+
+/**
+ * Walk up từ cwd đến worktree root, tìm file instruction đầu tiên.
+ * Boundary: không vượt quá worktree root (tránh đọc ~/CLAUDE.md của user).
+ */
+export async function findProjectInstructions(
+  cwd:      string,
+  worktree: string,
+): Promise<{ path: string; content: string } | null> {
+  let dir       = path.resolve(cwd)
+  const stop    = path.resolve(worktree)
+
+  while (dir.startsWith(stop)) {
+    for (const name of INSTRUCTION_FILES) {
+      const candidate = path.join(dir, name)
+      if (await fs.pathExists(candidate)) {
+        return {
+          path:    candidate,
+          content: await fs.readFile(candidate, "utf8"),
+        }
+      }
+    }
+
+    // Bước lên 1 level
+    const parent = path.dirname(dir)
+    if (parent === dir) break   // đã reach filesystem root
+    dir = parent
+  }
+
+  return null   // không tìm thấy file instruction nào
+}
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="attachInstructionIfNew() — claims tracking" />
+        <CodeBlock caption="session/instruction.ts — attachInstructionIfNew()" lang="typescript"><Fragment is:raw>{`
+// Claims tracking: per-session Set, ngăn re-attach cùng file
+const attachedFiles = new Set<string>()
+
+export function attachInstructionIfNew(
+  file: { path: string; content: string },
+): string | null {
+  // Nếu file đã được attach trong session này → skip
+  if (attachedFiles.has(file.path)) return null
+
+  // Mark as attached
+  attachedFiles.add(file.path)
+
+  // Trả về XML block để inject vào system prompt
+  return `<project-instruction src="${file.path}">
+${file.content}
+</project-instruction>`
+}
+
+// Caller (buildSystem):
+const instructionFile = await findProjectInstructions(ctx.cwd, ctx.worktree)
+const projectBlock    = instructionFile
+  ? (attachInstructionIfNew(instructionFile) ?? "")
+  : ""
+`}</Fragment></CodeBlock>
+
+        <Diagram>{`
+cwd = "/Users/nghia/monorepo/packages/api"
+worktree = "/Users/nghia/monorepo"
+                │
+                ▼
+findProjectInstructions(cwd, worktree)
+                │
+    ┌───────────────────────────────────────────┐
+    │  dir = /Users/nghia/monorepo/packages/api │
+    │                                           │
+    │  Try: AGENTS.md   → not found             │
+    │  Try: CLAUDE.md   → not found             │
+    │  Try: CONTEXT.md  → not found             │
+    │                                           │
+    │  dir = /Users/nghia/monorepo/packages     │
+    │                                           │
+    │  Try: AGENTS.md   → not found             │
+    │  Try: CLAUDE.md   → FOUND ✓               │
+    │  → return { path, content }               │
+    └───────────────────────────────────────────┘
+                │
+                ▼
+attachInstructionIfNew({ path, content })
+                │
+    ┌───────────────────────────────────────────┐
+    │  attachedFiles.has(path)?                 │
+    │                                           │
+    │  NO (first call) → add to Set             │
+    │  → return <project-instruction ...>       │
+    │                                           │
+    │  YES (subsequent calls in same session)   │
+    │  → return null (skip, save tokens)        │
+    └───────────────────────────────────────────┘
+                │
+                ▼
+    buildSystem() nhận projectBlock
+    inject vào cuối system prompt array
+        `}</Diagram>
+
+        <Subheading level="h3" text="Boundary: worktree root — không vượt ra ngoài repo" />
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+// Boundary check: dir.startsWith(stop)
+// stop = worktree root (git repo root)
+
+// SAFE: chỉ tìm trong repo
+dir = "/Users/nghia/monorepo/packages/api"
+stop = "/Users/nghia/monorepo"
+→ "/Users/nghia/monorepo/packages/api".startsWith("/Users/nghia/monorepo") === true ✓
+
+// STOP: không đọc file ngoài repo
+dir = "/Users/nghia"   (sau khi bước ra khỏi worktree)
+stop = "/Users/nghia/monorepo"
+→ "/Users/nghia".startsWith("/Users/nghia/monorepo") === false → exit loop
+
+// Tránh: ~/CLAUDE.md (global user config) leak vào project context
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T27 (Model-specific dispatch):</strong> T28 cung cấp <code>projectBlock</code> — một trong 4 parts của array <code>buildSystem()</code> returns. T27 kiểm soát parts trước (template, env, skills), T28 bổ sung project-specific instructions ở phần cuối.</li>
+          <li><strong>T10 (Cache-aware prompt structure):</strong> Project instruction block được đặt sau env block trong array. Template (static) → cache hit. Env (dynamic per call) → cache miss từ vị trí này. Project instruction thay đổi theo cwd → cần đặt đúng vị trí trong array để tối ưu cache hit cho template trước nó.</li>
+          <li><strong>T7/T8 (Context management):</strong> Project instruction tiêu tốn tokens — đặc biệt với CLAUDE.md dài. Claims tracking + single-file strategy (first-match-wins) giữ instruction block nhỏ, ít ảnh hưởng đến token budget per-call.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. User muốn stack nhiều instruction files" />
+        <p>
+          First-match-wins chỉ trả về 1 file — nếu user muốn combine root <code>AGENTS.md</code> (team-wide rules) với package-level <code>CLAUDE.md</code> (package-specific), không được. Phải duplicate nội dung hoặc dùng <code>@include</code> convention tự chế. Đây là trade-off có chủ ý: đơn giản vs linh hoạt.
+        </p>
+
+        <Subheading level="h3" text="2. attachedFiles không reset đúng lúc" />
+        <p>
+          <code>attachedFiles</code> là module-level Set — tồn tại suốt lifetime của process. Nếu user mở session mới trong cùng process (không restart), Set không được clear → instruction không được re-attach cho session mới. Cần scope Set theo session ID, không phải module.
+        </p>
+        <Callout type="warn">
+          <strong>Session isolation:</strong> Module-level state là anti-pattern cho multi-session server. opencode single-user nên ổn, nhưng nếu serve multiple users cần move <code>attachedFiles</code> vào session object.
+        </Callout>
+
+        <Subheading level="h3" text="3. Tên file typo → miss instruction" />
+        <p>
+          Chỉ 3 tên được check: <code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>CONTEXT.md</code>. User có file <code>agent.md</code> (lowercase) hay <code>AGENT.md</code> (singular) → không được đọc. Không có case-insensitive matching, không có custom filename config.
+        </p>
+
+        <Subheading level="h3" text="4. Symlink và path resolution" />
+        <p>
+          <code>dir.startsWith(stop)</code> là string comparison — nếu <code>worktree</code> là symlink và <code>cwd</code> là real path (hay ngược lại), startsWith có thể fail. Cần normalize cả hai với <code>fs.realpath()</code> trước khi so sánh.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Instruction file discovery', 'Multiple files', 'Boundary']}
+          rows={[
+            ['opencode', 'findUp cwd→worktree, first-match', '❌ single file only', '✅ worktree root'],
+            ['Claude Code', 'CLAUDE.md + parent dirs + ~/.claude/', '✅ stack nhiều levels', '✅ home dir boundary'],
+            ['Aider', '.aider.conf.yml + --read flag', '✅ --read multiple', '❌ no boundary'],
+            ['Cline', 'Single .clinerules file', '❌', '❌'],
+            ['Cursor', '.cursorrules (root) + notepads', '⚠️ partial', '✅'],
+          ]}
+        />
+
+        <Callout type="info">
+          <strong>Claude Code so sánh:</strong> Claude Code stack tất cả CLAUDE.md từ cwd lên home — subdir → parent → repo root → <code>~/.claude/CLAUDE.md</code> (global). opencode chỉ lấy 1 file gần nhất — đơn giản hơn nhưng kém linh hoạt hơn cho monorepo phức tạp.
+        </Callout>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+import path from "path"
+import fs   from "fs/promises"
+
+const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md", "CONTEXT.md"]
+
+// 1. findUp — walk from cwd to repo root
+async function findProjectInstructions(cwd: string, repoRoot: string) {
+  // Normalize to real paths to handle symlinks
+  let dir  = await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd))
+  const stop = await fs.realpath(path.resolve(repoRoot)).catch(() => path.resolve(repoRoot))
+
+  while (dir.startsWith(stop)) {
+    for (const name of INSTRUCTION_FILES) {
+      try {
+        const candidate = path.join(dir, name)
+        const content   = await fs.readFile(candidate, "utf8")
+        return { path: candidate, content }
+      } catch {
+        // not found, continue
+      }
+    }
+
+    const parent = path.dirname(dir)
+    if (parent === dir) break   // filesystem root
+    dir = parent
+  }
+
+  return null
+}
+
+// 2. Claims tracking — per SESSION (not module-level)
+class InstructionTracker {
+  private attached = new Set<string>()
+
+  attach(file: { path: string; content: string }): string | null {
+    if (this.attached.has(file.path)) return null
+    this.attached.add(file.path)
+    return \`<project-instruction src="\${file.path}">\n\${file.content}\n</project-instruction>\`
+  }
+
+  reset() {
+    this.attached.clear()
+  }
+}
+
+// 3. Usage in buildSystem
+async function buildSystem(model: string, ctx: Ctx, tracker: InstructionTracker) {
+  const instructionFile = await findProjectInstructions(ctx.cwd, ctx.worktree)
+  const projectBlock    = instructionFile
+    ? (tracker.attach(instructionFile) ?? "")
+    : ""
+
+  return [getTemplate(model), buildEnvBlock(ctx), buildSkillsBlock(ctx), projectBlock]
+    .filter(Boolean)
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://agents.md/">agents.md — Official AGENTS.md format specification</a>',
+            '<a href="https://medium.com/data-science-collective/the-complete-guide-to-ai-agent-memory-files-claude-md-agents-md-and-beyond-49ea0df5c5a9">Medium — The Complete Guide to AI Agent Memory Files</a>',
+            '<a href="https://www.augmentcode.com/guides/how-to-build-agents-md">Augment Code — How to Build Your AGENTS.md</a>',
+            '<a href="https://www.anthropic.com/engineering/claude-code-memory">Anthropic — How Claude Code uses memory files</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

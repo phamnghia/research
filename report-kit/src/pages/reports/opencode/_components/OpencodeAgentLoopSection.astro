@@ -1,0 +1,463 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import CodeBlock from "../../../../components/CodeBlock.astro";
+import WhyImportant from "../../../../components/WhyImportant.astro";
+import DeepDiveLink from "../../../../components/DeepDiveLink.astro";
+
+const __code_OpencodeAgentLoopSection_1 = `        <span class="kw">while</span> (<span class="kw">true</span>) { <span
+        class="kw">yield</span>* status.set(sessionID, { type: <span
+        class="str">"busy"</span> }) <span class="kw">yield</span>*
+        slog.info(<span class="str">"loop"</span>, { step }) <span
+        class="kw">let</span> msgs = <span class="kw">yield</span>*
+        MessageV2.filterCompactedEffect(sessionID) <span class="com">// Detect
+        finish condition — check AFTER tool execution, not before</span> <span
+        class="kw">if</span> (lastAssistant?.finish &amp;&amp; ![<span
+        class="str">"tool-calls"</span>].includes(lastAssistant.finish)
+        &amp;&amp; !hasToolCalls &amp;&amp; lastUser.id &lt; lastAssistant.id) {
+        <span class="kw">yield</span>* slog.info(<span class="str">"exiting
+        loop"</span>) <span class="kw">break</span> } step++ <span
+        class="kw">const</span> result = <span class="kw">yield</span>*
+        handle.process(streamInput) <span class="kw">if</span> (result === <span
+        class="str">"stop"</span>) <span class="kw">return</span> <span
+        class="str">"break"</span> <span class="kw">if</span> (result === <span
+        class="str">"compact"</span>) <span class="kw">yield</span>*
+        compaction.create(...) }
+      `;
+const __code_OpencodeAgentLoopSection_2 = `        <span class="com">// Naive (wrong):</span> <span class="kw">while</span>
+        (<span class="kw">true</span>) { <span class="kw">const</span> resp =
+        <span class="kw">await</span> llm.call(messages) <span
+        class="kw">if</span> (resp.finishReason === <span
+        class="str">"stop"</span>) <span class="kw">break</span> <span
+        class="com">// may exit with unfinished tool_calls!</span> <span
+        class="kw">for</span> (<span class="kw">const</span> tc <span
+        class="kw">of</span> resp.toolCalls) messages.push(executeToolCall(tc))
+        } <span class="com">// Opencode-style (correct):</span> <span
+        class="kw">while</span> (<span class="kw">true</span>) { <span
+        class="kw">const</span> resp = <span class="kw">await</span>
+        llm.call(messages) <span class="kw">const</span> hasToolCalls =
+        resp.toolCalls.length &gt; 0 <span class="kw">if</span> (hasToolCalls) {
+        <span class="kw">for</span> (<span class="kw">const</span> tc <span
+        class="kw">of</span> resp.toolCalls) messages.push(executeToolCall(tc))
+        <span class="kw">continue</span> <span class="com">// always loop again
+        after executing tools</span> } <span class="kw">if</span> ([<span
+        class="str">"stop"</span>, <span
+        class="str">"end_turn"</span>].includes(resp.finishReason)) <span
+        class="kw">break</span> }
+      `;
+const __code_OpencodeAgentLoopSection_3 = `        <span class="kw">const</span> handleEvent = Effect.fnUntraced(<span
+        class="kw">function</span>* (value: StreamEvent) { <span
+        class="kw">switch</span> (value.type) { <span class="kw">case</span>
+        <span class="str">"reasoning-start"</span>: ctx.reasoningMap[value.id] =
+        { id: PartID.ascending(), text: <span class="str">""</span>, time: {
+        start: Date.now() } } <span class="kw">yield</span>*
+        session.updatePart(ctx.reasoningMap[value.id]); <span
+        class="kw">return</span> <span class="kw">case</span> <span
+        class="str">"reasoning-delta"</span>: ctx.reasoningMap[value.id].text +=
+        value.text <span class="kw">yield</span>* session.updatePartDelta({
+        ...<span class="com">/* delta */</span>, delta: value.text }); <span
+        class="kw">return</span> <span class="kw">case</span> <span
+        class="str">"tool-input-start"</span>: <span class="kw">const</span>
+        part = <span class="kw">yield</span>* session.updatePart({ status: <span
+        class="str">"pending"</span>, input: {} }) ctx.toolcalls[value.id] = {
+        done: <span class="kw">yield</span>* Deferred.make&lt;<span
+        class="kw">void</span>&gt;(), partID: part.id } <span
+        class="kw">return</span> <span class="kw">case</span> <span
+        class="str">"tool-call"</span>: <span class="kw">yield</span>*
+        updateToolCall(value.toolCallId, (m) =&gt; ({ ...m, status: <span
+        class="str">"running"</span>, input: value.input })) <span
+        class="com">// Doom loop check — see T6</span> <span
+        class="kw">return</span> } })
+      `;
+const __code_OpencodeAgentLoopSection_4 = `        <span class="com">// session/processor.ts:544-554</span> <span
+        class="kw">const</span> stream = llm.stream(streamInput) <span
+        class="kw">yield</span>* stream.pipe( Stream.tap((event) =&gt;
+        handleEvent(event)), Stream.takeUntil(() =&gt; ctx.needsCompaction),
+        Stream.runDrain, )
+      `;
+const __code_OpencodeAgentLoopSection_5 = `        <span class="com">// Demultiplex stream events by type:</span> <span
+        class="kw">async function</span> processStream(stream:
+        AsyncIterable&lt;Event&gt;, ctx: Context) { <span class="kw">for</span>
+        <span class="kw">await</span> (<span class="kw">const</span> ev <span
+        class="kw">of</span> stream) { <span class="kw">switch</span> (ev.type)
+        { <span class="kw">case</span> <span class="str">"text-delta"</span>:
+        ctx.onText?.(ev.delta); <span class="kw">break</span> <span
+        class="kw">case</span> <span class="str">"tool-input-start"</span>:
+        ctx.pendingTools.set(ev.id, new Deferred()); <span
+        class="kw">break</span> <span class="kw">case</span> <span
+        class="str">"tool-call"</span>: ctx.onToolCall?.(ev); <span
+        class="kw">break</span> <span class="kw">case</span> <span
+        class="str">"finish"</span>: ctx.finish = ev.finishReason; <span
+        class="kw">break</span> } <span class="kw">if</span> (ctx.shouldStop)
+        <span class="kw">break</span> <span class="com">// cooperative
+        cancel</span> } }
+      `;
+const __code_OpencodeAgentLoopSection_6 = `        <span class="kw">type</span> ToolCall = { partID:
+        MessageV2.ToolPart[<span class="str">"id"</span>] messageID:
+        MessageV2.ToolPart[<span class="str">"messageID"</span>] sessionID:
+        MessageV2.ToolPart[<span class="str">"sessionID"</span>] done:
+        Deferred.Deferred&lt;<span class="kw">void</span>&gt; <span
+        class="com">// ← sync point</span> } ctx.toolcalls: Record&lt;<span
+        class="kw">string</span>, ToolCall&gt; = {} <span class="com">// On
+        tool-input-start event:</span> ctx.toolcalls[value.id] = { done: <span
+        class="kw">yield</span>* Deferred.make&lt;<span
+        class="kw">void</span>&gt;(), partID: part.id } <span class="com">//
+        Tool executor completes it:</span> <span class="kw">yield</span>*
+        Deferred.succeed(done, <span class="kw">undefined</span>) <span
+        class="com">// Cleanup waits for all in-flight tools (but with
+        timeout):</span> <span class="kw">yield</span>* Effect.forEach(
+        Object.values(ctx.toolcalls), (call) =&gt;
+        Deferred.await(call.done).pipe(Effect.timeout(<span class="str">"250
+        millis"</span>), Effect.ignore), { concurrency: <span
+        class="str">"unbounded"</span> }, )
+      `;
+const __code_OpencodeAgentLoopSection_7 = `        <span class="com">// Using native Promise as deferred:</span> <span
+        class="kw">const</span> pendingTools = <span class="kw">new</span>
+        Map&lt;string, { resolve: () =&gt; <span class="kw">void</span>;
+        promise: Promise&lt;<span class="kw">void</span>&gt; }&gt;() <span
+        class="kw">function</span> trackToolCall(id: string) { <span
+        class="kw">let</span> resolve!: () =&gt; <span class="kw">void</span>
+        <span class="kw">const</span> promise = <span class="kw">new</span>
+        Promise&lt;<span class="kw">void</span>&gt;((r) =&gt; { resolve = r })
+        pendingTools.set(id, { resolve, promise }) } <span class="kw">async
+        function</span> waitForAllTools(timeoutMs = 250) { <span
+        class="kw">const</span> promises = [...pendingTools.values()].map((p)
+        =&gt; Promise.race([p.promise, <span class="kw">new</span> Promise((res)
+        =&gt; setTimeout(res, timeoutMs))]) ) <span class="kw">await</span>
+        Promise.all(promises) pendingTools.clear() }
+      `;
+const __code_OpencodeAgentLoopSection_8 = `        <span class="kw">return</span> <span class="kw">yield</span>*
+        Effect.gen(<span class="kw">function</span>* () { <span
+        class="kw">yield</span>* Effect.gen(<span class="kw">function</span>* ()
+        { ctx.currentText = <span class="kw">undefined</span> ctx.reasoningMap =
+        {} <span class="kw">const</span> stream = llm.stream(streamInput) <span
+        class="kw">yield</span>* stream.pipe( Stream.tap((event) =&gt;
+        handleEvent(event)), Stream.takeUntil(() =&gt; ctx.needsCompaction),
+        Stream.runDrain, ) }).pipe( Effect.onInterrupt(() =&gt; Effect.gen(<span
+        class="kw">function</span>* () { aborted = <span class="kw">true</span>
+        <span class="kw">if</span> (!ctx.assistantMessage.error) { <span
+        class="kw">yield</span>* halt(<span class="kw">new</span>
+        DOMException(<span class="str">"Aborted"</span>, <span
+        class="str">"AbortError"</span>)) } })), Effect.catchCauseIf( (cause)
+        =&gt; !Cause.hasInterruptsOnly(cause), (cause) =&gt;
+        Effect.fail(Cause.squash(cause)), ), Effect.retry(...),
+        Effect.catch(halt), Effect.ensuring(cleanup()), <span class="com">// ←
+        always runs</span> ) })
+      `;
+const __code_OpencodeAgentLoopSection_9 = `        <span class="com">// Vanilla JS với try/finally:</span> <span
+        class="kw">async function</span> streamWithCleanup(signal: AbortSignal)
+        { <span class="kw">const</span> ctx = createContext() <span
+        class="kw">try</span> { <span class="kw">for</span> <span
+        class="kw">await</span> (<span class="kw">const</span> ev <span
+        class="kw">of</span> llm.stream({ signal })) { <span
+        class="kw">if</span> (signal.aborted) <span class="kw">throw new</span>
+        DOMException(<span class="str">"Aborted"</span>, <span
+        class="str">"AbortError"</span>) <span class="kw">await</span>
+        handleEvent(ev, ctx) } } <span class="kw">catch</span> (err) { <span
+        class="kw">if</span> ((err <span class="kw">as</span> Error).name ===
+        <span class="str">"AbortError"</span>) ctx.markAborted() <span
+        class="kw">else throw</span> err } <span class="kw">finally</span> {
+        <span class="kw">await</span> ctx.finalizeAllPendingTools() <span
+        class="com">// always runs</span> } }
+      `;
+const __code_OpencodeAgentLoopSection_10 = `        <span class="kw">if</span> (step &gt; 1 &amp;&amp; lastFinished) { <span
+        class="kw">for</span> (<span class="kw">const</span> m <span
+        class="kw">of</span> msgs) { <span class="kw">if</span> (m.info.role !==
+        <span class="str">"user"</span> || m.info.id &lt;= lastFinished.id)
+        <span class="kw">continue</span> <span class="kw">for</span> (<span
+        class="kw">const</span> p <span class="kw">of</span> m.parts) { <span
+        class="kw">if</span> (p.type !== <span class="str">"text"</span> ||
+        p.ignored || p.synthetic) <span class="kw">continue</span> <span
+        class="kw">if</span> (!p.text.trim()) <span class="kw">continue</span>
+        p.text = [ <span class="str">"&lt;system-reminder&gt;"</span>, <span
+        class="str">"The user sent the following message:"</span>, p.text, <span
+        class="str">""</span>, <span class="str">"Please address this message
+        and continue with your tasks."</span>, <span
+        class="str">"&lt;/system-reminder&gt;"</span>, ].join(<span
+        class="str">"\\n"</span>) } } }
+      `;
+const __code_OpencodeAgentLoopSection_11 = `        <span class="kw">function</span> markMidTurnUserMessages(messages:
+        Message[], lastAssistantId: string, step: number) { <span
+        class="kw">if</span> (step &lt;= 1) <span class="kw">return</span>
+        messages <span class="kw">return</span> messages.map((m) =&gt; { <span
+        class="kw">if</span> (m.role !== <span class="str">"user"</span> || m.id
+        &lt;= lastAssistantId) <span class="kw">return</span> m <span
+        class="kw">return</span> { ...m, content: <span
+        class="str">\`&lt;system-reminder&gt;\\nNew message:
+        </span>\${m.content}<span class="str">\\nPlease
+        address.\\n&lt;/system-reminder&gt;\`</span>, } }) }
+      `;
+const __code_OpencodeAgentLoopSection_12 = `        <span class="com">// Khi thấy tool-call event:</span> <span
+        class="kw">case</span> <span class="str">"tool-call"</span>: { <span
+        class="kw">yield</span>* updateToolCall(value.toolCallId, (m) =&gt; ({
+        ...m, status: <span class="str">"running"</span>, input: value.input }))
+        <span class="com">// Doom loop: 3 tool-call cuối cùng giống hệt nhau
+        (tên + input)</span> <span class="kw">const</span> recentParts =
+        parts.slice(-3) <span class="kw">if</span> (recentParts.every((p) =&gt;
+        p.tool === value.toolName &amp;&amp; JSON.stringify(p.state.input) ===
+        JSON.stringify(value.input))) { <span class="kw">yield</span>*
+        permission.ask({ permission: <span class="str">"doom_loop"</span>,
+        patterns: [value.toolName], always: [], metadata: { input: value.input
+        }, }) } <span class="kw">return</span> }
+      `;
+const __code_OpencodeAgentLoopSection_13 = `        <span class="kw">const</span> MAX_REPEATS = 3 <span
+        class="kw">function</span> isDoomLoop(history: ToolCall[], next:
+        ToolCall): <span class="kw">boolean</span> { <span
+        class="kw">const</span> recent = history.slice(-MAX_REPEATS) <span
+        class="kw">if</span> (recent.length &lt; MAX_REPEATS) <span
+        class="kw">return false</span> <span class="kw">const</span> signature =
+        (tc: ToolCall) =&gt; <span class="str">\`</span>\${tc.name}<span
+        class="str">:</span>\${JSON.stringify(tc.input)}<span
+        class="str">\`</span> <span class="kw">const</span> target =
+        signature(next) <span class="kw">return</span> recent.every((tc) =&gt;
+        signature(tc) === target) } <span class="com">// Usage:</span> <span
+        class="kw">if</span> (isDoomLoop(history, nextCall)) { <span
+        class="kw">const</span> ok = <span class="kw">await</span> askUser(<span
+        class="str">"Detected repeated tool call. Continue?"</span>) <span
+        class="kw">if</span> (!ok) <span class="kw">throw new</span> Error(<span
+        class="str">"Doom loop aborted"</span>) }
+      `;
+---
+
+<Section
+  id="section-a"
+  title="A. Agent Loop & Streaming"
+  themeTag="6 kỹ thuật"
+>
+  <p>
+    Đây là trái tim của harness — vòng lặp agent và pipeline streaming event.
+    opencode đặc biệt chú ý đến các edge case mà harness ngây thơ thường bỏ qua:
+    model trả <code>finish_reason=stop</code> khi còn tool pending, stream bị interrupt
+    giữa chừng, tool call lặp vô hạn.
+  </p>
+  <Technique
+    id="t1"
+    title="T1. ReAct loop với finish-reason-aware exit"
+    tid="A.1"
+    location="<strong>File:</strong> <code>session/prompt.ts</code> · <strong>Hàm:</strong> <code>runLoop()</code> · <strong>Lines:</strong> 1305–1530"
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeAgentLoopSection_1} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Nhiều harness ngây thơ exit loop khi thấy
+      <code>finish_reason === "stop"</code>. opencode kiểm tra finish reason <em
+        >sau</em
+      > khi tool đã execute, và chỉ exit khi <code>!hasToolCalls</code>. Điều
+      này sống sót với các model đôi khi trả <code>stop</code> dù vẫn còn tool pending
+      (quirk phổ biến của một số provider), đảm bảo tool result luôn được gửi về.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeAgentLoopSection_2} />
+    <ProsCons
+      pros={[
+        "Chịu được provider quirks (stop thay vì tool-calls)",
+        "Tool result không bao giờ bị bỏ rơi",
+        "Logic tường minh, dễ debug",
+      ]}
+      cons={[
+        "Cần explicit termination (risk vô hạn — xem T6)",
+        "Thêm 1 LLM call dư thừa khi model đã định stop",
+        "Khó test — state phức tạp theo step",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.ibm.com/think/topics/react-agent">IBM — What is a ReAct Agent</a>',
+        '<a href="https://martinfowler.com/articles/harness-engineering.html">Martin Fowler — Harness engineering</a>',
+        '<a href="https://pydantic.dev/docs/ai/core-concepts/agent/">Pydantic AI — Agents (deferred tool call semantics)</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t1/">
+      Phân tích sâu T1: anatomy code, failure modes, so sánh harness, implementation recipe
+    </DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t2"}
+    title={"T2. Streaming event demultiplexer"}
+    tid={"A.2"}
+    location={"<strong>File:</strong> <code>session/processor.ts</code> · <strong>Hàm:</strong> <code>handleEvent()</code> · <strong>Lines:</strong> 216–461 · <strong>LLM wrap:</strong> <code>session/llm.ts</code> L54–94"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeAgentLoopSection_3} />
+    <p>Stream được wrap trong Effect.Stream (<code>session/llm.ts</code>):</p>
+    <CodeBlock code={__code_OpencodeAgentLoopSection_4} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> AI SDK trả async iterable; opencode bọc
+      trong <code>Effect.Stream</code> để có: (1) interrupt được qua <code
+        >Stream.takeUntil</code
+      >, (2) transactional per-event, (3) composable retry, (4) cancel qua
+      scope. Mỗi event type có handler riêng → UI update thật real-time (tool
+      transitions pending→running→completed), không phải đợi full response.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeAgentLoopSection_5} />
+    <ProsCons
+      pros={[
+        "UI real-time update (tool transitions, reasoning deltas)",
+        "Cooperative cancellation trivial",
+        "Per-event state mutation tường minh",
+        "Composable với retry, timeout, tracing",
+      ]}
+      cons={[
+        "State machine phức tạp hơn (nhiều partial state)",
+        "Coupling với format event của provider SDK",
+        "Cần tracking cẩn thận partial text để ghép lại",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text">Vercel AI SDK — streamText lifecycle</a>',
+        '<a href="https://vercel.com/blog/ai-sdk-5">Vercel AI SDK 5 — onInputStart/onInputDelta/onInputAvailable hooks</a>',
+        '<a href="https://medium.com/data-science/how-to-build-a-streaming-agent-with-burr-fastapi-and-react-e2459ef527a8">TDS — Building a Streaming Agent with Burr</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t2/">
+      Phân tích sâu T2: event types, Effect.Stream, UI real-time update, cancel semantics
+    </DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t3"}
+    title={"T3. Deferred tool-call coordination"}
+    tid={"A.3"}
+    location={"<strong>File:</strong> <code>session/processor.ts</code> · <strong>Lines:</strong> 134–195, 273–278, 544–582"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeAgentLoopSection_6} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> AI SDK tool handler là async; LLM stream
+      event lại được consume sync từng event. Cần sync point giữa "stream finish"
+      và "all tools done". Deferred là cầu nối. Timeout 250ms đảm bảo tool stuck không
+      block loop mãi.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeAgentLoopSection_7} />
+    <ProsCons
+      pros={[
+        "Không block stream consumer khi tool async",
+        "Timeout bảo vệ khỏi stuck tool",
+        'Rõ ràng "nothing pending" trước khi loop tiếp',
+      ]}
+      cons={[
+        "Deferred manual mapping — có thể rò rỉ nếu quên cleanup",
+        "Timeout 250ms arbitrary — có thể quá ngắn cho tool nặng",
+        "Unbounded concurrency có thể overload",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://effect.website/docs/error-management/retrying/">Effect — Retrying &amp; Deferreds</a>',
+        '<a href="https://pydantic.dev/docs/ai/core-concepts/agent/">Pydantic AI — deferred tool call pattern</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t3/">
+      Phân tích sâu T3: Deferred pattern, concurrency, timeout tuning, native Promise alternative
+    </DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t4"}
+    title={"T4. Interruption-safe scope cleanup"}
+    tid={"A.4"}
+    location={"<strong>File:</strong> <code>session/processor.ts</code> · <strong>Lines:</strong> 544–582"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeAgentLoopSection_8} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Cancel user giữa stream (Ctrl+C), retry,
+      hoặc error bất ngờ — cleanup luôn chạy. Cleanup đóng tool call pending với status
+      "aborted", finalize partial text, save state. Effect cho phép semantic này <em
+        >transactional</em
+      > — một tính năng hiếm trong các agent harness khác (thường phải tự quản lý
+      AbortController + try/finally thủ công).
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeAgentLoopSection_9} />
+    <ProsCons
+      pros={[
+        "Resource leak-safe (file handles, DB connections, tool child processes)",
+        'UI không bị "stuck tool pending" sau cancel',
+        "Effect.ensuring tránh được try/catch hell",
+      ]}
+      cons={[
+        "Đòi hỏi phải dùng Effect hoặc abstraction tương đương",
+        "Interrupt semantics không quen thuộc với dev Promise-based",
+        "Cleanup logic dễ bị bỏ sót nếu có nhiều exit path",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://effect.website/docs/error-management/retrying/">Effect — Retrying docs</a>',
+        '<a href="https://blog.type-driven.com/effect-ts-new-standard/">Why Effect is Becoming the Go-To Choice for TypeScript APIs</a>',
+        '<a href="https://github.com/PaulJPhilp/EffectPatterns">EffectPatterns — community knowledge base</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t4/">
+      Phân tích sâu T4: Effect.ensuring, resource leaks, AbortController pattern, async cleanup
+    </DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t5"}
+    title={"T5. Synthetic system reminder cho mid-turn messages"}
+    tid={"A.5"}
+    location={"<strong>File:</strong> <code>session/prompt.ts</code> · <strong>Lines:</strong> 1453–1468"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeAgentLoopSection_10} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Khi user gõ thêm message <em
+        >giữa lúc agent đang làm việc</em
+      > (multi-step loop đang chạy), model dễ bỏ qua input mới nếu nó đi cùng history
+      thông thường. Wrap trong <code>&lt;system-reminder&gt;</code> nhấn mạnh input
+      mới cần được address. Chỉ apply step &gt; 1 (step 1 không cần vì user msg là
+      context gốc).
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeAgentLoopSection_11} />
+    <ProsCons
+      pros={[
+        'Đảm bảo user input mới không bị "missed"',
+        "Không cần model hỗ trợ interrupt thật",
+        "Rẻ (just prompt wrapping)",
+      ]}
+      cons={[
+        "Overhead token cho wrapper tags",
+        'Model có thể respond "I acknowledge" rồi ignore thực sự',
+        "Wrap quá nhiều làm loãng system prompt chính",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic — Claude Code auto mode</a> (discusses system reminder patterns)',
+        '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Harness Engineering</a> (context re-injection)',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t5/">
+      Phân tích sâu T5: XML wrapping, step guard, model attention, prompt engineering
+    </DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t6"}
+    title={"T6. Doom loop detection"}
+    tid={"A.6"}
+    location={'<strong>File:</strong> <code>session/processor.ts</code> (trong <code>handleEvent</code> case <code>tool-call</code>) · <strong>PR:</strong> <a href="https://github.com/anomalyco/opencode/pull/3445">#3445 fix: add doom loop detection</a>'}
+  >
+    <CodeBlock caption="Code từ opencode (concept)" code={__code_OpencodeAgentLoopSection_12} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> LLM đôi khi bị kẹt gọi cùng tool với cùng
+      args (vd đọc file không tồn tại liên tục). Không có guard, agent burn token
+      &amp; tiền không dừng. opencode detect 3 lần lặp &amp; prompt user xác nhận
+      (permission type <code>doom_loop</code>) — cho phép user abort hoặc thoát.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeAgentLoopSection_13} />
+    <ProsCons
+      pros={[
+        "Tránh chi phí &amp; thời gian lãng phí",
+        "Trigger khi thật sự có vấn đề (tol arg signature)",
+        "User vẫn có quyền continue nếu muốn",
+      ]}
+      cons={[
+        "False positive với legitimate retry (vd LSP tool gọi nhiều lần trên cùng file)",
+        "Threshold = 3 arbitrary — có thể quá tight hoặc quá loose",
+        'Không detect được "near-duplicate" (arg thay đổi nhẹ)',
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://github.com/anomalyco/opencode/pull/3445">opencode PR #3445 — add doom loop detection</a>',
+        '<a href="https://medium.com/@komalbaparmar007/llm-tool-calling-in-production-rate-limits-retries-and-the-infinite-loop-failure-mode-you-must-2a1e2a1e84c8">Medium — LLM Tool-Calling in Production: Infinite Loop Failure Mode</a>',
+        '<a href="https://www.agentpatterns.tech/en/failures/infinite-loop">Agent Patterns — Infinite Loop failure mode</a>',
+      ]}
+    />
+  </Technique>
+</Section>

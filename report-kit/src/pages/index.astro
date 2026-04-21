@@ -1,0 +1,146 @@
+---
+import IndexLayout from '../layouts/IndexLayout.astro';
+import { reports, getAllTags, type Report } from '../data/reports.ts';
+
+const allTags = getAllTags();
+
+/** Chỉ hiển thị báo cáo Layer 1 (overview) ở trang chủ — deep dives ẩn */
+const overviewReports: Report[] = reports.filter(r => r.kind !== 'deep-dive');
+const sortedReports: Report[] = [...overviewReports].sort((a, b) => b.date.localeCompare(a.date));
+
+const totalTechniques = overviewReports.reduce((s, r) => s + (r.techniqueCount ?? 0), 0);
+---
+<IndexLayout
+  title="Research Report Kit — Nghĩa & Cowork"
+  description="Bộ báo cáo nghiên cứu sâu về harness engineering của các AI coding agent."
+>
+  <header class="index-hero">
+    <h1>Research Report Kit</h1>
+    <div class="sub">
+      Bộ báo cáo nghiên cứu sâu của <strong>Nghĩa &amp; Cowork</strong> —
+      mỗi báo cáo là một bản phân tích chi tiết về <em>harness engineering</em>
+      của một AI coding agent, kèm code thật từ repo, pros/cons và references.
+    </div>
+    <div class="stats">
+      <span><strong>{sortedReports.length}</strong> báo cáo</span>
+      <span><strong>{totalTechniques}</strong> kỹ thuật đã phân tích</span>
+      <span><strong>{allTags.length}</strong> tags</span>
+    </div>
+  </header>
+
+  <div class="controls">
+    <div class="search-box">
+      <input
+        id="search-input"
+        type="search"
+        placeholder="Tìm theo title, mô tả, repo, tag…"
+        autocomplete="off"
+      />
+    </div>
+    <div class="tag-filters" id="tag-filters">
+      <span class="label">Tag:</span>
+      <button class="tag-btn active" data-tag="__all__">Tất cả</button>
+      {allTags.map((tag) => (
+        <button class="tag-btn" data-tag={tag}>{tag}</button>
+      ))}
+    </div>
+  </div>
+
+  <div class="report-grid" id="report-grid">
+    {sortedReports.map((r) => (
+      <a
+        class="report-card"
+        href={`/reports/${r.slug}/`}
+        data-tags={r.tags.join(' ')}
+        data-title={r.title.toLowerCase()}
+        data-desc={r.description.toLowerCase()}
+        data-repo={(r.repo ?? '').toLowerCase()}
+      >
+        <div class="card-head">
+          <h3>{r.title}</h3>
+          <span class={`status ${r.status}`}>{r.status}</span>
+        </div>
+        <p class="desc">{r.description}</p>
+        <div class="card-meta">
+          {r.repo && <span><strong>Repo:</strong> {r.repo}</span>}
+          {r.techniqueCount && <span><strong>Kỹ thuật:</strong> {r.techniqueCount}</span>}
+          <span><strong>Cập nhật:</strong> {r.date}</span>
+        </div>
+        <div class="card-tags">
+          {r.tags.map((t) => <span class="chip">{t}</span>)}
+        </div>
+      </a>
+    ))}
+  </div>
+
+  <div class="empty-state" id="empty-state" style="display: none;">
+    Không có báo cáo nào khớp với bộ lọc hiện tại.
+  </div>
+
+  <footer class="index-footer">
+    <p>
+      <strong>Thêm báo cáo mới:</strong> tạo file <code>src/pages/reports/&lt;slug&gt;.astro</code>
+      sử dụng <code>ReportLayout</code>, và thêm 1 entry vào <code>src/data/reports.ts</code>
+      để xuất hiện ở trang này.
+    </p>
+    <p>
+      <strong>Components tái sử dụng:</strong> <code>ReportLayout</code>, <code>Sidebar</code>,
+      <code>Hero</code>, <code>Technique</code>, <code>ProsCons</code>, <code>Callout</code>,
+      <code>Chip</code>, <code>Diagram</code>, <code>CodeBlock</code>, <code>RefList</code>,
+      <code>Section</code>, <code>SummaryTable</code>.
+    </p>
+  </footer>
+</IndexLayout>
+
+<script is:inline>
+  (function () {
+    const searchInput = document.getElementById('search-input');
+    const tagFilters = document.getElementById('tag-filters');
+    const grid = document.getElementById('report-grid');
+    const emptyState = document.getElementById('empty-state');
+    if (!searchInput || !tagFilters || !grid || !emptyState) return;
+
+    const cards = Array.from(grid.querySelectorAll('.report-card'));
+    let activeTag = '__all__';
+    let query = '';
+
+    function apply() {
+      let visible = 0;
+      const q = query.trim().toLowerCase();
+      cards.forEach((card) => {
+        const tags = (card.dataset.tags || '').split(/\s+/);
+        const title = card.dataset.title || '';
+        const desc = card.dataset.desc || '';
+        const repo = card.dataset.repo || '';
+
+        const tagOk = activeTag === '__all__' || tags.includes(activeTag);
+        const queryOk =
+          !q ||
+          title.includes(q) ||
+          desc.includes(q) ||
+          repo.includes(q) ||
+          tags.some((t) => t.includes(q));
+
+        const show = tagOk && queryOk;
+        card.style.display = show ? '' : 'none';
+        if (show) visible++;
+      });
+      emptyState.style.display = visible === 0 ? 'block' : 'none';
+    }
+
+    searchInput.addEventListener('input', (e) => {
+      query = e.target.value || '';
+      apply();
+    });
+
+    tagFilters.addEventListener('click', (e) => {
+      const btn = e.target.closest('.tag-btn');
+      if (!btn) return;
+      const tag = btn.dataset.tag;
+      if (!tag) return;
+      activeTag = tag;
+      tagFilters.querySelectorAll('.tag-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      apply();
+    });
+  })();
+</script>

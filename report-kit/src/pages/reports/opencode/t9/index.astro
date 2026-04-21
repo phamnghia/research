@@ -1,0 +1,345 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T9 — Tool output pruning với protected tools | opencode"
+  description="Phân tích cơ chế selective pruning tool outputs trong compaction — thay thế output bằng placeholder nhưng bảo vệ tool đặc biệt (skill) và N turn gần nhất."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T9 — Tool output pruning với protected tools"
+        subtitle="Trước khi compact, thay thế nội dung tool outputs bằng <code>&lt;tool-output-compacted /&gt;</code> — nhưng bảo vệ <code>skill</code> tool và 2 user turn cuối để giữ nguyên runtime instructions."
+        meta={[
+          { label: 'Nhóm',  value: 'B — Context Management' },
+          { label: 'File',  value: '<code>session/compaction.ts</code>' },
+          { label: 'Lines', value: '171–219' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      {/* ── 1. Overview ── */}
+      <Section id="overview" title="Tổng quan" themeTag="Context">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Tool outputs thường rất dài — đọc file 500 dòng,
+          kết quả grep 200 match, JSON response 10KB. Khi compact, gửi toàn bộ những
+          output này cho LLM summary là lãng phí: LLM sẽ không tóm tắt tốt hơn thực tế.
+          T9 giải quyết bằng cách thay thế chúng bằng placeholder trước khi gửi cho LLM
+          compact, giảm đáng kể số token trong head.
+        </WhyImportant>
+
+        <p>
+          Điểm tinh tế là <strong>protected tools</strong>: tool <code>skill</code>
+          không được prune vì output của nó là runtime instructions (SKILL.md content)
+          mà LLM cần đọc để biết cách hành xử. Prune skill output đồng nghĩa với
+          xoá hướng dẫn của agent — không thể phục hồi từ summary.
+        </p>
+
+        <p>
+          Ngoài ra, T9 tôn trọng <strong>skip boundary</strong>: 2 user turn cuối
+          không được prune bất kể tool nào. Đây là vùng "hot context" chứa lệnh
+          gần nhất và kết quả trực tiếp của nó.
+        </p>
+
+        <Callout type="unique">
+          <strong>Metadata compacted.</strong> Mỗi message bị prune được đánh dấu
+          <code>time.compacted: Date.now()</code>. Điều này cho phép debug và audit:
+          biết chính xác message nào đã bị prune và khi nào.
+        </Callout>
+      </Section>
+
+      {/* ── 2. Anatomy ── */}
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Bước 1 — Xác định protected tools và skip boundary" />
+        <p>
+          Protected set được định nghĩa cứng là <code>new Set(["skill"])</code>.
+          Skip boundary = index của user turn thứ 2 tính từ cuối.
+        </p>
+        <CodeBlock caption="session/compaction.ts — setup">
+          <Fragment is:raw>{`
+const PROTECTED_TOOLS = new Set(["skill"])
+// "skill" tool trả về nội dung SKILL.md — runtime instructions
+// Prune nó sẽ khiến agent mất hướng dẫn hoạt động
+
+function findSkipBoundary(messages: Message[]): number {
+  // Tìm index của user turn thứ 2 từ cuối
+  let userTurnCount = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      userTurnCount++
+      if (userTurnCount >= 2) return i  // skip messages từ i trở đi
+    }
+  }
+  return 0  // Ít hơn 2 user turns → không skip gì cả (prune tất cả)
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Bước 2 — Selective pruning với 2 điều kiện" />
+        <p>
+          Một message bị prune khi <em>đồng thời</em> thỏa:
+          (1) role = "tool", (2) tool name không trong protected set, (3) index &lt; skipBoundary.
+        </p>
+        <CodeBlock caption="session/compaction.ts — pruning loop">
+          <Fragment is:raw>{`
+export function pruneToolOutputs(messages: Message[]): Message[] {
+  const skipBoundary = findSkipBoundary(messages)
+
+  return messages.map((msg, idx) => {
+    // Không prune: sau skip boundary (gần đây)
+    if (idx >= skipBoundary) return msg
+
+    // Không prune: không phải tool message
+    if (msg.role !== 'tool') return msg
+
+    // Không prune: protected tool
+    const toolName = msg.metadata?.toolName ?? ''
+    if (PROTECTED_TOOLS.has(toolName)) return msg
+
+    // Prune: thay content bằng placeholder
+    return {
+      ...msg,
+      content:  '<tool-output-compacted />',
+      metadata: {
+        ...msg.metadata,
+        time: {
+          ...msg.metadata?.time,
+          compacted: Date.now(),  // audit trail
+        },
+      },
+    }
+  })
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Ví dụ thực tế" />
+        <p>
+          Với 10 messages, 2 user turns ở vị trí 3 và 7 (0-indexed):
+          skipBoundary = 3. Messages 0, 1, 2 có thể bị prune. Messages 3–9 được bảo vệ.
+        </p>
+        <CodeBlock caption="Ví dụ — skip boundary visualization">
+          <Fragment is:raw>{`
+Index  Role    Tool        Action
+  0    user    —           (trước boundary)
+  1    asst    read_file   (trước boundary)
+  2    tool    read_file   ← PRUNE (không protected, trước boundary)
+  3    user    —           ← skipBoundary (user turn thứ 2)
+  4    asst    skill       (sau boundary → bảo vệ)
+  5    tool    skill       ← BẢO VỆ (protected tool)
+  6    asst    edit_file   (sau boundary)
+  7    tool    edit_file   ← BẢO VỆ (sau boundary)
+  8    user    —           (sau boundary)
+  9    asst    —           (sau boundary)
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      {/* ── 3. Interaction ── */}
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T8 Compaction bắt đầu
+       │
+       ▼
+  ┌────────────────────────────────────────────┐
+  │        T9 — Tool Output Pruning            │
+  │  (pre-processing step trong T8)            │
+  │                                            │
+  │  Input: full messages array                │
+  │         ↓                                  │
+  │  1. findSkipBoundary (last 2 user turns)   │
+  │         ↓                                  │
+  │  2. pruneToolOutputs                       │
+  │     - skip: idx >= boundary                │
+  │     - skip: role != 'tool'                 │
+  │     - skip: PROTECTED_TOOLS                │
+  │     - replace: content → placeholder       │
+  │         ↓                                  │
+  │  Output: pruned messages (smaller)         │
+  └────────────────────────────────────────────┘
+       │
+       ▼
+  T8 tiếp tục: split head/tail trên pruned messages
+  T12 template: compact head (đã nhỏ hơn nhiều)
+
+Protected tools ← configured bởi plugin system (T26+)
+`}</Diagram>
+
+        <p>
+          T9 là bước pre-processing bắt buộc trong T8. Thứ tự đúng: T9 trước, rồi mới
+          split head/tail (T8), rồi LLM compact (T12). Nếu đảo ngược, tail có thể chứa
+          tool messages đã bị prune — gây ra context không nhất quán.
+        </p>
+
+        <Callout type="info">
+          <strong>Plugin extensibility.</strong> Protected tools list có thể mở rộng
+          qua plugin API. Ví dụ: một plugin custom có tool <code>memory_store</code>
+          trả về long-term memory content → thêm vào protected list để không bị prune.
+        </Callout>
+      </Section>
+
+      {/* ── 4. Failure modes ── */}
+      <Section id="failure" title="Failure modes" themeTag="Risk">
+        <Subheading level="h3" text="FM-1: Prune tool output gần nhất" />
+        <p>
+          Nếu không có skip boundary, model compact không thấy kết quả tool call
+          vừa thực hiện:
+        </p>
+        <CodeBlock caption="Anti-pattern — prune tất cả tool outputs">
+          <Fragment is:raw>{`
+// ❌ Prune tất cả — kể cả turn gần nhất
+function pruneAll(messages) {
+  return messages.map(msg =>
+    msg.role === 'tool'
+      ? { ...msg, content: '<compacted />' }
+      : msg
+  )
+  // Model nhận lệnh "đọc file X" (user turn) nhưng
+  // không thấy kết quả đọc → hỏi lại hoặc làm sai
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="FM-2: Prune skill output" />
+        <p>
+          <code>skill</code> tool trả về nội dung SKILL.md — hướng dẫn chi tiết về
+          cách thực hiện một tác vụ. Prune nó khiến agent không còn runtime instructions:
+        </p>
+        <CodeBlock caption="Anti-pattern — prune skill output">
+          <Fragment is:raw>{`
+// ❌ Không có protected set — prune cả skill
+// Kết quả: model không biết cách chạy skill build-report
+// → action sai, không theo template
+const PROTECTED_TOOLS = new Set()  // empty — nguy hiểm
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="FM-3: Skip boundary không đủ" />
+        <p>
+          Nếu chỉ skip 1 user turn (thay vì 2), một số tool results liên quan đến
+          lệnh gần nhất vẫn có thể bị prune — đặc biệt khi 1 user turn trigger
+          nhiều tool calls liên tiếp.
+        </p>
+
+        <ProsCons
+          pros={[
+            'Giảm đáng kể số token trong head trước khi compact',
+            'Protected tools — bảo vệ runtime instructions',
+            'Skip boundary = 2 turns — giữ đủ hot context',
+            '<code>time.compacted</code> metadata — audit trail',
+          ]}
+          cons={[
+            'Protected list cứng — plugin phải tự extend',
+            'Placeholder đơn giản — không biết output đã prune là gì',
+            'Không prune partially — prune toàn bộ content hoặc không',
+          ]}
+        />
+      </Section>
+
+      {/* ── 5. Compare ── */}
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Tool output pruning?', 'Protected tools?', 'Skip boundary?']}
+          rows={[
+            ['<strong>opencode</strong>', '<span style="color:var(--chip-green-fg)">Có — selective với placeholder</span>', '<span style="color:var(--chip-green-fg)">Có (<code>skill</code> + extensible)</span>', '<span style="color:var(--chip-green-fg)">2 user turns cuối</span>'],
+            ['Claude Code', '<span style="color:var(--chip-green-fg)">Có</span>', '<span style="color:var(--chip-amber-fg)">Không rõ chi tiết</span>', '<span style="color:var(--chip-amber-fg)">Có (không public)</span>'],
+            ['LangChain', '<span style="color:var(--chip-red-fg)">Không — prune đều tất cả hoặc không</span>', '<span style="color:var(--chip-red-fg)">Không có khái niệm</span>', '<span style="color:var(--chip-red-fg)">Không</span>'],
+            ['Cursor', '<span style="color:var(--chip-amber-fg)">Không public chi tiết</span>', '<span style="color:var(--chip-amber-fg)">Không rõ</span>', '<span style="color:var(--chip-amber-fg)">Không rõ</span>'],
+          ]}
+        />
+      </Section>
+
+      {/* ── 6. Recipe ── */}
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock caption="compaction.ts — selective tool pruner recipe">
+          <Fragment is:raw>{`
+// tool-pruner.ts — selective pruning với protected set + boundary
+
+const PROTECTED_TOOLS = new Set<string>(["skill"])
+const SKIP_BOUNDARY_TURNS = 2
+const COMPACTED_PLACEHOLDER = '<tool-output-compacted />'
+
+export function pruneToolOutputs(
+  messages:       Message[],
+  protectedTools: Set<string> = PROTECTED_TOOLS
+): Message[] {
+  // Tìm skipBoundary: user turn thứ N từ cuối
+  let userTurnCount = 0
+  let skipBoundary  = 0
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      userTurnCount++
+      if (userTurnCount >= SKIP_BOUNDARY_TURNS) {
+        skipBoundary = i
+        break
+      }
+    }
+  }
+
+  return messages.map((msg, idx) => {
+    // Giữ nguyên: sau boundary, không phải tool, hoặc protected
+    if (idx >= skipBoundary)                           return msg
+    if (msg.role !== 'tool')                           return msg
+    if (protectedTools.has(msg.metadata?.toolName ?? '')) return msg
+
+    // Prune với audit metadata
+    return {
+      ...msg,
+      content: COMPACTED_PLACEHOLDER,
+      metadata: {
+        ...msg.metadata,
+        time: { ...msg.metadata?.time, compacted: Date.now() },
+      },
+    }
+  })
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      {/* ── 7. Refs ── */}
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://medium.com/@ai-engineering/context-management-in-llm-agents">Medium — Context management in LLM agents: pruning strategies</a>',
+            '<a href="https://blog.jetbrains.com/ai/2024/05/ai-context-compression-research/">JetBrains Research — AI context compression</a>',
+            '<a href="https://google.github.io/adk-docs/context/">Google ADK — Context compression techniques</a>',
+            '<a href="https://github.com/sst/opencode/blob/main/packages/opencode/src/session/compaction.ts">opencode source — session/compaction.ts (lines 171–219)</a>',
+            '<a href="https://www.anthropic.com/research/tool-use">Anthropic — Tool use in context-heavy sessions</a>',
+            '<a href="https://arxiv.org/abs/2404.11843">arXiv 2404.11843 — Compressing tool-augmented agent histories</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

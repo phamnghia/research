@@ -1,0 +1,271 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+import DeepDiveLink from '../../../../components/DeepDiveLink.astro';
+
+const code1 = `\
+import PROMPT_ANTHROPIC from "./prompts/anthropic.txt"
+import PROMPT_GPT       from "./prompts/gpt.txt"
+import PROMPT_BEAST     from "./prompts/beast.txt"   // gpt-4 | o1 | o3
+import PROMPT_GEMINI    from "./prompts/gemini.txt"
+import PROMPT_DEFAULT   from "./prompts/default.txt"
+
+function pickTemplate(modelId: string): string {
+  if (/^(gpt-4|o1|o3)/i.test(modelId)) return PROMPT_BEAST   // o1-style reasoning models
+  if (/^gpt/i.test(modelId))            return PROMPT_GPT
+  if (/^gemini/i.test(modelId))         return PROMPT_GEMINI
+  if (/claude/i.test(modelId))          return PROMPT_ANTHROPIC
+  return PROMPT_DEFAULT
+}
+
+export function buildSystem(model: Model, ctx: Ctx): string[] {
+  const template = pickTemplate(model.id)
+
+  // Dynamic env block — fresh mỗi call
+  const envBlock = \`
+<env>
+  directory: \${ctx.cwd}
+  worktree: \${ctx.worktree}
+  git: \${ctx.gitStatusShort}
+  platform: \${process.platform}
+  date: \${new Date().toISOString()}
+</env>\`
+
+  // Skills list — chỉ show skills được phép dùng
+  const skillsBlock = renderSkills(ctx.skills, { permissionGate: ctx.perm })
+
+  // Project instructions từ AGENTS.md / CLAUDE.md (T28)
+  const projectBlock = ctx.agentsFile?.content ?? ""
+
+  // Trả về array → AI SDK dùng multi-part system message
+  // [template, env] cache-stable, [skills, project] dynamic
+  return [template, envBlock, skillsBlock, projectBlock]
+}`;
+
+const code2 = `\
+const PROMPTS: Record<string, string> = {
+  anthropic: ANTHROPIC_TEMPLATE,
+  openai:    OPENAI_TEMPLATE,
+  gemini:    GEMINI_TEMPLATE,
+}
+
+function detectFamily(model: string): string {
+  if (/claude/i.test(model))    return "anthropic"
+  if (/gpt|o1|o3/i.test(model)) return "openai"
+  if (/gemini/i.test(model))    return "gemini"
+  return "openai"  // reasonable default
+}
+
+function buildSystemPrompt(model: string, ctx: Ctx): string {
+  const template = PROMPTS[detectFamily(model)] ?? PROMPTS.openai
+  const env = \`<env>cwd=\${ctx.cwd}; git=\${ctx.git}; os=\${process.platform}</env>\`
+  return [template, env, ctx.projectInstructions ?? ""].join("\\n\\n")
+}`;
+
+const code3 = `\
+// 1. Create template files
+// prompts/claude.txt, prompts/openai.txt, prompts/gemini.txt
+import CLAUDE_TEMPLATE  from "./prompts/claude.txt"
+import OPENAI_TEMPLATE  from "./prompts/openai.txt"
+import GEMINI_TEMPLATE  from "./prompts/gemini.txt"
+import DEFAULT_TEMPLATE from "./prompts/default.txt"
+
+// 2. Model family detection table
+const FAMILY_MAP: Array<[RegExp, string]> = [
+  [/claude/i,           "claude"],
+  [/gpt|o1|o3/i,        "openai"],
+  [/gemini/i,           "gemini"],
+  [/llama|mistral/i,    "default"],
+]
+
+const TEMPLATES: Record<string, string> = {
+  claude:  CLAUDE_TEMPLATE,
+  openai:  OPENAI_TEMPLATE,
+  gemini:  GEMINI_TEMPLATE,
+  default: DEFAULT_TEMPLATE,
+}
+
+function getTemplate(modelId: string): string {
+  for (const [re, family] of FAMILY_MAP) {
+    if (re.test(modelId)) return TEMPLATES[family]
+  }
+  return TEMPLATES.default
+}
+
+// 3. Build system prompt with fresh env
+interface Ctx {
+  cwd:     string
+  git:     string
+  skills:  string[]
+  project: string | null
+}
+
+function buildSystem(modelId: string, ctx: Ctx): string[] {
+  const template = getTemplate(modelId)
+
+  const env = [
+    "<env>",
+    \`  cwd: \${ctx.cwd}\`,
+    \`  git: \${ctx.git}\`,
+    \`  platform: \${process.platform}\`,
+    \`  date: \${new Date().toISOString().slice(0, 10)}\`,
+    "</env>",
+  ].join("\\n")
+
+  const skills = ctx.skills.length
+    ? \`Available skills:\\n\${ctx.skills.map(s => \`- \${s}\`).join("\\n")}\`
+    : ""
+
+  return [template, env, skills, ctx.project ?? ""].filter(Boolean)
+}`;
+---
+<ReportLayout
+  title="T27 — Model-specific system prompt dispatch + dynamic env | opencode"
+  description="Phân tích sâu kỹ thuật dispatch system prompt theo model family (claude/gpt/gemini/beast) và inject env block động mỗi call — git status, cwd, platform luôn fresh."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T27 — Model-specific system prompt dispatch + dynamic env"
+        subtitle="4 prompt template (anthropic / gpt / gemini / beast) dispatch theo model regex. Env block <code>&lt;env&gt;...&lt;/env&gt;</code> inject fresh mỗi call: git status, cwd, platform, available skills."
+        meta={[
+          { label: 'Nhóm',  value: 'F — System Prompt' },
+          { label: 'File',  value: '<code>session/system.ts</code> · Lines 19–77' },
+          { label: 'ID',    value: 'F.1 / T27' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="System Prompt">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Claude, GPT-4, Gemini có "phong cách" khác nhau: Claude phản hồi tốt với XML tags và explicit structure; GPT-4/o1 cần instructions ngắn gọn hơn; Gemini có quirks với system message. Một prompt chung cho tất cả → performance lowest common denominator. Dispatch theo model family cho phép tối ưu từng path. Env block dynamic (git status, working dir, platform) đảm bảo agent luôn biết bối cảnh thực tế ngay lúc đó — không phụ thuộc vào context lỗi thời từ turns trước.
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>Skills list permission-gated:</strong> <code>renderSkills(ctx.skills, &#123; permissionGate: ctx.perm &#125;)</code> — model chỉ thấy skills mà permission hiện tại cho phép. Agent không biết có thêm capabilities mà nó không được dùng trong context này.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Model family detection và template dispatch" />
+        <CodeBlock caption="session/system.ts — pickTemplate() + buildSystem()" lang="typescript" code={code1} />
+
+        <Diagram>{`
+model.id = "claude-opus-4"
+    │
+    ▼
+pickTemplate("claude-opus-4")
+    │  → /claude/i matches
+    ▼
+PROMPT_ANTHROPIC  (cached, stable)
+    │
+    + envBlock (dynamic, per-call)
+    │   <env>
+    │     directory: /Users/nghia/project
+    │     git: 3 modified files, 1 untracked
+    │     platform: darwin
+    │   </env>
+    │
+    + skillsBlock (permission-gated)
+    │   Available skills: bash, edit, read, grep
+    │   [task tool hidden if permission denied]
+    │
+    + projectBlock (AGENTS.md content, T28)
+    │   <project-instruction src="./AGENTS.md">
+    │     Always write tests. Use TypeScript strict.
+    │   </project-instruction>
+    │
+    ▼
+buildSystem() returns: [template, env, skills, project]
+    │
+    ▼
+AI SDK: { role: "system", content: [...parts] }
+        `}</Diagram>
+
+        <Subheading level="h3" text="Generic model-dispatch pattern" />
+        <CodeBlock lang="typescript" code={code2} />
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T10 (Cache-aware prompt structure):</strong> Template (static) và env (dynamic) là 2 parts riêng. Template part được Anthropic cache. Env part thay đổi mỗi call → invalidate env cache, nhưng template cache vẫn còn. Tách 2 parts giúp tối đa cache hit rate.</li>
+          <li><strong>T28 (AGENTS.md cascading):</strong> <code>projectBlock</code> là kết quả của T28 — findUp từ cwd để tìm AGENTS.md/CLAUDE.md. T27 gọi T28 và nhận content để append vào system prompt.</li>
+          <li><strong>T13 (Tool description .txt):</strong> Tool description cũng dùng .txt file — cùng pattern. System prompt template là macroscopic version của cùng technique: tách text khỏi code.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. Template drift giữa model families" />
+        <p>
+          Khi update policy (vd thêm rule mới về tool use), phải update tất cả 4–5 template files. Dễ miss 1 file → model family đó hoạt động theo policy cũ. Cần process review để sync templates.
+        </p>
+
+        <Subheading level="h3" text="2. Regex detect model không bền" />
+        <p>
+          Model ID mới không match regex (<code>claude-3-7-sonnet-20251022</code> OK, nhưng nếu Anthropic đặt tên mới không có "claude" → PROMPT_DEFAULT thay vì PROMPT_ANTHROPIC). Cần fallback explicit hoặc mapping table.
+        </p>
+
+        <Subheading level="h3" text="3. Env block invalidate cache" />
+        <p>
+          Env block thay đổi mỗi call (git status, date) → part thứ 2 không được cache. Cần cân nhắc: đặt env block sau template (không trước) để tối đa cache hit cho static parts trước env.
+        </p>
+        <Callout type="warn">
+          <strong>Cache ordering:</strong> Anthropic cache tính từ đầu system prompt. Đặt static template trước env block → cache hit cho template. Đặt env trước template → cache miss mọi lần.
+        </Callout>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Model-specific prompt', 'Dynamic env', 'Skills gating']}
+          rows={[
+            ['opencode', '4 templates, regex dispatch', '✅ mỗi call', '✅ permission-gated'],
+            ['Claude Code', 'Single template (Anthropic only)', 'N/A', '✅'],
+            ['Aider', '1 template, model-agnostic', '⚠️ partial (cwd only)', '❌'],
+            ['Cline', '1 template per provider config', '⚠️ cwd + date', '❌'],
+            ['OpenHarness', '1 template cho Anthropic', '⚠️ minimal', '❌'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript" code={code3} />
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://www.humanlayer.dev/blog/writing-a-good-claude-md">HumanLayer — Writing a good CLAUDE.md</a>',
+            '<a href="https://www.deployhq.com/blog/ai-coding-config-files-guide">DeployHQ — Configure Every AI Coding Assistant</a>',
+            '<a href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic — Claude Code auto mode (system prompt patterns)</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

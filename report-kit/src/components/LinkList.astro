@@ -1,0 +1,15 @@
+---
+// LinkList.astro — tiêu đề h3 + danh sách link (mỗi item là HTML snippet, thường là <a>...</a>)
+interface Props {
+  title: string;
+  items: string[];
+}
+
+const { title, items } = Astro.props;
+---
+<h3>{title}</h3>
+<ul>
+  {items.map((item) => (
+    <li set:html={item} />
+  ))}
+</ul>

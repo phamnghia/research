@@ -1,0 +1,190 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import CodeBlock from "../../../../components/CodeBlock.astro";
+import WhyImportant from "../../../../components/WhyImportant.astro";
+import DeepDiveLink from "../../../../components/DeepDiveLink.astro";
+
+const __code_OpencodePermissionModelSection_1 = `        import { Wildcard } from "./wildcard" export function evaluate( rules:
+        PermissionRule[], permission: string, // "bash" | "edit" | "write" | ...
+        pattern: string, // "rm -rf *" | "/tmp/**" | ... ): "allow" | "deny" |
+        "ask" { const match = rules.findLast((rule) =&gt;
+        Wildcard.match(permission, rule.permission) &amp;&amp;
+        Wildcard.match(pattern, rule.pattern) ) return match?.action ?? "ask" //
+        default "ask" khi không match }
+      `;
+const __code_OpencodePermissionModelSection_2 = `        interface Rule { permission: string; pattern: string; action:
+        "allow"|"deny"|"ask" } function matchWildcard(value: string, pattern:
+        string): boolean { const re = new RegExp("^" + pattern.replace(/\\*/g,
+        ".*") + "$") return re.test(value) } function evaluate(rules: Rule[],
+        perm: string, ptn: string) { const hit = [...rules].reverse().find(r
+        =&gt; matchWildcard(perm, r.permission) &amp;&amp; matchWildcard(ptn,
+        r.pattern) ) return hit?.action ?? "ask" }
+      `;
+const __code_OpencodePermissionModelSection_3 = `        interface PermissionState { sessionId: string alwaysAllow: Array&lt;{
+        permission: string; pattern: string }&gt; // session-scoped pending:
+        Map&lt;string, Deferred&lt;"allow" | "deny"&gt;&gt; } export class
+        Permission { async ask(req: PermissionRequest): Promise&lt;"allow" |
+        "deny"&gt; { // 1. Check static rules const staticResult =
+        evaluate(this.rules, req.permission, req.pattern) if (staticResult !==
+        "ask") return staticResult // 2. Check session alwaysAllow const always
+        = this.state.alwaysAllow.some((r) =&gt; Wildcard.match(req.permission,
+        r.permission) &amp;&amp; Wildcard.match(req.pattern, r.pattern) ) if
+        (always) return "allow" // 3. Ask user (UI emits event) const deferred =
+        makeDeferred() this.state.pending.set(req.id, deferred)
+        emit("permission.request", req) return await deferred.promise }
+        reply(reqId: string, reply: "once" | "always" | "reject", pattern?:
+        string) { const d = this.state.pending.get(reqId) if (!d) return if
+        (reply === "always" &amp;&amp; pattern) { this.state.alwaysAllow.push({
+        permission: d.req.permission, pattern }) } d.resolve(reply === "reject"
+        ? "deny" : "allow") } }
+      `;
+const __code_OpencodePermissionModelSection_4 = `        class PermissionGate { private alwaysAllow: Array&lt;{perm: string, ptn:
+        string}&gt; = [] async ask(req: Request): Promise&lt;"allow"|"deny"&gt;
+        { if (this.alwaysAllow.some(r =&gt; match(req, r))) return "allow" const
+        answer = await ui.ask(req) // UI returns {mode, pattern?} if
+        (answer.mode === "always") { this.alwaysAllow.push({ perm:
+        req.permission, ptn: answer.pattern ?? req.pattern }) } return
+        answer.mode === "reject" ? "deny" : "allow" } }
+      `;
+const __code_OpencodePermissionModelSection_5 = `        // ARITY map: command → số "word" cần giữ để nhận diện "human command"
+        const ARITY: Record&lt;string, number&gt; = { touch: 1, // touch
+        file.txt → "touch" ls: 1, // ls -la → "ls" npm: 2, // npm install → "npm
+        install" "npm run": 3, // npm run build → "npm run build" "git config":
+        3, "pnpm dlx": 3, "npx create-next-app": 4, // ... 450+ entries } export
+        function normalizeCommand(raw: string): string { const tokens =
+        tokenize(raw) // respect quotes // Try longest prefix match for (let n =
+        4; n &gt;= 1; n--) { const prefix = tokens.slice(0, n).join(" ") if
+        (ARITY[prefix] === n) { return tokens.slice(0, n).join(" ") } } return
+        tokens[0] ?? "" // fallback: first token } // normalizeCommand("npm run
+        build --watch") === "npm run build" // normalizeCommand("git config
+        --global user.email me@x.com") === "git config --global user.email"? //
+        ... thực chất sẽ là "git config" với arity=3 nhưng token[2] là
+        "--global" // → opencode xử lý kỹ hơn, bỏ qua flags
+      `;
+const __code_OpencodePermissionModelSection_6 = `        const ARITY: Record&lt;string, number&gt; = { ls: 1, cat: 1, touch: 1,
+        mkdir: 1, "npm install": 2, "npm run": 3, "git status": 2, "git add": 2,
+        "git commit": 2, "docker run": 2, "docker compose": 2, } function
+        normalize(cmd: string): string { const parts = cmd.split(/\\s+/).filter(p
+        =&gt; !p.startsWith("-")) for (let n = 3; n &gt;= 1; n--) { const pref =
+        parts.slice(0, n).join(" ") if (ARITY[pref] === n) return pref } return
+        parts[0] ?? "" }
+      `;
+---
+
+<Section id={"section-e"} title={"E. Permission Model — First-class safety"}>
+  <p class="lead">
+    opencode coi permission là feature chính chứ không phải add-on. Wildcard
+    matching, arity normalization, state per session — tất cả cho phép user có
+    control mịn mà không bị spam dialog liên tục.
+  </p>
+  <Technique
+    id={"t24"}
+    title={"T24. Wildcard last-match-wins evaluation"}
+    tid={"E.1"}
+    location={"<strong>File:</strong> <code>permission/evaluate.ts</code> · <strong>Lines:</strong> 1-15"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodePermissionModelSection_1} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Permission rules cần vừa "allow broadly"
+      vừa "deny specifically". Last-match-wins + wildcard cho user viết: <code
+        >allow: bash:*</code
+      > rồi <code>deny: bash:rm -rf *</code> → cho phép bash trừ rm -rf. findLast
+      (thay vì find) đảm bảo rule sau override rule trước → predictable.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodePermissionModelSection_2} />
+    <ProsCons
+      pros={[
+        'Mental model đơn giản: "rule sau win" — giống nginx, iptables',
+        "Wildcard đủ biểu đạt (ngôn ngữ shell mà user quen)",
+        'Default "ask" an toàn — không biết thì hỏi',
+      ]}
+      cons={[
+        "Order-sensitive — user kéo rule lên xuống sẽ đổi behavior",
+        "Wildcard không regex đầy đủ → pattern phức tạp không biểu đạt được",
+        'Không có "deny wins" mode → vulnerable khi user thứ tự sai',
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://code.claude.com/docs/en/permissions">Claude Code — Configure permissions</a>',
+        '<a href="https://dev.to/klement_gunndu/lock-down-claude-code-with-5-permission-patterns-4gcn">DEV — Lock Down Claude Code With 5 Permission Patterns</a>',
+        '<a href="https://claudefa.st/blog/guide/development/permission-management">Claude Fast — Safe vs Fast Development Modes</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t24/">Phân tích sâu T24 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t25"}
+    title={"T25. Session-scoped permission state (once/always/reject)"}
+    tid={"E.2"}
+    location={"<strong>File:</strong> <code>permission/index.ts</code> · <strong>Lines:</strong> 130-282"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodePermissionModelSection_3} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Nếu mỗi bash command đều popup dialog →
+      user spam Enter, permission mất ý nghĩa. "always" cho phép user approve pattern
+      một lần (e.g. <code>ls *</code>), agent execute thoải mái trong session.
+      "reject" cancel ngay. State scoped theo session → không leak giữa
+      sessions.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodePermissionModelSection_4} />
+    <ProsCons
+      pros={[
+        'Balance safety vs velocity: "always" giảm ma sát, "once" cho case hiếm',
+        'Session-scope đảm bảo "always" không leak vào session khác → ít rủi ro',
+        "UI và core decoupled qua event — dễ swap UI (TUI, web, desktop)",
+      ]}
+      cons={[
+        '"always" pattern không được persist → mỗi session mới phải approve lại (trade-off có chủ ý)',
+        "User vội approve pattern quá rộng → tự mở cửa cho agent",
+        "Deferred pattern cần quản lý lifecycle (timeout, interrupt) → thêm phức tạp",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic — Claude Code auto mode: safer way to skip permissions</a>',
+        '<a href="https://opencode.ai/docs/permissions/">OpenCode — Permissions docs</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t25/">Phân tích sâu T25 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t26"}
+    title={"T26. Arity-based command normalization"}
+    tid={"E.3"}
+    location={"<strong>File:</strong> <code>permission/arity.ts</code> · <strong>Lines:</strong> 1-161"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodePermissionModelSection_5} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> User muốn approve <code
+        >"git status"</code
+      > 1 lần, không phải mỗi lần git khác arg. Arity normalization trích "human-readable
+      command" (bỏ flags/paths) từ raw bash. 450+ entries cover ecosystem tool (npm,
+      pnpm, yarn, docker, kubectl, git subcommands). Pattern gợi ý cho user = command
+      normalized → permission "always" nhanh.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodePermissionModelSection_6} />
+    <ProsCons
+      pros={[
+        'UX cao — user approve pattern "human" thay vì regex',
+        "Cover ecosystem: 450+ entries đồng nghĩa handled trước khi user gặp",
+        "Fallback về first token an toàn cho command không biết",
+      ]}
+      cons={[
+        "Maintenance cost — tool mới (bun, deno subcommand) phải thêm vào",
+        "Edge case: <code>sudo npm install</code>, <code>env X=1 git status</code> có thể bị miss",
+        "Users với shell custom (alias, function) không thấy đúng command",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://claudelog.com/faqs/what-is-wildcard-bash-permissions-in-claude-code/">ClaudeLog — Wildcard Bash Permissions</a>',
+        '<a href="https://dev.to/klement_gunndu/lock-down-claude-code-with-5-permission-patterns-4gcn">DEV — 5 Permission Patterns</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t26/">Phân tích sâu T26 →</DeepDiveLink>
+  </Technique>
+</Section>

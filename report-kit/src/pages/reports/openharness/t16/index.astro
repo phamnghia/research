@@ -1,0 +1,405 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T16 — Plugin manifest-based loading | OpenHarness"
+  description="Phân tích sâu plugin manifest system của OpenHarness: plugin.json schema, auto-scan từ ~/.openharness/plugins/ và project-local dirs, command namespace, và tích hợp với skills/hooks/MCP."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/openharness/" label="← openharness report" />
+      <Hero
+        title="T16 — Plugin manifest-based loading"
+        subtitle="OpenHarness plugin system đóng gói skills, hooks, MCP configs, và agents vào một distributable unit — được discover tự động qua plugin.json manifest và command namespace để tránh conflict."
+        meta={[
+          { label: 'Nhóm', value: 'D — Extension Ecosystem' },
+          { label: 'File', value: '<code>plugins/loader.py:104-157</code>' },
+          { label: 'Search dirs', value: '<code>~/.openharness/plugins/</code> · <code>.openharness/plugins/</code>' },
+          { label: 'ID', value: 'D.3' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          Plugin là đơn vị phân phối lớn nhất trong OpenHarness extension ecosystem — cao hơn
+          skill (T14) và hook (T15). Một plugin bundle tất cả extension types cần thiết cho
+          một use-case hoàn chỉnh vào một thư mục duy nhất với <code>plugin.json</code> manifest.
+        </p>
+        <WhyImportant>
+          <strong>Punchline từ Claude Code Extensions guide:</strong>
+          <em>"Plugins are installable bundles combining skills, agents, hooks, and MCP configs
+          into a single distributable unit."</em> Điều này cho phép distribute một "security audit toolkit"
+          hay "deployment assistant" như một package duy nhất — không phải hướng dẫn user
+          copy 4 loại file vào 4 chỗ khác nhau.
+        </WhyImportant>
+        <Callout type="unique">
+          <strong>Command namespace:</strong>
+          <em>"The command namespace plugin:plugin-name:command prevents skill name collision
+          between plugins."</em> Nếu plugin A và plugin B đều có skill tên <code>test</code>,
+          chúng sống ở <code>plugin:pluginA:test</code> và <code>plugin:pluginB:test</code>
+          — không bao giờ conflict. Đây là design choice quan trọng cho plugin ecosystem lớn.
+        </Callout>
+        <Callout type="warn">
+          <em>"A plugin without a manifest file is ignored silently — validate your plugin.json
+          schema first."</em> Đây là silent failure pattern — không có warning, plugin đơn giản
+          không tồn tại trong system. Luôn validate manifest trước khi distribute plugin.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code: plugins/loader.py" themeTag="Anatomy">
+        <Subheading level="h3" text="Plugin dataclass — manifest fields" />
+        <p>
+          <code>Plugin</code> dataclass map trực tiếp từ <code>plugin.json</code> fields,
+          với tất cả path fields là optional (<code>Path | None</code>) — plugin có thể
+          chỉ có skills mà không có hooks, hoặc chỉ có MCP config.
+        </p>
+        <CodeBlock caption="plugins/loader.py — Plugin dataclass + load_plugins()">
+          <Fragment is:raw>{`
+@dataclass
+class Plugin:
+    name: str
+    version: str
+    description: str
+    base_dir: Path
+    skills_dir: Path | None
+    hooks_file: Path | None
+    mcp_file: Path | None
+    agents_dir: Path | None
+
+def load_plugins(search_dirs: list[Path]) -> list[Plugin]:
+    plugins = []
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for plugin_dir in sorted(search_dir.iterdir()):
+            manifest = plugin_dir / "plugin.json"
+            if not manifest.exists():
+                continue  # silently ignored
+            try:
+                data = json.loads(manifest.read_text())
+                plugin = Plugin(
+                    name=data["name"],
+                    version=data.get("version", "0.0.0"),
+                    description=data.get("description", ""),
+                    base_dir=plugin_dir,
+                    skills_dir=_resolve(plugin_dir, data.get("skills_dir")),
+                    hooks_file=_resolve(plugin_dir, data.get("hooks_file")),
+                    mcp_file=_resolve(plugin_dir, data.get("mcp_file")),
+                    agents_dir=_resolve(plugin_dir, data.get("agents_dir")),
+                )
+                plugins.append(plugin)
+            except (KeyError, json.JSONDecodeError) as e:
+                logger.warning(f"Plugin {plugin_dir.name}: invalid manifest: {e}")
+    return plugins
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          <code>sorted(search_dir.iterdir())</code> đảm bảo load order deterministic —
+          alphabetical sort theo plugin directory name. Khi có conflict (2 plugins cùng skill name),
+          plugin load trước (theo alphabet) win. Đây là <em>first-wins by sort order</em> policy.
+        </p>
+
+        <Subheading level="h3" text="plugin.json manifest — ví dụ thực tế" />
+        <CodeBlock lang="json" caption="~/.openharness/plugins/security-toolkit/plugin.json">
+          <Fragment is:raw>{`
+{
+  "name": "security-toolkit",
+  "version": "1.2.0",
+  "description": "Security auditing skills + SAST hooks",
+  "skills_dir": "skills/",
+  "hooks_file": "hooks.yaml",
+  "mcp_file": "mcp.json",
+  "agents_dir": "agents/"
+}
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          Tất cả path fields là relative so với <code>base_dir</code> của plugin.
+          <code>_resolve(plugin_dir, relative_path)</code> join chúng thành absolute path.
+          Nếu field bị omit (ví dụ không có <code>agents_dir</code>), value là <code>None</code>
+          và downstream code bỏ qua gracefully.
+        </p>
+
+        <Subheading level="h3" text="Search dirs — global vs project-local" />
+        <Diagram>{`
+Plugin search order:
+
+  1. ~/.openharness/plugins/          ← Global user plugins
+     security-toolkit/
+       plugin.json
+       skills/
+       hooks.yaml
+
+  2. .openharness/plugins/            ← Project-local plugins (CWD)
+     company-deploy/
+       plugin.json
+       skills/
+       hooks.yaml
+
+Project-local plugins load SAU global → có thể override global plugins
+(nếu cùng tên, first-wins theo sort, nhưng project-local search_dir
+được pass vào search_dirs list với priority theo caller)
+`}</Diagram>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T16 (Plugin manifest) tương tác với:
+
+  T14 (Skill loader)
+    └─ Plugin.skills_dir → pass vào load_all_skills(plugin_dirs=[...])
+       Skills từ plugin được namespaced: plugin:security-toolkit:audit
+       Cùng 3-stage loading như bundled skills
+
+  T15 (Hook system)
+    └─ Plugin.hooks_file → path của hooks.yaml do plugin cung cấp
+       HookExecutor nhận hook list từ plugin hooks file
+       Hooks từ plugin merge với user hooks (dedup theo event+command)
+
+  T17 (MCP integration)
+    └─ Plugin.mcp_file → MCP server config bundle cùng plugin
+       Ví dụ: security-toolkit bundled với semgrep MCP server
+       User không phải configure MCP riêng — plugin lo hết
+
+  Agent system
+    └─ Plugin.agents_dir → sub-agents contribute bởi plugin
+       Agents có thể được invoke từ skill hoặc hook trong cùng plugin
+`}</Diagram>
+        <Callout type="info">
+          Plugin là orchestration layer — không implement logic trực tiếp mà
+          <strong>wire các extension types lại với nhau</strong>. Một plugin "security-toolkit"
+          có thể: (1) đăng ký skill <code>audit-code</code>, (2) đăng ký PRE_TOOL_USE hook
+          check dangerous commands, (3) configure MCP server Semgrep — tất cả tự động khi
+          user install plugin.
+        </Callout>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: Missing 'name' → KeyError, plugin bị bỏ qua" />
+        <CodeBlock caption="Manifest thiếu required field 'name'">
+          <Fragment is:raw>{`
+# plugin.json thiếu "name" field:
+{
+  "version": "1.0.0",
+  "description": "My plugin",
+  "skills_dir": "skills/"
+  // "name" bị quên → KeyError khi data["name"]
+}
+
+# Kết quả: logger.warning("Plugin my-plugin: invalid manifest: 'name'")
+# Plugin không được load — SILENT fail từ user perspective
+# User install plugin, invoke /plugin:my-plugin:skill → "not found"
+
+# Fix: validate manifest trước khi distribute
+import jsonschema
+MANIFEST_SCHEMA = {
+    "required": ["name"],
+    "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+        "version": {"type": "string"},
+    }
+}
+jsonschema.validate(manifest_data, MANIFEST_SCHEMA)
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: Path traversal — skills_dir trỏ ra ngoài plugin dir" />
+        <CodeBlock caption="Security concern: relative path resolution">
+          <Fragment is:raw>{`
+# Malicious hoặc buggy plugin.json:
+{
+  "name": "evil-plugin",
+  "skills_dir": "../../.openharness/skills/"
+  // → _resolve() join thành absolute path pointing OUTSIDE plugin dir
+  // → Load skills từ user skills dir dưới namespace plugin:evil-plugin:*
+  // → Có thể shadow user skills với crafted versions
+}
+
+# Mitigation: validate resolved path vẫn nằm trong plugin base_dir
+def _resolve(base_dir: Path, relative: str | None) -> Path | None:
+    if relative is None:
+        return None
+    resolved = (base_dir / relative).resolve()
+    # Security check: ensure no path traversal
+    if not str(resolved).startswith(str(base_dir.resolve())):
+        raise ValueError(f"Path traversal detected: {relative}")
+    return resolved
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 3: Plugin name conflict — first-wins by sort order" />
+        <CodeBlock caption="Hai plugins định nghĩa cùng skill name">
+          <Fragment is:raw>{`
+# ~/.openharness/plugins/
+#   aaa-plugin/plugin.json  →  name: "toolkit", skills: [audit]
+#   zzz-plugin/plugin.json  →  name: "toolkit", skills: [audit]  # CONFLICT
+
+# sorted(search_dir.iterdir()) → aaa-plugin load trước
+# "aaa-plugin/skills/audit" được load, seen_names = {"audit"}
+# "zzz-plugin/skills/audit" bị skip vì "audit" đã trong seen_names
+
+# User không biết zzz-plugin/audit bị shadowed
+# Không có warning nào được emit
+
+# Mitigation: dùng namespaced skill names trong plugin
+# Thay vì "audit" → "security-audit" hoặc "toolkit-audit"
+# Namespace command: plugin:aaa-plugin:audit (tự động không conflict)
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Plugin format', 'Auto-load', 'Namespace', 'Components']}
+          rows={[
+            [
+              '<strong>OpenHarness</strong>',
+              'plugin.json manifest',
+              'Yes — scan ~/.openharness/plugins/ + project-local',
+              'plugin:name:cmd',
+              'skills + hooks + mcp + agents',
+            ],
+            [
+              'Claude Code',
+              'Plugin via CLI / marketplace',
+              'Yes — namespaced auto-discover',
+              'Namespaced',
+              'skills + hooks + mcp',
+            ],
+            [
+              'Aider',
+              'N/A',
+              'N/A',
+              'N/A',
+              'N/A',
+            ],
+            [
+              'LangGraph',
+              'Python package (pip)',
+              'No — explicit import',
+              'Python module namespace',
+              'Tools + nodes',
+            ],
+          ]}
+        />
+        <p>
+          OpenHarness và Claude Code có mô hình plugin gần nhau nhất — cả hai đều có manifest,
+          auto-scan, và namespacing. Điểm khác biệt chính: OpenHarness thêm
+          <strong>agents_dir</strong> trong manifest (Claude Code chưa có trong spec public),
+          và OpenHarness scan cả <strong>project-local</strong> plugin dir
+          (<code>.openharness/plugins/</code>) — hữu ích cho monorepo có plugin riêng per-project.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>Minimal plugin loader với manifest validation và path safety check:</p>
+        <CodeBlock caption="plugin_loader.py — minimal implementation">
+          <Fragment is:raw>{`
+import json
+from dataclasses import dataclass
+from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class Plugin:
+    name: str
+    version: str
+    description: str
+    base_dir: Path
+    skills_dir: Path | None = None
+    hooks_file: Path | None = None
+    mcp_file: Path | None = None
+    agents_dir: Path | None = None
+
+def _resolve_safe(base: Path, rel: str | None) -> Path | None:
+    if rel is None:
+        return None
+    resolved = (base / rel).resolve()
+    if not str(resolved).startswith(str(base.resolve())):
+        raise ValueError(f"Path traversal: {rel!r} escapes plugin dir")
+    return resolved
+
+def load_plugins(search_dirs: list[Path]) -> list[Plugin]:
+    plugins: list[Plugin] = []
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for plugin_dir in sorted(search_dir.iterdir()):
+            if not plugin_dir.is_dir():
+                continue
+            manifest = plugin_dir / "plugin.json"
+            if not manifest.exists():
+                continue  # silently skip — by design
+            try:
+                data = json.loads(manifest.read_text(encoding="utf-8"))
+                plugins.append(Plugin(
+                    name=data["name"],          # required — KeyError if missing
+                    version=data.get("version", "0.0.0"),
+                    description=data.get("description", ""),
+                    base_dir=plugin_dir,
+                    skills_dir=_resolve_safe(plugin_dir, data.get("skills_dir")),
+                    hooks_file=_resolve_safe(plugin_dir, data.get("hooks_file")),
+                    mcp_file=_resolve_safe(plugin_dir, data.get("mcp_file")),
+                    agents_dir=_resolve_safe(plugin_dir, data.get("agents_dir")),
+                ))
+            except (KeyError, json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Plugin {plugin_dir.name}: skipped — {e}")
+    return plugins
+
+# Usage:
+GLOBAL_PLUGINS = Path.home() / ".openharness" / "plugins"
+LOCAL_PLUGINS = Path.cwd() / ".openharness" / "plugins"
+plugins = load_plugins([GLOBAL_PLUGINS, LOCAL_PLUGINS])
+`}</Fragment>
+        </CodeBlock>
+        <Callout type="info">
+          Sau khi load plugins, pass <code>[p.skills_dir for p in plugins if p.skills_dir]</code>
+          vào <code>load_all_skills(plugin_dirs=...)</code> (T14) và
+          <code>[p.hooks_file for p in plugins if p.hooks_file]</code>
+          vào <code>HookExecutor</code> (T15) để wire up toàn bộ extension ecosystem.
+        </Callout>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://muneebsa.medium.com/claude-code-extensions-explained-skills-mcp-hooks-subagents-agent-teams-plugins-9294907e84ff">Medium — Claude Code Extensions Explained</a> · Punchlines về plugin bundle, namespace, silent-fail pattern',
+            '<a href="https://platform.claude.com/docs/en/agents-and-tools/claude-code/extensions">Anthropic — Claude Code Extensions docs</a> · Plugin format, manifest fields, auto-load behavior',
+            '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Harness Engineering for Coding Agents</a> · Plugin system trong harness engineering context',
+            '<a href="https://opencode.ai/docs/plugins/">OpenCode — Plugin system docs</a> · Plugin model tham chiếu, so sánh manifest approach',
+            '<a href="https://owasp.org/www-community/attacks/Path_Traversal">OWASP — Path Traversal</a> · Security background cho path resolution validation',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

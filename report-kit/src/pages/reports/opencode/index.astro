@@ -1,0 +1,45 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import {
+  title,
+  description,
+  sidebarGroups,
+  heroMeta,
+} from '../../../data/reports/opencode-report';
+import OpencodeIntroSection from './_components/OpencodeIntroSection.astro';
+import OpencodeAgentLoopSection from './_components/OpencodeAgentLoopSection.astro';
+import OpencodeContextManagementSection from './_components/OpencodeContextManagementSection.astro';
+import OpencodeToolDesignSection from './_components/OpencodeToolDesignSection.astro';
+import OpencodeProviderAbstractionSection from './_components/OpencodeProviderAbstractionSection.astro';
+import OpencodePermissionModelSection from './_components/OpencodePermissionModelSection.astro';
+import OpencodeSystemPromptSection from './_components/OpencodeSystemPromptSection.astro';
+import OpencodeConclusionSection from './_components/OpencodeConclusionSection.astro';
+import OpencodeSourcesSection from './_components/OpencodeSourcesSection.astro';
+---
+
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar groups={sidebarGroups} />
+    <main>
+      <Breadcrumb />
+      <Hero
+        title={"opencode — Nghiên cứu sâu các kỹ thuật Harness"}
+        subtitle={"Phân tích chi tiết scaffolding agent-loop trong repo <a href=\"https://github.com/anomalyco/opencode\">anomalyco/opencode</a> (aka sst/opencode). 28 kỹ thuật, mỗi kỹ thuật kèm code thật từ repo, code example, pros/cons và bài viết tham khảo."}
+        meta={heroMeta}
+      />
+
+      <OpencodeIntroSection />
+      <OpencodeAgentLoopSection />
+      <OpencodeContextManagementSection />
+      <OpencodeToolDesignSection />
+      <OpencodeProviderAbstractionSection />
+      <OpencodePermissionModelSection />
+      <OpencodeSystemPromptSection />
+      <OpencodeConclusionSection />
+      <OpencodeSourcesSection />
+    </main>
+  </div>
+</ReportLayout>

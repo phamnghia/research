@@ -1,0 +1,489 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import CodeBlock from "../../../../components/CodeBlock.astro";
+import WhyImportant from "../../../../components/WhyImportant.astro";
+import DeepDiveLink from "../../../../components/DeepDiveLink.astro";
+
+const __code_OpencodeToolDesignSection_1 = `        // tool/bash.ts import DESCRIPTION from "./bash.txt" import { Tool }
+        from "./tool" export const BashTool = Tool.define("bash", { description:
+        renderTemplate(DESCRIPTION, { PLATFORM: process.platform, SHELL:
+        process.env.SHELL, MAX_LINES: 2000, }), parameters: z.object({ command:
+        z.string(), timeout: z.number().optional(), }), // ... })
+      `;
+const __code_OpencodeToolDesignSection_2 = `        # tool/bash.txt (excerpt) Execute shell commands in a persistent {SHELL}
+        session on {PLATFORM}. &lt;important-rules&gt; - DO NOT use \`find\` or
+        \`grep\` — use the dedicated Grep/Glob tools instead. - Quote paths with
+        spaces. - Output is truncated to {MAX_LINES} lines.
+        &lt;/important-rules&gt;
+      `;
+const __code_OpencodeToolDesignSection_3 = `        // edit.ts import DESCRIPTION from "./edit.txt" export const EditTool =
+        defineTool({ name: "edit", description: DESCRIPTION
+        .replace("{MAX_FILE_SIZE}", String(MAX_FILE_SIZE))
+        .replace("{READ_REQUIREMENT}", "You MUST Read the file first"), schema:
+        editSchema, handler: editHandler, })
+      `;
+const __code_OpencodeToolDesignSection_4 = `        export namespace Tool { export const define = &lt;P extends z.ZodType,
+        R&gt;( id: string, init: Effect.Effect&lt;Definition&lt;P, R&gt;, never,
+        Truncate | Agent&gt;, ) =&gt; { return Effect.gen(function* () { const
+        def = yield* init // resolve services ONCE at definition time const
+        truncate = yield* Truncate const agent = yield* Agent // Return a
+        wrapped version that intercepts execute for truncation + tracing return
+        wrap(id, def, truncate, agent) }) } function wrap&lt;P, R&gt;(id:
+        string, def: Definition&lt;P, R&gt;, truncate: Truncate, agent: Agent) {
+        return { ...def, execute: (args: z.infer&lt;P&gt;, ctx: ExecuteCtx)
+        =&gt; Effect.withSpan(\`Tool.execute\`, { attributes: { "tool.name": id }
+        })( def.execute(args, ctx).pipe( Effect.tap((result) =&gt;
+        truncate.apply(id, result)), ), ), } } }
+      `;
+const __code_OpencodeToolDesignSection_5 = `        function defineTool&lt;A&gt;(id: string, factory: (deps: Deps) =&gt;
+        ToolDef&lt;A&gt;) { const deps = resolveDeps() // inject once const base
+        = factory(deps) return { ...base, execute: async (args: A, ctx: Ctx)
+        =&gt; { const span = tracer.startSpan(\`tool.\${id}\`) try { const raw =
+        await base.execute(args, ctx) return deps.truncate(raw) // auto truncate
+        } finally { span.end() } }, } }
+      `;
+const __code_OpencodeToolDesignSection_6 = `        const MAX_LINES = 2_000 const MAX_BYTES = 50_000 export function
+        truncateOutput( output: string, opts: { direction?: "head" | "tail";
+        toolName: string; callId: string } = {}, ) { const { direction = "tail",
+        toolName, callId } = opts const lines = output.split("\\n") if
+        (lines.length &lt;= MAX_LINES &amp;&amp; output.length &lt;= MAX_BYTES)
+        return output // Giữ lại "tail" (hoặc head) theo direction const keep =
+        direction === "tail" ? lines.slice(-MAX_LINES).join("\\n") :
+        lines.slice(0, MAX_LINES).join("\\n") // Ghi full output ra file để agent
+        có thể đọc lại bằng Read/Grep const spillPath =
+        \`/tmp/opencode-overflow/\${toolName}-\${callId}.txt\`
+        fs.writeFileSync(spillPath, output) return \`\${keep}
+        &lt;truncated-notice&gt; Output truncated to last \${MAX_LINES} lines.
+        Full output saved to \${spillPath}. Use the Read or Grep tool to access
+        specific parts. &lt;/truncated-notice&gt;\` }
+      `;
+const __code_OpencodeToolDesignSection_7 = `        async function truncateAndSpill( output: string, meta: { tool: string;
+        callId: string }, ): Promise&lt;string&gt; { if (output.length &lt;=
+        50_000) return output const tail = output.slice(-50_000) const path =
+        \`/tmp/agent-overflow/\${meta.tool}-\${meta.callId}.log\` await
+        fs.writeFile(path, output) return tail + \`\\n\\n[Output was
+        \${output.length} bytes, truncated to last 50k. \` + \`Full content:
+        \${path}. Use Read/Grep to inspect.]\` }
+      `;
+const __code_OpencodeToolDesignSection_8 = `        function validateArgs&lt;P extends z.ZodType&gt;(parameters: P, raw:
+        unknown): z.infer&lt;P&gt; { const parsed = parameters.safeParse(raw) if
+        (!parsed.success) { const issues = parsed.error.issues .map((i) =&gt;
+        \`\${i.path.join(".")}: \${i.message}\`) .join("; ") throw new ToolArgError(
+        \`Please rewrite the input with valid arguments. Errors: \${issues}\`, ) }
+        return parsed.data }
+      `;
+const __code_OpencodeToolDesignSection_9 = `        import { z } from "zod" const EditArgs = z.object({ file_path:
+        z.string().min(1), old_string: z.string(), new_string: z.string(), })
+        function validateEdit(raw: unknown) { const r = EditArgs.safeParse(raw)
+        if (!r.success) { const details = r.error.issues .map(i =&gt;
+        \`\${i.path.join(".")}: \${i.message}\`) .join("; ") throw new Error(\`Please
+        rewrite the input. Errors: \${details}\`) } return r.data }
+      `;
+const __code_OpencodeToolDesignSection_10 = `        // 3 tier, try từ strict → loose const REPLACERS = [ SimpleReplacer, //
+        exact match LineTrimmedReplacer, // ignore leading/trailing whitespace
+        per line BlockAnchorReplacer, // match first + last line, fuzzy middle ]
+        as const export async function applyEdit(content: string, oldStr:
+        string, newStr: string) { for (const replacer of REPLACERS) { const
+        match = replacer.findMatch(content, oldStr) if (match) { return
+        replacer.replace(content, match, newStr) } } throw new
+        NoMatchError("old_string not found in file") } // BlockAnchorReplacer:
+        match dòng đầu + dòng cuối của block, // rồi Levenshtein distance các
+        dòng giữa với threshold class BlockAnchorReplacer { static
+        findMatch(content: string, oldStr: string) { const oldLines =
+        oldStr.split("\\n") if (oldLines.length &lt; 3) return null // chỉ áp
+        dụng block &gt;= 3 dòng const first = oldLines[0].trim() const last =
+        oldLines[oldLines.length - 1].trim() const candidates =
+        findAllAnchorPairs(content, first, last) const scored =
+        candidates.map((c) =&gt; ({ ...c, score: levenshteinRatio(oldStr,
+        content.slice(c.start, c.end)), })) scored.sort((a, b) =&gt; b.score -
+        a.score) const threshold = scored.length &gt; 1 ? 0.3 : 0.0 return
+        scored[0]?.score &gt;= threshold ? scored[0] : null } }
+      `;
+const __code_OpencodeToolDesignSection_11 = `        const replacers = [exactMatch, trimmedMatch, anchorMatch] function
+        replaceFlex(content: string, oldStr: string, newStr: string) { for
+        (const r of replacers) { const m = r.find(content, oldStr) if (m) return
+        content.slice(0, m.start) + newStr + content.slice(m.end) } throw new
+        Error("No match found. Re-read the file and retry.") } function
+        anchorMatch(content: string, oldStr: string) { const lines =
+        oldStr.split("\\n") if (lines.length &lt; 3) return null const [first,
+        ...rest] = lines const last = rest.pop()! // Tìm tất cả anchor pairs,
+        chọn cặp có Levenshtein ratio cao nhất // ... }
+      `;
+const __code_OpencodeToolDesignSection_12 = `        import TreeSitter from "web-tree-sitter" import BashWasm from
+        "tree-sitter-bash/tree-sitter-bash.wasm" with { type: "file" } //
+        Lazy-load parser một lần let parserPromise:
+        Promise&lt;TreeSitter.Parser&gt; | null = null function getParser() { if
+        (!parserPromise) { parserPromise = (async () =&gt; { await
+        TreeSitter.init() const parser = new TreeSitter()
+        parser.setLanguage(await TreeSitter.Language.load(BashWasm)) return
+        parser })() } return parserPromise } const DESTRUCTIVE_COMMANDS = new
+        Set(["rm", "mv", "cp", "dd", "chmod", "chown"]) export async function
+        analyzeCommand(cmd: string) { const parser = await getParser() const
+        tree = parser.parse(cmd) const commands: Array&lt;{ name: string; args:
+        string[]; paths: string[] }&gt; = [] walkTree(tree.rootNode, (node)
+        =&gt; { if (node.type === "command") { const name =
+        node.childForFieldName("name")?.text ?? "" const args =
+        node.childrenForFieldName("argument").map((a) =&gt; a.text) const paths
+        = args.filter((a) =&gt; looksLikePath(a)) commands.push({ name, args,
+        paths }) } }) return { commands, modifiesFiles: commands.some((c) =&gt;
+        DESTRUCTIVE_COMMANDS.has(c.name)), } }
+      `;
+const __code_OpencodeToolDesignSection_13 = `        // Simplified: detect các command modify file async function
+        extractDangerousPaths(cmd: string): Promise&lt;string[]&gt; { const tree
+        = await parseBash(cmd) const paths: string[] = [] walk(tree.rootNode,
+        (node) =&gt; { if (node.type !== "command") return const name =
+        node.childForFieldName("name")?.text if (!DESTRUCTIVE.has(name)) return
+        for (const arg of node.namedChildren) { if (arg.type === "word"
+        &amp;&amp; looksLikePath(arg.text)) paths.push(arg.text) } }) return
+        paths }
+      `;
+const __code_OpencodeToolDesignSection_14 = `        export const TaskTool = Tool.define("task", Effect.gen(function* () {
+        const ops = yield* Session.Ops return { description: TASK_DESCRIPTION,
+        parameters: z.object({ description: z.string().describe("3-5 word task
+        summary"), prompt: z.string(), subagent_type: z.enum(["general-purpose",
+        "explore", "plan"]).default("general-purpose"), }), async execute(args,
+        ctx) { // Child session thừa hưởng permission rules nhưng với
+        restrictions const childSession = yield*
+        ops.createChildSession(ctx.sessionId, { agent: args.subagent_type,
+        inheritPermissions: true, deniedTools: ["task", "todowrite"], // prevent
+        recursion / scope creep }) // Recursive: gọi lại ops.prompt() trên child
+        session const result = yield* ops.prompt(childSession.id, { message:
+        args.prompt, description: args.description, }) return { summary:
+        result.finalMessage.text, toolCalls: result.toolCalls.length,
+        tokensUsed: result.usage.total, } }, } }))
+      `;
+const __code_OpencodeToolDesignSection_15 = `        async function spawnSubAgent(opts: { prompt: string type: "explore" |
+        "plan" parent: Session }) { const child = await createSession({ agent:
+        opts.type, system: getAgentSystem(opts.type), permissions:
+        inheritFrom(opts.parent).deny(["task", "todowrite"]), parent:
+        opts.parent.id, }) const result = await runLoop(child, opts.prompt)
+        return { summary: result.finalText, // ONLY summary gửi về parent cost:
+        result.cost, } }
+      `;
+const __code_OpencodeToolDesignSection_16 = `        export async function discoverPluginTools(configDirs: string[]) { const
+        tools: Tool[] = [] for (const dir of configDirs) { const files = await
+        glob("{tool,tools}/*.{js,ts,mjs}", { cwd: dir, absolute: true }) for
+        (const file of files) { try { const mod = await import(file) const
+        toolDef = mod.default ?? mod.tool if (!toolDef) continue // Wrap với
+        fromPlugin: auto-truncate + sandboxed permission
+        tools.push(Tool.fromPlugin(toolDef, { source: file })) } catch (err) {
+        log.warn(\`Plugin tool load failed: \${file}\`, err) } } } return tools }
+      `;
+const __code_OpencodeToolDesignSection_17 = `        import { glob } from "fast-glob" import { pathToFileURL } from
+        "node:url" async function loadUserTools(pluginDirs: string[]):
+        Promise&lt;Tool[]&gt; { const out: Tool[] = [] for (const dir of
+        pluginDirs) { const files = await glob(["tool/*.{js,ts}",
+        "tools/*.{js,ts}"], { cwd: dir }) for (const f of files) { const mod =
+        await import(pathToFileURL(f).href) const def = mod.default if
+        (def?.name &amp;&amp; def?.execute) { out.push(wrapTool(def)) //
+        auto-apply truncate / perm / trace } } } return out }
+      `;
+---
+
+<Section
+  id={"section-c"}
+  title={"C. Tool Design — Cách định nghĩa, truncate, match & thực thi tool"}
+>
+  <p class="lead">
+    Tool là "tay chân" của agent. opencode đặc biệt đầu tư vào: description được
+    tách thành file
+    <code>.txt</code> riêng, output luôn được truncate, edit tool có 3-tier fuzzy
+    matching, bash command parse bằng tree-sitter để extract permission context. Đây
+    là nhóm kỹ thuật nhiều nhất (8 kỹ thuật).
+  </p>
+  <Technique
+    id={"t13"}
+    title={"T13. Tool description .txt pattern"}
+    tid={"C.1"}
+    location={"<strong>File:</strong> <code>tool/*.txt</code> (mỗi tool có 1 file)"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeToolDesignSection_1} />
+    <CodeBlock code={__code_OpencodeToolDesignSection_2} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Tool description thường rất dài (vài trăm
+      dòng) và đóng vai trò như "mini system prompt" cho tool đó. Tách ra file <code
+        >.txt</code
+      > với template variable giúp: (1) version control tốt hơn, (2) không cần escape
+      trong code, (3) dễ A/B test prompt bằng cách swap file, (4) non-dev cũng có
+      thể edit.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeToolDesignSection_3} />
+    <ProsCons
+      pros={[
+        'Description dài không làm "nặng" file <code>.ts</code> — giữ code clean',
+        "Dễ grep, diff, review khi prompt thay đổi (mỗi thay đổi = 1 PR có thể thấy rõ)",
+        "Template interpolation cho phép description động (platform, feature flag)",
+      ]}
+      cons={[
+        "Tool description không có type safety — typo trong template variable sẽ fail runtime",
+        "Cần build setup để bundle <code>.txt</code> vào runtime (Bun hỗ trợ sẵn, Node cần loader)",
+        "Non-trivial để test: phải render template rồi so sánh string",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic — Claude Code auto mode (tool description patterns)</a>',
+        '<a href="https://blog.dailydoseofds.com/p/the-anatomy-of-an-agent-harness">Avi Chawla — The Anatomy of an Agent Harness</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t13/">Phân tích sâu T13 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t14"}
+    title={"T14. Effect-based lazy tool init với service injection"}
+    tid={"C.2"}
+    location={"<strong>File:</strong> <code>tool/tool.ts</code> · <strong>Lines:</strong> 119-142"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeToolDesignSection_4} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Tool cần dùng Truncate service, Agent config,
+      Logger... Nếu inject tại mỗi execute → performance tệ, test khó. Effect <code
+        >init</code
+      > resolve services 1 lần ở define-time, sau đó wrap execute để chèn truncation
+      + OTel span tự động. Toàn bộ tool "miễn phí" observability.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeToolDesignSection_5} />
+    <ProsCons
+      pros={[
+        "Tool author không cần nhớ truncate / trace — wrapper lo hết",
+        "Service injection rõ ràng ở type level (Effect's R channel)",
+        "Test easy — mock Truncate/Agent là đủ",
+      ]}
+      cons={[
+        "Effect-TS learning curve cao — đội mới khó onboard",
+        "Wrapping có overhead nhỏ (mỗi call tạo span, dù không log)",
+        "Nếu muốn tool bỏ qua truncate (vd stream), phải có escape hatch phức tạp",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://effect.website/">Effect — official site</a>',
+        '<a href="https://blog.type-driven.com/effect-ts-new-standard/">Type Driven Blog — Why Effect is Becoming the Go-To Choice for TypeScript APIs</a>',
+        '<a href="https://opentelemetry.io/blog/2025/ai-agent-observability/">OpenTelemetry — AI Agent Observability</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t14/">Phân tích sâu T14 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t15"}
+    title={"T15. Output truncation với tail-keep + file spill"}
+    tid={"C.3"}
+    location={"<strong>File:</strong> <code>tool/truncate.ts</code> · <strong>Lines:</strong> 64-126"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeToolDesignSection_6} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Tool output như <code
+        >bash ls -R /</code
+      > hay <code>grep -r foo</code> có thể trả về megabyte data → fill sạch context.
+      Truncate đơn thuần làm mất thông tin. Opencode vừa truncate (trả về dòng cuối
+      — thường là dòng quan trọng nhất trong bash output), vừa spill full ra file
+      để agent có thể quay lại đọc bằng Read/Grep tool — "lossy on model, lossless
+      on disk".
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeToolDesignSection_7} />
+    <ProsCons
+      pros={[
+        'Context được bảo vệ — không tool nào có thể "làm ngập" cuộc hội thoại',
+        "Agent vẫn truy cập được full output qua file → không mất thông tin",
+        "Direction head/tail linh hoạt (head cho lỗi compile, tail cho log)",
+      ]}
+      cons={[
+        'File spill chỉ hữu dụng nếu agent "nhớ" path — đôi khi forget và hỏi lại',
+        "Disk IO mỗi lần truncate (dù rare) thêm latency",
+        "Limit 2000 dòng / 50KB là magic number — workload khác nhau cần khác",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Skill Issue: Harness Engineering</a>',
+        '<a href="https://gist.github.com/Haseeb-Qureshi/2213cc0487ea71d62572a645d7582518">Gist — AI Coding Agent Architecture: Claude Code vs Codex vs Cline vs OpenCode</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t15/">Phân tích sâu T15 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t16"}
+    title={"T16. Zod schema validation với custom error format"}
+    tid={"C.4"}
+    location={"<strong>File:</strong> <code>tool/tool.ts</code> · <strong>Lines:</strong> 86-96"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeToolDesignSection_8} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Model thỉnh thoảng gửi args sai schema
+      (wrong type, missing field). Nếu error đơn giản <code
+        >"invalid input"</code
+      >, model không biết sửa ở đâu. Message <strong
+        >"Please rewrite the input with valid arguments. Errors: file_path:
+        Required; limit: expected number, got string"</strong
+      > → model có đủ thông tin để retry đúng format.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeToolDesignSection_9} />
+    <ProsCons
+      pros={[
+        'Error message là "instruction to retry" — model hiểu ngay phải fix gì',
+        "Zod schema double purpose: validation + TypeScript type inference",
+        'Field path (<code>"options.timeout"</code>) giúp model tìm đúng field cần sửa',
+      ]}
+      cons={[
+        "Zod error verbose — nếu schema lồng sâu, message có thể quá dài",
+        "Model đôi khi giữ nguyên arg và chỉ thay error message thành comment → vô dụng",
+        "Không tự retry — tool author phải bọc trong loop nếu muốn auto-retry",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://pydantic.dev/docs/ai/core-concepts/agent/">Pydantic AI — Agents (Python equivalent of this pattern)</a>',
+        '<a href="https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text">Vercel AI SDK — streamText + tool validation</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t16/">Phân tích sâu T16 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t17"}
+    title={"T17. Fuzzy edit matching 3-tier (Simple → LineTrimmed → BlockAnchor)"}
+    tid={"C.5"}
+    location={"<strong>File:</strong> <code>tool/edit.ts</code> · <strong>Lines:</strong> 182-350"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeToolDesignSection_10} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Edit tool fail khi model copy indentation
+      sai hoặc nhớ code gần đúng — đây là loại fail phổ biến nhất của coding agents.
+      3-tier matching: (1) exact → nhanh, (2) trim whitespace → bắt được lỗi indent,
+      (3) block anchor + Levenshtein → bắt được lỗi "model nhớ giữa bị mờ". Threshold
+      0.3 cho multiple candidates tránh match sai khi có nhiều block giống nhau.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeToolDesignSection_11} />
+    <ProsCons
+      pros={[
+        'Giảm đáng kể tỉ lệ "edit fail" của agent → ít retry, trải nghiệm mượt',
+        "Tier theo thứ tự strict → loose đảm bảo không nhầm lẫn khi có exact match",
+        "Threshold adaptive (0.0 khi single, 0.3 khi multiple) tránh false positive",
+      ]}
+      cons={[
+        'Fuzzy match có thể "chọn sai" block nếu threshold 0.3 quá loose với code tương tự nhau',
+        "Levenshtein O(n*m) → chậm với file lớn (&gt;5k lines)",
+        "Model có thể lười, gửi <code>old_string</code> càng ngày càng mờ → rủi ro edit sai âm thầm",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.datacamp.com/tutorial/fuzzy-string-python">DataCamp — Fuzzy String Matching</a>',
+        '<a href="https://medium.com/@r.manov/the-two-algorithms-every-developer-uses-wrong-a-visual-guide-to-fuzzy-string-matching-5d97961bb465">Medium — Visual Guide to Fuzzy String Matching</a>',
+        '<a href="https://medium.com/data-science-collective/deep-dive-into-string-similarity-from-edit-distance-to-fuzzy-matching-theory-and-practice-in-68e214c0cb1d">Medium — Deep Dive into String Similarity</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t17/">Phân tích sâu T17 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t18"}
+    title={"T18. Bash command parsing với tree-sitter WASM"}
+    tid={"C.6"}
+    location={"<strong>File:</strong> <code>tool/bash.ts</code> · <strong>Lines:</strong> 150-320"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeToolDesignSection_12} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Regex để phân tích bash command là bug-farm:
+      <code>"rm -rf /"</code>, <code>"echo hello | rm"</code>, <code
+        >"sh -c 'rm x'"</code
+      > cần được detect đúng. Tree-sitter là full grammar parser → chính xác, handle
+      quoting, subshell, pipes, redirection. Kết quả parse feed vào permission system
+      để extract paths cần approval — an toàn hơn regex hack nhiều.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeToolDesignSection_13} />
+    <ProsCons
+      pros={[
+        "Parse chính xác: subshell <code>$()</code>, pipe, redirection đều không fool được",
+        "WASM portable — chạy cả trong Bun, Node, browser",
+        "Lazy load, init 1 lần → cost thấp sau request đầu",
+      ]}
+      cons={[
+        "WASM asset ~2MB → tăng bundle size / cold start",
+        "Tree-sitter-bash không hỗ trợ hết shell exotic (fish, zsh-specific syntax)",
+        "Deny-rule bypass risk: nếu parse miss 1 pattern, permission có thể leak — cần unit test kỹ",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://tree-sitter.github.io/tree-sitter/">Tree-sitter — official intro</a>',
+        '<a href="https://adversa.ai/blog/claude-code-security-bypass-deny-rules-disabled/">Adversa — Claude Code Critical Vulnerability: Deny rules silently bypassed (relevance)</a>',
+        '<a href="https://claudelog.com/faqs/what-is-wildcard-bash-permissions-in-claude-code/">ClaudeLog — Wildcard Bash Permissions</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t18/">Phân tích sâu T18 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t19"}
+    title={"T19. Sub-agent delegation via Task tool"}
+    tid={"C.7"}
+    location={"<strong>File:</strong> <code>tool/task.ts</code> · <strong>Lines:</strong> 69-145"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeToolDesignSection_14} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Parent agent có context đầy tool output
+      → nếu dùng để search / explore sẽ càng ngập. Sub-agent là "thread ephemeral":
+      spawn với context sạch, làm task cụ thể (search, plan), trả lại compact summary.
+      Parent context không bị ô nhiễm. Deny <code>task</code>, <code
+        >todowrite</code
+      > cho child tránh recursion vô hạn + scope creep.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeToolDesignSection_15} />
+    <ProsCons
+      pros={[
+        "Parent context không bị ô nhiễm bởi tool output của sub-task",
+        "Cho phép parallel: spawn nhiều sub-agent cùng lúc (search, plan, verify)",
+        "Specialized agent (explore/plan) có system prompt tối ưu cho task",
+      ]}
+      cons={[
+        'Sub-agent "mù" về context của parent — cần prompt self-contained, dễ miss info',
+        "Cost x2: parent paid để frame task + sub agent paid để làm",
+        "Khó debug: khi sub-agent sai, parent chỉ thấy summary, không thấy rationale",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic — How we built our multi-agent research system</a>',
+        '<a href="https://dev.to/aws/build-multi-agent-systems-using-the-agents-as-tools-pattern-jce">DEV — Agents as Tools Pattern</a>',
+        '<a href="https://google.github.io/adk-docs/agents/multi-agents/">Google ADK — Multi-agent systems</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t19/">Phân tích sâu T19 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t20"}
+    title={"T20. Plugin tool dynamic discovery"}
+    tid={"C.8"}
+    location={"<strong>File:</strong> <code>tool/registry.ts</code> · <strong>Lines:</strong> 152-173"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeToolDesignSection_16} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Hard-code tool list trong core = mỗi lần
+      muốn thêm tool cần PR core. Discovery pattern: scan folder convention (<code
+        >tool/</code
+      >, <code>tools/</code>), dynamic import, wrap với safety wrapper. User/org
+      có thể inject tool riêng (Slack, Jira, internal DB) mà không fork repo.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeToolDesignSection_17} />
+    <ProsCons
+      pros={[
+        "Extensibility — user tự thêm tool không cần core PR",
+        "Discovery pattern quen thuộc (VSCode, Next.js đều dùng)",
+        "Wrap đảm bảo plugin tool không bypass truncate / permission",
+      ]}
+      cons={[
+        "Security: plugin chạy với quyền process → malicious plugin có thể exfiltrate data",
+        "Type safety yếu — runtime mới biết plugin đúng shape hay chưa",
+        "Plugin load error silent (chỉ warn) → user có thể không biết tool bị miss",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://opencode.ai/docs/agents/">OpenCode — Agents &amp; plugin docs</a>',
+        '<a href="https://dev.to/apssouza22/building-a-production-ready-ai-agent-harness-2570">DEV — Building a Production-Ready AI Agent Harness</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t20/">Phân tích sâu T20 →</DeepDiveLink>
+  </Technique>
+</Section>

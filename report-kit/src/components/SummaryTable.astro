@@ -1,0 +1,41 @@
+---
+// SummaryTable.astro — bảng tóm tắt các kỹ thuật
+// rows = [{ id, title, chipLabel, chipVariant }]
+export interface SummaryRow {
+  id: string;
+  title: string;
+  chipLabel?: string;
+  chipVariant?: 'default' | 'green' | 'amber' | 'purple' | 'cyan' | 'red' | 'unique';
+}
+
+interface Props {
+  rows: SummaryRow[];
+  headers?: [string, string, string];
+}
+
+const { rows, headers = ['ID', 'Kỹ thuật', 'Theme'] } = Astro.props;
+---
+<table>
+  <thead>
+    <tr>
+      <th style="width:60px">{headers[0]}</th>
+      <th>{headers[1]}</th>
+      <th style="width:100px">{headers[2]}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {rows.map((row) => (
+      <tr>
+        <td>{row.id}</td>
+        <td set:html={row.title} />
+        <td>
+          {row.chipLabel && (
+            <span class={`chip ${row.chipVariant && row.chipVariant !== 'default' ? row.chipVariant : ''}`.trim()}>
+              {row.chipLabel}
+            </span>
+          )}
+        </td>
+      </tr>
+    ))}
+  </tbody>
+</table>

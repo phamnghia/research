@@ -1,0 +1,223 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T21 — Multi-provider SDK lazy loading | opencode"
+  description="Phân tích sâu kỹ thuật lazy-load 20+ provider SDK qua dynamic import map — chỉ load SDK đang thật sự dùng, tránh bundle size khổng lồ và slow startup."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T21 — Multi-provider SDK lazy loading"
+        subtitle="<code>BUNDLED_PROVIDERS: Record&lt;string, () =&gt; Promise&lt;Loader&gt;&gt;</code> — 20+ provider, mỗi cái là 1 lazy lambda. Chỉ SDK của provider đang dùng được load. User pick Anthropic → chỉ Anthropic SDK."
+        meta={[
+          { label: 'Nhóm',  value: 'D — Provider Abstraction' },
+          { label: 'File',  value: '<code>provider/provider.ts</code> · Lines 92–117' },
+          { label: 'ID',    value: 'D.1 / T21' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Provider">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> opencode hỗ trợ 20+ provider: Anthropic, OpenAI, Google Gemini, AWS Bedrock, Mistral, Groq, Together, Ollama... Mỗi SDK có size 0.5–5MB. Import eager tất cả → bundle ~50MB+, startup 2–5 giây. Dynamic import giải quyết: mỗi provider là 1 lambda <code>() =&gt; import("./loaders/anthropic")</code>. Chỉ lambda được defined lúc bundle — SDK thật sự chỉ load khi user chọn provider đó.
+        </WhyImportant>
+
+        <Callout type="info">
+          <strong>Vercel AI SDK underneath:</strong> opencode dùng Vercel AI SDK (<code>ai</code> package) làm abstraction layer. Provider loaders adapter Anthropic SDK, OpenAI SDK... vào unified Vercel AI interface — core logic không biết đang dùng provider nào.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="BUNDLED_PROVIDERS map — lazy lambdas" />
+        <CodeBlock caption="provider/provider.ts" lang="typescript"><Fragment is:raw>{`
+// Mỗi entry = 1 lambda trả Promise<Loader>
+// Lambda được define lúc bundle — SDK chỉ import khi lambda được gọi
+const BUNDLED_PROVIDERS: Record<string, () => Promise<Loader>> = {
+  anthropic: () => import("./loaders/anthropic").then((m) => m.default),
+  openai:    () => import("./loaders/openai").then((m) => m.default),
+  google:    () => import("./loaders/google").then((m) => m.default),
+  bedrock:   () => import("./loaders/bedrock").then((m) => m.default),
+  mistral:   () => import("./loaders/mistral").then((m) => m.default),
+  groq:      () => import("./loaders/groq").then((m) => m.default),
+  together:  () => import("./loaders/together").then((m) => m.default),
+  ollama:    () => import("./loaders/ollama").then((m) => m.default),
+  // ... 15+ more
+}
+
+export async function loadProvider(id: string): Promise<Loader> {
+  const loader = BUNDLED_PROVIDERS[id]
+  if (!loader) throw new UnknownProviderError(id)
+  return await loader()  // ← import chỉ xảy ra ở đây
+}
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="Provider Loader interface — unified abstraction" />
+        <CodeBlock caption="provider/loader.ts — Loader interface" lang="typescript"><Fragment is:raw>{`
+export interface Loader {
+  // Tạo Vercel AI compatible provider instance
+  create(config: ProviderConfig): LanguageModel
+
+  // Danh sách models hỗ trợ (cho UI model picker)
+  models(): ModelInfo[]
+
+  // Auth flow nếu cần (vd Anthropic API key)
+  auth?: AuthConfig
+}
+
+// Anthropic loader — adapter sang Vercel AI interface
+// provider/loaders/anthropic.ts
+export default {
+  create(config) {
+    const { createAnthropic } = await import("@ai-sdk/anthropic")
+    const anthropic = createAnthropic({ apiKey: config.apiKey })
+    return anthropic(config.model)  // returns LanguageModel
+  },
+  models: () => ANTHROPIC_MODELS,
+} satisfies Loader
+`}</Fragment></CodeBlock>
+
+        <Diagram>{`
+User config: provider = "anthropic", model = "claude-opus-4"
+                    │
+                    ▼
+loadProvider("anthropic")
+    │
+    ├── BUNDLED_PROVIDERS["anthropic"]   ← look up lambda (no import yet)
+    │
+    └── lambda()                          ← trigger import NOW
+         │
+         ▼
+     import("./loaders/anthropic")        ← load anthropic loader
+         │
+         ▼
+     loader.create({ apiKey, model })
+         │
+         ▼
+     import("@ai-sdk/anthropic")          ← load actual SDK
+         │
+         ▼
+     LanguageModel (Vercel AI interface)
+         │
+         ▼
+     AI SDK streamText(model, messages)   ← unified API
+        `}</Diagram>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T22 (Provider transform):</strong> Sau khi load provider, messages phải đi qua transform layer trước khi gửi — mỗi provider có quirks riêng trong message format.</li>
+          <li><strong>T23 (Overflow + retry):</strong> Provider loaders cũng wrap call với error handling — overflow detection và retry xảy ra ở tầng trên loader, không phải trong loader.</li>
+          <li><strong>T26 (Cost matrix):</strong> Mỗi loader có thể expose cost information (input/output token price) → cost-aware routing có thể chọn provider rẻ hơn cho task đơn giản.</li>
+          <li><strong>T10 (Cache-aware prompt):</strong> Anthropic loader cần xử lý cache headers đặc biệt — <code>anthropic-beta: prompt-caching-2024-07-31</code>. Google Gemini, OpenAI không có equivalent.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. First-call latency" />
+        <p>
+          Lần đầu gọi provider có thêm latency do dynamic import (~50–200ms tùy SDK size). Lần sau cache module. Với interactive CLI, latency 200ms cảm nhận được.
+        </p>
+        <Callout type="warn">
+          <strong>Mitigation:</strong> Preload provider config khi app khởi động — không cần load SDK ngay, nhưng validate config và kiểm tra API key sớm để fail fast thay vì fail tại lần gọi đầu tiên.
+        </Callout>
+
+        <Subheading level="h3" text="2. Loader load error chỉ xuất hiện runtime" />
+        <p>
+          Nếu <code>./loaders/anthropic.ts</code> có syntax error hoặc import lỗi, chỉ phát hiện khi user thật sự dùng Anthropic. TypeScript không check dynamic import path at compile time.
+        </p>
+
+        <Subheading level="h3" text="3. Provider update phá API" />
+        <p>
+          Khi <code>@ai-sdk/anthropic</code> update major version, loader phải update. Nếu miss, dynamic import pass (file tồn tại) nhưng runtime fail khi gọi API.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Provider support', 'Lazy loading', 'Abstraction layer']}
+          rows={[
+            ['opencode', '20+ providers, dynamic import map', '✅ per-provider lazy', 'Vercel AI SDK'],
+            ['Claude Code', 'Anthropic only (native)', 'N/A', 'Anthropic SDK direct'],
+            ['Aider', '30+ providers via litellm', '✅ litellm lazy', 'litellm abstraction'],
+            ['Cline', 'Anthropic + OpenAI + custom', '⚠️ partial', 'Direct SDK calls'],
+            ['OpenHarness', 'Anthropic + OpenAI (pluggable)', '⚠️ partial', 'Anthropic/OpenAI SDK'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+// Multi-provider lazy loading pattern
+
+interface ProviderLoader {
+  create(config: { apiKey: string; model: string }): LanguageModel
+}
+
+// Registry = map of lazy lambdas
+const PROVIDERS: Record<string, () => Promise<ProviderLoader>> = {
+  anthropic: () => import("./providers/anthropic"),
+  openai:    () => import("./providers/openai"),
+  google:    () => import("./providers/google"),
+}
+
+// Cache loaded providers (avoid re-import per call)
+const cache = new Map<string, ProviderLoader>()
+
+export async function getProvider(id: string): Promise<ProviderLoader> {
+  if (cache.has(id)) return cache.get(id)!
+
+  const factory = PROVIDERS[id]
+  if (!factory) throw new Error(`Unknown provider: ${id}`)
+
+  const loader = (await factory()).default
+  cache.set(id, loader)
+  return loader
+}
+
+// Usage:
+const provider = await getProvider("anthropic")
+const model    = provider.create({ apiKey: process.env.ANTHROPIC_KEY!, model: "claude-opus-4" })
+// model is now a unified LanguageModel interface
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text">Vercel AI SDK — provider abstraction reference</a>',
+            '<a href="https://vercel.com/blog/ai-sdk-5">Vercel AI SDK 5 — architecture blog</a>',
+            '<a href="https://gist.github.com/Haseeb-Qureshi/2213cc0487ea71d62572a645d7582518">Gist — Multi-model harness comparison (Claude Code vs Codex vs OpenCode)</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

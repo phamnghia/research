@@ -1,0 +1,428 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T4 — Interruption-safe scope cleanup | opencode"
+  description="Phân tích sâu kỹ thuật interruption-safe cleanup của opencode: Effect.ensuring bọc toàn bộ stream pipeline, đảm bảo cleanup luôn chạy dù cancel, error hay normal exit."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác với T-khác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+      <Hero
+        title="T4 — Interruption-safe scope cleanup"
+        subtitle="Toàn bộ stream processing trong opencode được bọc trong <code>Effect.ensuring(cleanup())</code> — cleanup LUÔN chạy dù stream kết thúc bình thường, bị cancel bởi user, hay gặp error không mong đợi."
+        meta={[
+          { label: 'Nhóm', value: 'A — Agent Loop & Streaming' },
+          { label: 'File', value: '<code>session/processor.ts</code>' },
+          { label: 'Lines', value: '544–582' },
+          { label: 'ID', value: 'A.4' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          Khi user nhấn Ctrl+C giữa lúc tool đang chạy, điều gì xảy ra? Tool có được đánh dấu
+          "aborted" không? File handle có được đóng không? UI có thoát khỏi trạng thái
+          "running" không? Database connection có được cleanup không?
+        </p>
+        <p>
+          Trong harness không có explicit cleanup, câu trả lời thường là: không. Tài nguyên
+          bị leak, UI stuck ở trạng thái cũ, và state không nhất quán. opencode giải quyết
+          bằng <code>Effect.ensuring</code> — semantic tương đương <code>finally</code>
+          nhưng composable và interrupt-aware.
+        </p>
+
+        <WhyImportant>
+          <strong>Tại sao quan trọng:</strong> Resource leak trong long-running agent là nguy hiểm:
+          file handles không đóng, subprocess còn sống, DB connections cạn kiệt, tool UI stuck
+          "running" mãi. <code>Effect.ensuring</code> là "transaction semantic" — cleanup luôn
+          xảy ra, giống ACID trong database. Tính chất này composable: nesting ensuring vẫn
+          đảm bảo cleanup thứ tự đúng.
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>Effect.ensuring vs try/finally:</strong> Cả hai đều "always run cleanup".
+          Khác biệt: Effect.ensuring integrate với fiber interrupt — khi fiber bị interrupt,
+          ensuring vẫn chạy trong fiber context đó. try/finally với async/await có edge cases
+          khi combine với Promise cancellation (không tồn tại trong native JS).
+        </Callout>
+
+        <Callout type="warn">
+          <strong>Retry trong ensuring:</strong> opencode đặt retry BÊN TRONG ensuring —
+          không phải ngoài. Điều này đảm bảo cleanup chỉ chạy một lần sau khi retry exhausted,
+          không phải sau mỗi lần retry.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Cấu trúc lồng nhau của pipeline" />
+        <p>
+          Pipeline cleanup có nhiều layer, từ ngoài vào trong:
+        </p>
+        <CodeBlock caption="session/processor.ts:544-582 — full pipeline">
+          <Fragment is:raw>{`
+return yield* Effect.gen(function* () {
+  yield* Effect.gen(function* () {
+    // Reset state cho iteration mới
+    ctx.currentText = undefined
+    ctx.reasoningMap = {}
+
+    // T2: Consume stream với demux
+    const stream = llm.stream(streamInput)
+    yield* stream.pipe(
+      Stream.tap((event) => handleEvent(event)),
+      Stream.takeUntil(() => ctx.needsCompaction),
+      Stream.runDrain,
+    )
+
+  }).pipe(
+    // Hook: khi bị interrupt → mark aborted
+    Effect.onInterrupt(() => Effect.gen(function* () {
+      aborted = true
+      if (!ctx.assistantMessage.error) {
+        yield* halt(new DOMException("Aborted", "AbortError"))
+      }
+    })),
+
+    // Chỉ propagate non-interrupt errors
+    Effect.catchCauseIf(
+      (cause) => !Cause.hasInterruptsOnly(cause),
+      (cause) => Effect.fail(Cause.squash(cause)),
+    ),
+
+    // Retry logic (bên trong ensuring)
+    Effect.retry(retrySchedule),
+
+    // Catch remaining errors → halt
+    Effect.catch(halt),
+
+    // ← CLEANUP LUÔN CHẠY — dù retry, interrupt, error, hay normal
+    Effect.ensuring(cleanup()),
+  )
+})
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="cleanup() function — finalize state" />
+        <p>
+          Cleanup finalize tất cả pending tools với status "aborted", lưu partial text,
+          và resolve tất cả Deferred (T3):
+        </p>
+        <CodeBlock caption="cleanup() — finalize everything">
+          <Fragment is:raw>{`
+function* cleanup() {
+  // 1. Finalize partial text nếu có
+  if (ctx.currentText) {
+    yield* session.finalizeText(ctx.currentText)
+  }
+
+  // 2. Mark tất cả pending tools là aborted
+  for (const [id, call] of Object.entries(ctx.toolcalls)) {
+    yield* session.updatePart(call.partID, { status: "aborted" })
+    // 3. Resolve Deferred (T3) để không block
+    yield* Deferred.succeed(call.done, undefined)
+  }
+
+  // 4. Update session status
+  yield* status.set(sessionID, { type: "idle" })
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="onInterrupt hook — detect user cancel" />
+        <p>
+          <code>Effect.onInterrupt</code> chạy khi fiber bị interrupt (user Ctrl+C hay
+          programmatic cancel). Khác với cleanup — onInterrupt chỉ chạy khi có interrupt,
+          không chạy khi normal exit hay error.
+        </p>
+        <CodeBlock caption="Interrupt handling">
+          <Fragment is:raw>{`
+Effect.onInterrupt(() => Effect.gen(function* () {
+  aborted = true  // flag cho code downstream biết
+  // Chỉ halt nếu chưa có error khác
+  if (!ctx.assistantMessage.error) {
+    yield* halt(new DOMException("Aborted", "AbortError"))
+  }
+}))
+// Sau onInterrupt → ensuring(cleanup()) vẫn chạy
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T4 là lớp ngoài cùng bọc T2 và T3:
+
+┌─────────────────────────────────────────────────────┐
+│  T4 — Effect.ensuring(cleanup())                    │
+│                                                     │
+│  ┌───────────────────────────────────────────────┐  │
+│  │  Effect.retry(retrySchedule)                  │  │
+│  │                                               │  │
+│  │  ┌─────────────────────────────────────────┐  │  │
+│  │  │  Effect.onInterrupt(markAborted)        │  │  │
+│  │  │                                         │  │  │
+│  │  │  ┌───────────────────────────────────┐  │  │  │
+│  │  │  │  T2 — Stream demux pipeline      │  │  │  │
+│  │  │  │  (handleEvent, takeUntil, drain) │  │  │  │
+│  │  │  └───────────────────────────────────┘  │  │  │
+│  │  └─────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────┘  │
+│                                                     │
+│  cleanup() — luôn chạy:                             │
+│    → finalize partial text                          │
+│    → mark pending tools "aborted"                   │
+│    → T3: resolve all Deferreds                      │
+│    → update session status → idle                   │
+└─────────────────────────────────────────────────────┘
+
+T1 nhận control SAU KHI T4 cleanup hoàn thành
+`}</Diagram>
+
+        <p>
+          T4 bọc T2 và T3 — nó là "transaction boundary" của một iteration. Khi T2 stream
+          bị interrupt, T4 đảm bảo T3 cleanup (resolve Deferreds) vẫn xảy ra. T1 chỉ nhận
+          control sau khi T4 ensuring hoàn thành, đảm bảo mọi state được finalize trước
+          khi loop check exit condition.
+        </p>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: Tool UI stuck 'running' sau cancel" />
+        <p>
+          Nếu không có cleanup, tool bị interrupt sẽ không được đánh dấu "aborted" —
+          UI hiển thị tool đang chạy mãi mãi:
+        </p>
+        <CodeBlock caption="Không có cleanup — UI stuck">
+          <Fragment is:raw>{`
+// WRONG: không cleanup khi cancel
+async function processStream(signal: AbortSignal) {
+  for await (const event of stream) {
+    if (signal.aborted) return  // exit ngay, không cleanup
+    handleEvent(event)
+  }
+}
+// Tool partID vẫn có status: "running" trong DB
+// User reload page → vẫn thấy tool "running" từ session cũ
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: File handle leak sau error" />
+        <p>
+          Subprocess và file handles không được đóng khi stream bị interrupt giữa chừng:
+        </p>
+        <CodeBlock caption="Resource leak">
+          <Fragment is:raw>{`
+// Tool mở file để đọc
+const file = await fs.open(path, "r")
+try {
+  const content = await file.readFile()
+  return content
+} catch (err) {
+  // Nếu stream bị interrupt ở đây:
+  // file.close() không được gọi → fd leak
+  throw err
+}
+// CORRECT: dùng finally
+} finally {
+  await file.close()  // luôn đóng
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 3: Retry mất cleanup" />
+        <p>
+          Đặt retry NGOÀI ensuring thay vì bên trong gây ra cleanup bị gọi sau mỗi lần retry,
+          không phải sau khi retry exhausted:
+        </p>
+        <CodeBlock caption="Retry ngoài ensuring — cleanup sai timing">
+          <Fragment is:raw>{`
+// WRONG: cleanup chạy sau mỗi retry
+pipeline.pipe(
+  Effect.ensuring(cleanup()),  // ← chạy sau mỗi attempt
+  Effect.retry(schedule),
+)
+
+// CORRECT: cleanup chạy sau retry exhausted
+pipeline.pipe(
+  Effect.retry(schedule),      // retry trong ensuring
+  Effect.ensuring(cleanup()),  // ← chỉ chạy 1 lần sau cùng
+)
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Cleanup mechanism', 'Interrupt-safe', 'Composable']}
+          rows={[
+            [
+              '<strong>opencode</strong>',
+              '<Chip variant="green">Effect.ensuring — transactional</Chip>',
+              '<Chip variant="green">Có — onInterrupt hook</Chip>',
+              '<Chip variant="green">Có — nesting preserves order</Chip>',
+            ],
+            [
+              'Vanilla JS',
+              '<Chip variant="amber">try/finally + AbortController</Chip>',
+              '<Chip variant="amber">Partial — async cancel không đảm bảo</Chip>',
+              '<Chip variant="red">Verbose khi nesting</Chip>',
+            ],
+            [
+              'Python asyncio',
+              '<Chip variant="amber">try/except CancelledError</Chip>',
+              '<Chip variant="amber">Có nhưng phải catch manually</Chip>',
+              '<Chip variant="amber">contextmanager giúp một phần</Chip>',
+            ],
+            [
+              'Aider',
+              '<Chip variant="red">Không có — dựa vào GC</Chip>',
+              '<Chip variant="red">Không</Chip>',
+              '<Chip variant="red">Không</Chip>',
+            ],
+            [
+              'LangChain',
+              '<Chip variant="amber">Callback hooks</Chip>',
+              '<Chip variant="amber">Partial</Chip>',
+              '<Chip variant="amber">Callback-based, không typed</Chip>',
+            ],
+          ]}
+        />
+
+        <p>
+          Vanilla JS try/finally là equivalent gần nhất nhưng không composable — nesting nhiều
+          cleanup blocks dễ gây lỗi thứ tự. Python asyncio CancelledError pattern tương tự
+          nhưng phải remember catch nó. Effect.ensuring là solution elegant nhất.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>
+          Vanilla TypeScript pattern với try/finally và AbortController — không cần Effect:
+        </p>
+        <CodeBlock caption="interruption-safe-stream.ts">
+          <Fragment is:raw>{`
+interface StreamContext {
+  pendingTools: Map<string, { resolve: () => void }>
+  currentText: string
+  aborted: boolean
+}
+
+async function streamWithCleanup(
+  streamFn: (signal: AbortSignal) => AsyncIterable<StreamEvent>,
+  onEvent: (event: StreamEvent, ctx: StreamContext) => Promise<void>,
+  options = { retries: 2, toolTimeoutMs: 250 }
+) {
+  const ctx: StreamContext = {
+    pendingTools: new Map(),
+    currentText: "",
+    aborted: false,
+  }
+
+  const controller = new AbortController()
+
+  // Expose cancel để caller có thể trigger
+  const cancel = () => {
+    ctx.aborted = true
+    controller.abort()
+  }
+
+  let attempt = 0
+
+  while (attempt <= options.retries) {
+    try {
+      const stream = streamFn(controller.signal)
+
+      for await (const event of stream) {
+        if (controller.signal.aborted) break
+        await onEvent(event, ctx)
+      }
+
+      // Success — exit retry loop
+      break
+
+    } catch (err) {
+      if (controller.signal.aborted) {
+        // User cancel — không retry
+        break
+      }
+      attempt++
+      if (attempt > options.retries) throw err
+      // Wait before retry
+      await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000))
+
+    } finally {
+      // CLEANUP — luôn chạy (cancel, error, success)
+      await cleanup(ctx, options.toolTimeoutMs)
+    }
+  }
+
+  return { aborted: ctx.aborted, text: ctx.currentText }
+}
+
+async function cleanup(ctx: StreamContext, timeoutMs: number) {
+  // 1. Await all pending tools with timeout
+  await Promise.all(
+    [...ctx.pendingTools.values()].map((d) =>
+      Promise.race([
+        new Promise<void>((r) => {
+          // Replace resolve to track when done
+          const orig = d.resolve
+          d.resolve = () => { orig(); r() }
+        }),
+        new Promise<void>((r) => setTimeout(r, timeoutMs)),
+      ])
+    )
+  )
+
+  // 2. Mark remaining tools aborted
+  ctx.pendingTools.clear()
+
+  console.log("[cleanup] done — text length:", ctx.currentText.length)
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://effect.website/docs/error-management/retrying/">Effect — Retrying docs</a> · Effect.ensuring, Effect.retry semantics',
+            '<a href="https://blog.type-driven.com/effect-ts-new-standard/">Why Effect is Becoming the Go-To Choice for TypeScript APIs</a> · Structured concurrency motivation',
+            '<a href="https://github.com/PaulJPhilp/EffectPatterns">EffectPatterns community knowledge base</a> · Patterns tái sử dụng với Effect',
+            '<a href="https://developer.mozilla.org/en-US/docs/Web/API/AbortController">MDN — AbortController</a> · Native cancel signal cho async operations',
+            '<a href="https://docs.python.org/3/library/asyncio-task.html#task-cancellation">Python asyncio — Task Cancellation</a> · CancelledError pattern tương đương',
+            '<a href="https://github.com/anomalyco/opencode">anomalyco/opencode — session/processor.ts:544-582</a> · Source tham chiếu chính',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

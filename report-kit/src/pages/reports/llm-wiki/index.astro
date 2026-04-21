@@ -1,0 +1,703 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Chip from '../../../components/Chip.astro';
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RefList from '../../../components/RefList.astro';
+import SummaryTable from '../../../components/SummaryTable.astro';
+import DataTable from '../../../components/DataTable.astro';
+import LinkList from '../../../components/LinkList.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+import ReportImage from '../../../components/ReportImage.astro';
+import DeepDiveLink from '../../../components/DeepDiveLink.astro';
+
+const title = 'LLM Wiki — Andrej Karpathy';
+const description = 'Phân tích đầy đủ pattern LLM Wiki của Andrej Karpathy (April 2026): thay thế RAG bằng wiki markdown được LLM xây dựng và duy trì liên tục. Bao gồm architecture, operations, knowledge lifecycle, hybrid search và implementation.';
+---
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    {/* ─────── SIDEBAR ─────── */}
+    <Sidebar
+      intro="LLM Wiki — Karpathy"
+      groups={[
+        {
+          title: 'Mở đầu',
+          items: [
+            { href: '#intro', label: 'Tổng quan', section: true },
+            { href: '#summary', label: 'Bảng tóm tắt' },
+            { href: '#rag-vs-wiki', label: 'RAG vs LLM Wiki' },
+          ],
+        },
+        {
+          title: 'Core — Architecture',
+          items: [
+            { href: '#t1', label: '1. Compilation Metaphor' },
+            { href: '#t2', label: '2. Ba lớp kiến trúc' },
+            { href: '#t3', label: '3. Three Operations' },
+            { href: '#t4', label: '4. Index & Log' },
+            { href: '#t5', label: '5. CLAUDE.md Schema' },
+          ],
+        },
+        {
+          title: 'Advanced — Scale & Memory',
+          items: [
+            { href: '#t6', label: '6. Knowledge Lifecycle' },
+            { href: '#t7', label: '7. Knowledge Graph' },
+            { href: '#t8', label: '8. Hybrid Search' },
+            { href: '#t9', label: '9. Automation Hooks' },
+          ],
+        },
+        {
+          title: 'Implementation',
+          items: [
+            { href: '#t10', label: '10. Folder Structure' },
+            { href: '#t11', label: '11. Use Cases' },
+            { href: '#t12', label: '12. Scaling Path' },
+          ],
+        },
+        {
+          title: 'Kết luận',
+          items: [
+            { href: '#wrap', label: 'Tổng kết', section: true },
+          ],
+        },
+      ]}
+    />
+
+    {/* ─────── MAIN ─────── */}
+    <main>
+      <Breadcrumb />
+
+      <Hero
+        title={title}
+        subtitle="Pattern xây dựng personal knowledge base bằng LLM — thay thế RAG với <strong>compounding wiki</strong> được duy trì liên tục."
+        meta={[
+          { label: 'Nguồn', value: '<a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">GitHub Gist</a>' },
+          { label: 'Công bố', value: '4 April 2026' },
+          { label: 'Stars', value: '5,000+' },
+          { label: 'Forks', value: '4,711' },
+          { label: 'Kỹ thuật', value: '12' },
+        ]}
+      />
+
+      {/* ── INTRO ── */}
+      <Section id="intro" title="Tổng quan" themeTag="Intro">
+        <Callout type="info">
+          <strong>Đây là báo cáo tổng quan (lớp 1).</strong> Mỗi topic lớn có trang deep dive riêng
+          — nhấn nút "Phân tích sâu" ở cuối mỗi section để xem chi tiết đầy đủ.
+        </Callout>
+
+        <p>
+          Ngày 4/4/2026, Andrej Karpathy — co-founder OpenAI, cựu Director of AI Tesla —
+          đăng một GitHub Gist tên <strong>llm-wiki.md</strong>. Trong vòng vài ngày, bài này
+          đạt <strong>16 triệu lượt xem</strong>, 5,000+ stars và 4,711 forks, trở thành
+          một trong những ý tưởng AI viral nhất năm 2026.
+        </p>
+
+        <p>
+          Ý tưởng cốt lõi: thay vì để LLM tái tạo kiến thức từ đầu mỗi lần bạn hỏi (RAG),
+          hãy để LLM <strong>xây dựng và duy trì một wiki markdown có cấu trúc</strong> từ nguồn
+          tài liệu của bạn. Wiki này tích lũy theo thời gian — mỗi nguồn mới được tích hợp vào
+          những gì đã có, không phải đặt sang một bên để retrieval sau.
+        </p>
+
+        <ReportImage
+          src="https://datasciencedojo.com/wp-content/uploads/2026/04/Obsidian-Graph-View-for-LLM-Wiki.png"
+          alt="Obsidian graph view của một LLM Wiki với các entity pages được kết nối nhau qua wiki-links"
+          caption="Obsidian graph view sau khi ingest 5 papers. Node là entity pages, edge là [[wiki-links]]. Đây là knowledge graph được LLM xây dựng tự động."
+          source="https://datasciencedojo.com/blog/llm-wiki-tutorial/"
+          sourceLabel="Data Science Dojo Tutorial"
+          bordered={true}
+        />
+
+        <Callout type="unique">
+          <strong>Pattern, không phải sản phẩm.</strong> LLM Wiki là một workflow pattern —
+          không có server, không có database, không có embedding vector store. Chỉ là folder
+          markdown files + LLM agent + CLAUDE.md schema. Bạn có thể bắt đầu trong 30 phút.
+        </Callout>
+      </Section>
+
+      {/* ── SUMMARY TABLE ── */}
+      <Section id="summary" title="Bảng tóm tắt 12 kỹ thuật" themeTag="Overview">
+        <SummaryTable
+          headers={['ID', 'Kỹ thuật', 'Theme']}
+          rows={[
+            { id: '1', title: '<a href="#t1">Compilation Metaphor</a>', chipLabel: 'Core Idea', chipVariant: 'purple' },
+            { id: '2', title: '<a href="#t2">Ba lớp kiến trúc</a>', chipLabel: 'Architecture', chipVariant: 'green' },
+            { id: '3', title: '<a href="#t3">Three Operations</a>', chipLabel: 'Architecture', chipVariant: 'green' },
+            { id: '4', title: '<a href="#t4">Index & Log</a>', chipLabel: 'Architecture', chipVariant: 'green' },
+            { id: '5', title: '<a href="#t5">CLAUDE.md Schema</a>', chipLabel: 'Schema', chipVariant: 'cyan' },
+            { id: '6', title: '<a href="#t6">Knowledge Lifecycle</a>', chipLabel: 'Memory', chipVariant: 'amber' },
+            { id: '7', title: '<a href="#t7">Knowledge Graph</a>', chipLabel: 'Scale', chipVariant: 'amber' },
+            { id: '8', title: '<a href="#t8">Hybrid Search</a>', chipLabel: 'Scale', chipVariant: 'amber' },
+            { id: '9', title: '<a href="#t9">Automation Hooks</a>', chipLabel: 'Automation', chipVariant: 'red' },
+            { id: '10', title: '<a href="#t10">Folder Structure</a>', chipLabel: 'Impl', chipVariant: 'cyan' },
+            { id: '11', title: '<a href="#t11">Use Cases</a>', chipLabel: 'Impl', chipVariant: 'cyan' },
+            { id: '12', title: '<a href="#t12">Scaling Path</a>', chipLabel: 'Impl', chipVariant: 'cyan' },
+          ]}
+        />
+      </Section>
+
+      {/* ── RAG vs LLM WIKI ── */}
+      <Section id="rag-vs-wiki" title="RAG vs LLM Wiki" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Aspect', 'RAG (Traditional)', 'LLM Wiki (Karpathy)']}
+          rows={[
+            ['Knowledge persistence', 'None — stateless, forgets every session', '<strong>Full</strong> — builds and compounds over time'],
+            ['Multi-doc synthesis', 'Per query, rebuilt from scratch', '<strong>Pre-compiled</strong> into interlinked pages'],
+            ['Contradiction detection', '❌ No', '<strong>✅ Yes</strong> — flagged during ingest'],
+            ['Source traceability', 'High (chunk-level)', 'Moderate (page-level)'],
+            ['Setup complexity', 'Low (upload & go)', 'Low-Medium (30 min setup)'],
+            ['Best for', 'Quick Q&A on fixed docs', '<strong>Deep research over weeks/months</strong>'],
+            ['Infrastructure', 'Vector DB, embeddings', '<strong>Just markdown files + LLM</strong>'],
+            ['Scale limit', 'Scales with infra', 'index.md tốt đến ~200 pages; hybrid search cho hơn'],
+          ]}
+        />
+        <Callout type="warn">
+          <strong>Khi nào dùng RAG thay vì LLM Wiki:</strong> Khi data thay đổi hàng ngày hoặc
+          cần exact source traceability cho mọi claim. LLM Wiki tốt hơn khi bạn đang build
+          expertise trên một topic qua nhiều tuần/tháng và muốn model <em>reason across</em>
+          knowledge base, không chỉ retrieve.
+        </Callout>
+      </Section>
+
+      {/* ── CORE ARCHITECTURE ── */}
+      <Section id="core" title="Core — Kiến trúc & Operations" themeTag="Architecture">
+
+        <Technique id="t1" title="1. The Compilation Metaphor" tid="1" location="Gist: llm-wiki.md — The core idea">
+          <WhyImportant>
+            <strong>Tại sao đây là insight quan trọng nhất.</strong> Karpathy đặt ra một metaphor
+            rõ ràng giúp giải thích toàn bộ pattern: thay vì "retrieval", đây là "compilation".
+            Một khi bạn hiểu metaphor này, mọi thứ còn lại trở nên hiển nhiên.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Vấn đề với RAG" />
+          <p>
+            Hầu hết mọi người trải nghiệm LLM + documents theo kiểu RAG: upload files, LLM
+            retrieve relevant chunks khi query, generate answer. Cơ chế này hoạt động, nhưng
+            LLM đang <em>re-discover</em> knowledge từ đầu mỗi câu hỏi. Không có accumulation.
+            Hỏi câu hỏi cần tổng hợp 5 tài liệu → LLM phải tìm và ghép fragment mỗi lần.
+          </p>
+
+          <Subheading level="h4" text="Compilation: compile once, query many times" />
+          <Diagram>{`
+RAG (Retrieval):
+  Query ──▶ Vector Search ──▶ Chunks ──▶ LLM ──▶ Answer
+  Query ──▶ Vector Search ──▶ Chunks ──▶ LLM ──▶ Answer   (lặp lại mãi)
+  Query ──▶ Vector Search ──▶ Chunks ──▶ LLM ──▶ Answer
+
+LLM Wiki (Compilation):
+  Source ──▶ LLM Ingest ──▶ Wiki Pages (persistent)
+  Source ──▶ LLM Update ──▶ Wiki Pages (growing)
+  Query  ──▶ Read Index  ──▶ Wiki Pages ──▶ Answer (fast, rich)
+          `}</Diagram>
+
+          <p>
+            Cũng giống như compiler: source code không được execute trực tiếp mỗi lần — được
+            compile thành optimized binary. Compilation tốn kém nhưng bù đắp qua mọi lần
+            execution tiếp theo.
+          </p>
+
+          <Callout type="unique">
+            <strong>Key insight của Karpathy:</strong> "The wiki is a persistent, compounding
+            artifact. The cross-references are already there. The contradictions have already been
+            flagged. The synthesis already reflects everything you've read."
+          </Callout>
+
+          <RefList items={[
+            '<a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">LLM Wiki gist — Andrej Karpathy (April 2026)</a>',
+          ]} />
+        </Technique>
+
+        <Technique id="t2" title="2. Ba lớp kiến trúc" tid="2" location="Gist: Architecture section">
+          <WhyImportant>
+            <strong>Ba lớp tách biệt rõ ràng trách nhiệm.</strong> Sự phân chia này đảm bảo
+            raw sources không bao giờ bị corrupted, wiki luôn có structure nhất quán, và LLM
+            biết chính xác phải làm gì.
+          </WhyImportant>
+
+          <Diagram>{`
+┌─────────────────────────────────────────┐
+│  Layer 1: Raw Sources (IMMUTABLE)       │
+│  PDFs, articles, notes — bạn curate     │
+│  LLM chỉ ĐỌC, không bao giờ MODIFY     │
+└────────────────────┬────────────────────┘
+                     │ ingest
+                     ▼
+┌─────────────────────────────────────────┐
+│  Layer 2: The Wiki (LLM-OWNED)          │
+│  Markdown pages, entity pages, index    │
+│  LLM creates, updates, cross-references │
+│  Bạn ĐỌC; LLM VIẾT                     │
+└────────────────────┬────────────────────┘
+                     │ guided by
+                     ▼
+┌─────────────────────────────────────────┐
+│  Layer 3: CLAUDE.md Schema              │
+│  Conventions + workflows + types        │
+│  "Bản hợp đồng" giữa bạn và LLM        │
+│  Co-evolved theo thời gian              │
+└─────────────────────────────────────────┘
+          `}</Diagram>
+
+          <ProsCons
+            pros={[
+              'Raw sources immutable → không bao giờ mất nguồn gốc',
+              'LLM owns wiki layer → bạn không cần manually maintain',
+              'Schema file → LLM disciplined, nhất quán qua nhiều sessions',
+              'Simple infrastructure — chỉ cần folder + markdown',
+            ]}
+            cons={[
+              'LLM errors có thể propagate vào wiki nếu không lint',
+              'Schema cần time để co-evolve và stabilize',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t3" title="3. Three Operations: Ingest / Query / Lint" tid="3" location="Gist: Operations section">
+          <WhyImportant>
+            <strong>Ba operations này là toàn bộ giao diện bạn cần.</strong> Không phức tạp hơn.
+            Mọi workflow trong LLM Wiki đều là biến thể của ba operations cơ bản này.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Ingest — Thêm source mới" />
+          <p>Drop source vào <code>raw/</code> → tell LLM process. LLM sẽ:</p>
+          <Diagram>{`
+1. Đọc source
+2. Thảo luận key takeaways với bạn
+3. Viết summary page trong wiki/
+4. Update index.md
+5. Update relevant entity + concept pages
+   → 1 source có thể touch 10-15 wiki pages!
+6. Append entry vào log.md
+          `}</Diagram>
+
+          <Subheading level="h4" text="Query — Hỏi câu hỏi" />
+          <p>
+            LLM đọc <code>index.md</code> → tìm relevant pages → đọc pages → synthesize answer
+            với citations. Answers có thể là: markdown page, comparison table, Marp slides,
+            matplotlib chart.
+          </p>
+          <Callout type="info">
+            <strong>Key insight:</strong> Good answers <em>có thể filed back vào wiki như new pages</em>.
+            Một analysis, một comparison, một connection bạn discover — đây là valuable content,
+            không nên chỉ tồn tại trong chat history.
+          </Callout>
+
+          <Subheading level="h4" text="Lint — Health check định kỳ" />
+          <p>Sau mỗi ~20 pages mới, chạy lint để tìm:</p>
+          <Diagram>{`
+• Contradictions giữa các pages
+• Stale claims bị supersede bởi newer sources
+• Orphan pages (không có inbound links)
+• Concepts được mention nhưng thiếu page riêng
+• Missing cross-references
+• Data gaps → suggest new sources để investigate
+          `}</Diagram>
+
+          <DeepDiveLink href="/reports/llm-wiki/architecture/">
+            Phân tích sâu: Architecture & Operations — schema co-evolution, ingest prompt templates, lint automation
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t4" title="4. Index & Log — Navigation Infrastructure" tid="4" location="Gist: Indexing and logging section">
+          <WhyImportant>
+            <strong>Hai file đặc biệt này là "hệ thống thần kinh" của wiki.</strong> Không có
+            chúng, LLM sẽ phải brute-force read tất cả pages mỗi lần query — tốn tokens và
+            không scale.
+          </WhyImportant>
+
+          <Subheading level="h4" text="index.md — Content catalog" />
+          <CodeBlock caption="wiki/index.md (ví dụ)" code={`# Wiki Index
+
+## Entities
+- [[Transformer Architecture]] — Attention mechanism, encoder-decoder design (2 sources)
+- [[BERT]] — Bidirectional pre-training for NLP (3 sources)
+- [[GPT-3]] — Large-scale language model with emergent capabilities (1 source)
+
+## Concepts
+- [[Attention Mechanism]] — Scaled dot-product attention, multi-head attention
+- [[Scaling Laws]] — Relationship between compute, data, parameters
+
+## Comparisons
+- [[BERT vs GPT]] — Bidirectional vs autoregressive comparison
+`} lang="markdown" />
+
+          <Subheading level="h4" text="log.md — Chronological audit trail" />
+          <CodeBlock caption="wiki/log.md" code={`## [2026-04-10] ingest | Attention Is All You Need (2017)
+Created: transformer-architecture.md, attention-mechanism.md, positional-encoding.md
+Updated: index.md (+3 entries)
+
+## [2026-04-11] query | "How does multi-head attention differ from single-head?"
+Filed answer as: wiki/attention-multi-head-comparison.md
+
+## [2026-04-12] lint | routine health check
+Fixed: 2 orphan pages linked, 1 contradiction flagged in scaling-laws.md
+`} lang="markdown" />
+
+          <Callout type="info">
+            <strong>Scale claim từ Karpathy:</strong> index.md approach hoạt động tốt đến ~100 sources,
+            ~hundreds of pages mà <em>không cần embedding-based RAG infrastructure</em>. Karpathy's
+            own wiki: ~100 articles, ~400,000 words.
+          </Callout>
+        </Technique>
+
+        <Technique id="t5" title="5. CLAUDE.md Schema — The Real Product" tid="5" location="Gist: The schema section">
+          <WhyImportant>
+            <strong>Schema là thứ quan trọng nhất trong cả hệ thống.</strong> Karpathy viết:
+            "The schema document is the most important file in the system. It's what turns a
+            generic LLM into a disciplined knowledge worker." Bạn có thể share schema với người
+            khác cùng domain → họ nhận được running start ngay lập tức.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Ví dụ CLAUDE.md cho research wiki" />
+          <CodeBlock caption="CLAUDE.md (schema file)" lang="markdown">
+            <Fragment is:raw>{`# Wiki Schema — AI Research
+
+## Structure
+- wiki/ — entity pages (one concept per file)
+- raw/ — immutable sources
+- wiki/index.md — catalog
+- wiki/log.md — chronological log
+
+## Entity Page Format
+\`\`\`markdown
+# [Entity Name]
+**Type**: Concept | Person | Project | Library | Decision
+**Summary**: One sentence.
+**Sources**: [[source-1]], [[source-2]]
+**Confidence**: 0.85 (2 sources, last confirmed 2026-04-10)
+---
+## Overview
+## Key Properties / Arguments
+## Relationships
+- uses: [[Entity A]]
+- contradicts: [[Entity B]]
+## Open Questions
+\`\`\`
+
+## Ingest Workflow
+1. Read source
+2. Identify entities (list them before writing)
+3. Create/update entity pages
+4. Update cross-references
+5. Update index.md
+6. Append to log.md
+
+## Lint Rules
+- Every entity page must have ≥1 inbound link
+- Confidence <0.5 → flag for verification
+- Contradiction found → mark both pages, log decision
+`}</Fragment>
+          </CodeBlock>
+
+          <ProsCons
+            pros={[
+              'Schema transferable — share với người khác cùng domain, họ có running start',
+              'LLM consistent qua nhiều sessions — không phải "nhắc nhở" format mỗi lần',
+              'Co-evolve theo thời gian — schema reflect cách domain thực sự work',
+              'Separates concerns — bạn curate sources; LLM handles bookkeeping',
+            ]}
+            cons={[
+              'Cần time để phát triển schema đủ tốt (vài dozen sources đầu tiên)',
+              'Schema phải được update khi domain evolve',
+            ]}
+          />
+        </Technique>
+
+        <DeepDiveLink href="/reports/llm-wiki/architecture/">
+          Phân tích sâu: Architecture & Operations — toàn bộ CLAUDE.md template, ingest prompts đầy đủ, lint automation
+        </DeepDiveLink>
+      </Section>
+
+      {/* ── ADVANCED: MEMORY & SCALE ── */}
+      <Section id="advanced" title="Advanced — Memory & Scale (LLM Wiki v2)" themeTag="Scale">
+        <Callout type="info">
+          <strong>LLM Wiki v2</strong> là extension của rohitg00 (agentmemory project), build trên
+          pattern gốc của Karpathy. Phần này tổng hợp những gì <em>original gist chưa có</em> nhưng
+          cần thiết khi wiki grow past ~200 pages.
+        </Callout>
+
+        <Technique id="t6" title="6. Knowledge Lifecycle — Confidence & Forgetting" tid="6" location="LLM Wiki v2 — Memory lifecycle section">
+          <WhyImportant>
+            <strong>Wiki không có lifecycle management sẽ trở thành junk drawer.</strong>
+            Original LLM Wiki treat tất cả content như equally valid forever. Trong thực tế,
+            knowledge có lifecycle — bug từ 6 tháng trước ít quan trọng hơn tuần rồi; pattern
+            thấy 12 lần đáng tin hơn thấy 1 lần.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Confidence Scoring" />
+          <p>
+            Mỗi fact trong wiki có confidence score: bao nhiêu sources support, lần xác nhận gần nhất,
+            có contradictions không. Confidence decays với time, strengthens với reinforcement.
+          </p>
+
+          <Subheading level="h4" text="Supersession — Version control cho knowledge" />
+          <p>
+            Khi info mới contradicts/updates existing claim: old claim được marked stale với link
+            tới claim mới. Không xóa, không chỉ thêm note — explicitly supersede với timestamp.
+          </p>
+
+          <Subheading level="h4" text="Forgetting — Ebbinghaus curve" />
+          <p>
+            Facts không được access/reinforce nhiều tháng → fade (không xóa, nhưng deprioritized).
+            Architecture decisions decay chậm; transient bugs decay nhanh.
+          </p>
+
+          <Subheading level="h4" text="Consolidation Tiers" />
+          <Diagram>{`
+Working Memory  →  Episodic Memory  →  Semantic Memory  →  Procedural Memory
+(recent obs)      (session summaries)   (cross-session facts)  (workflows/patterns)
+  volatile           compressed            confident              long-lived
+          `}</Diagram>
+
+          <DeepDiveLink href="/reports/llm-wiki/memory/">
+            Phân tích sâu: Knowledge Lifecycle & Memory — confidence scoring implementation, Ebbinghaus model, consolidation pipeline
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t7" title="7. Knowledge Graph — Entity + Typed Relationships" tid="7" location="LLM Wiki v2 — Beyond flat pages">
+          <WhyImportant>
+            <strong>Flat pages với wikilinks đang bỏ phí structure.</strong> Knowledge graph
+            với typed relationships cho phép queries kiểu "impact of upgrading Redis?" đi qua
+            dependency edges — catches connections keyword search miss.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Entity Extraction" />
+          <p>
+            Khi ingest source: extract structured entities — people, projects, libraries, concepts,
+            files, decisions. Mỗi entity: type, attributes, typed relationships to other entities.
+          </p>
+
+          <Subheading level="h4" text="Typed Relationships" />
+          <Diagram>{`
+"React"  ──[uses]──▶  "Fiber reconciler"
+"Auth migration"  ──[caused]──▶  "Performance regression"  (confidence: 0.9, 3 sources)
+"Redis v7.0"  ──[supersedes]──▶  "Redis v6.x"
+"Sarah"  ──[owns]──▶  "Auth migration"
+          `}</Diagram>
+
+          <DeepDiveLink href="/reports/llm-wiki/search/">
+            Phân tích sâu: Knowledge Graph & Hybrid Search — entity extraction, BM25 + vector + graph fusion, RRF
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t8" title="8. Hybrid Search — Scale Beyond 200 Pages" tid="8" location="LLM Wiki v2 — Search that actually scales">
+          <WhyImportant>
+            <strong>index.md breaks around 200-500 pages</strong> vì brute-force matching.
+            Hybrid search kết hợp ba streams để catch connections mà single approach miss.
+          </WhyImportant>
+
+          <Diagram>{`
+Query
+  │
+  ├── BM25 search ──▶ exact terms, stemming, synonyms
+  ├── Vector search ──▶ semantic similarity via embeddings
+  └── Graph traversal ──▶ entity-aware relationship walking
+          │
+          ▼
+    RRF Fusion (Reciprocal Rank Fusion)
+          │
+          ▼
+    Ranked results (agentmemory: 95.2% trên LongMemEval-S)
+          `}</Diagram>
+
+          <ProsCons
+            pros={[
+              'BM25 catches exact terms (hiệu quả với technical jargon)',
+              'Vectors catch semantic similarity (same concept, different words)',
+              'Graph catches structural connections (downstream dependencies)',
+              'RRF fusion: không cần tune weights, robust với noisy results',
+            ]}
+            cons={[
+              'Setup phức tạp hơn index.md approach',
+              'Overkill với wiki nhỏ (<200 pages)',
+              'Need to maintain vector index khi wiki update',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t9" title="9. Automation Hooks — Event-driven Maintenance" tid="9" location="LLM Wiki v2 — Automation section">
+          <WhyImportant>
+            <strong>Biggest gap trong original LLM Wiki: mọi thứ đều manual.</strong>
+            Bookkeeping là lý do chính khiến người ta abandon wikis. Automation hooks
+            đưa bookkeeping về gần zero.
+          </WhyImportant>
+
+          <Diagram>{`
+Events → Hooks:
+
+on_new_source     →  auto-ingest, extract entities, update graph, update index
+on_session_start  →  load relevant context dựa trên recent activity
+on_session_end    →  compress session thành observations, file insights
+on_query          →  check if answer worth filing back (quality score > threshold)
+on_memory_write   →  check contradictions, trigger supersession
+on_schedule       →  periodic lint, consolidation, retention decay
+          `}</Diagram>
+
+          <Callout type="success">
+            <strong>Human vẫn trong loop</strong> cho curation và direction. Automation chỉ handle
+            bookkeeping — phần mà người ta hay abandon wikis vì quá tốn công.
+          </Callout>
+
+          <DeepDiveLink href="/reports/llm-wiki/memory/">
+            Phân tích sâu: Automation, Memory Lifecycle & Privacy — hook implementation, governance, multi-agent sync
+          </DeepDiveLink>
+        </Technique>
+      </Section>
+
+      {/* ── IMPLEMENTATION ── */}
+      <Section id="implementation" title="Implementation" themeTag="Impl">
+
+        <Technique id="t10" title="10. Folder Structure — Minimal Viable Setup" tid="10" location="Data Science Dojo Tutorial + original gist">
+          <Subheading level="h4" text="Cấu trúc chuẩn" />
+          <CodeBlock caption="Minimal viable wiki structure" lang="bash" code={`my-wiki/
+├── raw/              ← drop PDFs, articles, notes ở đây (immutable)
+│   ├── paper1.pdf
+│   └── article1.md
+├── wiki/             ← LLM-generated entity pages
+│   ├── index.md      ← catalog of all pages
+│   ├── log.md        ← chronological audit trail
+│   ├── attention-mechanism.md
+│   ├── transformer-architecture.md
+│   └── bert.md
+└── CLAUDE.md         ← schema: conventions + workflows (bạn + LLM co-evolve)`} />
+
+          <ReportImage
+            src="https://datasciencedojo.com/wp-content/uploads/2026/04/my-wiki-Folder-structure.png"
+            alt="Folder structure của LLM Wiki với raw và wiki directories"
+            caption="Cấu trúc folder minimal viable wiki. raw/ chứa sources, wiki/ chứa entity pages của LLM."
+            source="https://datasciencedojo.com/blog/llm-wiki-tutorial/"
+            sourceLabel="Data Science Dojo Tutorial"
+            bordered={true}
+          />
+
+          <Subheading level="h4" text="Note template chuẩn" />
+          <CodeBlock caption="wiki/_template.md" lang="markdown" code={`# [Entity Name]
+**Summary**: One sentence describing this concept.
+**Tags**: #topic1 #topic2
+**Created**: 2026-04-20
+**Last Updated**: 2026-04-20
+
+---
+
+## Overview
+
+## Key Properties
+
+## Related Notes
+- [[Related Entity A]]
+- [[Related Entity B]]`} />
+        </Technique>
+
+        <Technique id="t11" title="11. Use Cases — Contexts LLM Wiki Shines" tid="11" location="Gist + tutorial">
+          <Subheading level="h4" text="5 use cases Karpathy đề xuất" />
+          <Diagram>{`
+1. RESEARCH: Papers, articles → wiki với evolving thesis
+   "Tolkien Gateway built by volunteers → bạn build cá nhân trong vài ngày"
+
+2. READING BOOKS: Mỗi chapter → character pages, theme pages, plot threads
+   → rich companion wiki khi đọc xong
+
+3. PERSONAL GROWTH: Journal entries, podcast notes, articles
+   → structured picture của bản thân theo thời gian
+
+4. BUSINESS/TEAM: Slack threads, meeting transcripts, customer calls
+   → internal wiki luôn current vì LLM maintain
+
+5. COMPETITIVE ANALYSIS, due diligence, trip planning, course notes
+          `}</Diagram>
+
+          <Callout type="info">
+            <strong>Real-world scale:</strong> Karpathy's own wiki: ~100 articles, ~400,000 words.
+            LLM vẫn navigate hiệu quả bằng index + summaries — faster và accurate hơn RAG pipeline.
+          </Callout>
+        </Technique>
+
+        <Technique id="t12" title="12. Scaling Path — Từ Minimal đến Enterprise" tid="12" location="LLM Wiki v2 — Implementation spectrum">
+          <Subheading level="h4" text="6 tầng scaling" />
+          <Diagram>{`
+Tầng 1 — Minimal Viable (bắt đầu ở đây)
+  raw/ + wiki/ + index.md + CLAUDE.md
+  → works tốt đến ~200 pages
+
+Tầng 2 — Add Lifecycle
+  + confidence scoring
+  + supersession
+  + basic retention decay
+  → prevents wiki thành junk drawer
+
+Tầng 3 — Add Structure
+  + entity extraction
+  + typed relationships
+  + knowledge graph
+  → queries richer, connections visible
+
+Tầng 4 — Add Automation
+  + event-driven hooks (auto-ingest, auto-lint)
+  + context injection on session start
+  → maintenance burden → near zero
+
+Tầng 5 — Add Scale
+  + hybrid search (BM25 + vector + graph)
+  + consolidation tiers
+  + quality scoring
+  → 200+ pages với no degradation
+
+Tầng 6 — Add Collaboration
+  + mesh sync cho multi-agent
+  + shared/private scoping
+  + work coordination
+  → team hoặc multi-agent setups
+          `}</Diagram>
+
+          <Callout type="success">
+            <strong>Recommendation:</strong> Start ở Tầng 1. Add Tầng 2 sau vài dozen sources khi
+            bạn notice content bắt đầu stale. Chỉ move lên Tầng 3+ khi bạn thực sự cần — mỗi
+            tầng có giá trị độc lập.
+          </Callout>
+        </Technique>
+      </Section>
+
+      {/* ── WRAP ── */}
+      <Section id="wrap" title="Tổng kết" themeTag="Wrap">
+        <p>
+          LLM Wiki là một trong những ý tưởng đơn giản nhất nhưng powerful nhất trong AI workflow
+          2026. Insight cốt lõi — thay vì re-derive, hãy compile — khiến knowledge compounding
+          thực sự khả thi với một người dùng đơn lẻ và không cần infrastructure phức tạp.
+        </p>
+
+        <p>
+          Karpathy không viết code, không build sản phẩm — ông viết một markdown file 500 dòng
+          mô tả một pattern. Đó là sức mạnh của ý tưởng đúng đắn ở đúng thời điểm.
+        </p>
+
+        <Callout type="success">
+          <strong>Bắt đầu ngay:</strong> Tạo folder <code>my-wiki/</code>, thêm 5 PDFs về topic
+          bạn đang research, paste ingest prompt vào Claude Code — bạn có working wiki trong 30 phút.
+        </Callout>
+
+        <RefList
+          title="Tham khảo chính"
+          items={[
+            '<a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">LLM Wiki gist (original) — Andrej Karpathy, April 4, 2026</a>',
+            '<a href="https://gist.github.com/rohitg00/2067ab416f7bbe447c1977edaaa681e2">LLM Wiki v2 — rohitg00 (agentmemory project)</a>',
+            '<a href="https://datasciencedojo.com/blog/llm-wiki-tutorial/">Step-by-step Tutorial — Data Science Dojo</a>',
+            '<a href="https://www.mindstudio.ai/blog/andrej-karpathy-llm-wiki-knowledge-base-claude-code">LLM Wiki với Claude Code — MindStudio</a>',
+            '<a href="https://venturebeat.com/data/karpathy-shares-llm-knowledge-base-architecture-that-bypasses-rag-with-an">VentureBeat coverage — LLM Knowledge Base bypasses RAG</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

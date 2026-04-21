@@ -1,0 +1,363 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T19 — Built-in sensitive path protection | OpenHarness"
+  description="Phân tích sâu cơ chế bảo vệ đường dẫn nhạy cảm của OpenHarness: 12 hardcoded glob patterns, unconditional pre-check trước mọi layer khác, và các CVE-2026-40515 / CVE-2026-40502 đã được vá."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/openharness/" label="← openharness report" />
+      <Hero
+        title="T19 — Built-in sensitive path protection"
+        subtitle="OpenHarness hardcode 12 glob patterns bao phủ các credential file phổ biến nhất — SSH keys, AWS/GCP/Azure credentials, kubeconfig, GPG, .env, PEM/KEY files. Check này chạy <strong>unconditionally</strong> trước mọi layer khác, bao gồm cả FULL_AUTO mode."
+        meta={[
+          { label: 'Nhóm', value: 'E — Permission &amp; Safety' },
+          { label: 'File', value: '<code>permissions/checker.py:14-37</code>' },
+          { label: 'Patterns', value: '12 glob patterns' },
+          { label: 'ID', value: 'E.2' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          Sensitive path protection là tầng bảo vệ <em>không điều kiện</em> đầu tiên trong
+          OpenHarness — nó chạy trước khi kiểm tra mode, trước allow/deny rules, trước tất cả.
+          Thiết kế này ngăn mọi kịch bản bypass: dù agent đang chạy FULL_AUTO, dù tool đã nằm
+          trong allow list, dù path rule có grant access — nếu path khớp một trong 12 patterns
+          thì request bị block ngay lập tức.
+        </p>
+        <WhyImportant>
+          <strong>Punchline kiến trúc:</strong>
+          <em>"Sensitive path protection is the only unconditional defense in OpenHarness — it
+          runs before mode check, before allow/deny rules, before everything."</em>
+          Đây là "safety floor" không thể bị cấu hình sai hay vô tình tắt đi.
+        </WhyImportant>
+        <Callout type="warn">
+          <strong>CVE-2026-40515 (glob root bypass):</strong>
+          <em>"CVE-2026-40515: passing path='/' to glob tool bypassed all path-based checks. Fix:
+          normalize before matching."</em>
+          Kẻ tấn công truyền <code>path="/"</code> vào glob/grep tool — không pattern nào match
+          <code>"/"</code> nhưng tool lại trả về toàn bộ filesystem bao gồm <code>~/.ssh/id_rsa</code>.
+        </Callout>
+        <Callout type="warn">
+          <strong>CVE-2026-40502 (path traversal không normalize):</strong>
+          <em>"CVE-2026-40502: file_path parameter was not resolved to absolute path before
+          checking. Fix: Path(file_path).resolve() first."</em>
+          <code>/../../../.ssh/id_rsa</code> không match bất kỳ pattern nào trước khi normalize —
+          sau khi <code>resolve()</code> mới trở thành <code>/home/user/.ssh/id_rsa</code> và bị block.
+        </Callout>
+        <Callout type="unique">
+          <strong>Fix chung cho cả hai CVE:</strong>
+          <em>"The fix for both CVEs is the same: resolve() before you check, never after."</em>
+          Gọi <code>Path(path).resolve()</code> là bước bắt buộc đầu tiên trong <code>is_sensitive_path()</code>
+          — trước khi bất kỳ pattern matching nào diễn ra.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code: permissions/checker.py:14-37" themeTag="Anatomy">
+        <Subheading level="h3" text="SENSITIVE_PATTERNS — 12 glob patterns" />
+        <CodeBlock caption="permissions/checker.py:14-37 — danh sách patterns và is_sensitive_path()">
+          <Fragment is:raw>{`
+SENSITIVE_PATTERNS = [
+    "*/.ssh/*",
+    "*/.aws/credentials",
+    "*/.aws/config",
+    "*/.azure/*",
+    "*/.kube/config",
+    "*/.gnupg/*",
+    "*/.config/gcloud/*",
+    "**/.env",
+    "**/secrets.yaml",
+    "**/secret.yaml",
+    "**/*.pem",
+    "**/*.key",
+]
+
+def is_sensitive_path(path: str | Path) -> bool:
+    """
+    Returns True if path matches any sensitive pattern.
+    ALWAYS called first — before mode, before rules.
+    """
+    # CVE-2026-40502 fix: resolve to absolute path first
+    resolved = Path(path).resolve()
+    resolved_str = str(resolved)
+
+    for pattern in SENSITIVE_PATTERNS:
+        if resolved.match(pattern):
+            return True
+        # Also check string-level match for patterns with **
+        if fnmatch.fnmatch(resolved_str, f"*/{pattern}"):
+            return True
+    return False
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          Hàm dùng hai chiến lược matching: <code>Path.match()</code> cho patterns đơn giản
+          (không có <code>**</code>) và <code>fnmatch.fnmatch()</code> với prefix <code>"*/"</code>
+          cho patterns có <code>**</code>. Kết hợp hai lớp này đảm bảo cả path tuyệt đối
+          lẫn path tương đối (sau khi resolve) đều được kiểm tra đúng.
+        </p>
+
+        <Subheading level="h3" text="CVE-2026-40515 — root path bypass và fix" />
+        <CodeBlock caption="permissions/checker.py — CVE-2026-40515: glob root bypass">
+          <Fragment is:raw>{`
+# CVE-2026-40515: root path bypass
+# Before fix:
+def old_check(path: str) -> bool:
+    return any(fnmatch.fnmatch(path, p) for p in SENSITIVE_PATTERNS)
+
+# Attack: old_check("/") → False (no pattern matches "/")
+# But glob("/") returns everything including ~/.ssh/id_rsa
+
+# After fix: check the FILES being accessed, not the search root
+def new_check_glob_result(found_paths: list[str]) -> list[str]:
+    return [p for p in found_paths if not is_sensitive_path(p)]
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          Lỗi gốc: check được áp dụng lên <em>tham số tìm kiếm</em> (<code>"/"</code>) thay vì
+          các file thực sự được trả về. Fix chuyển check sang <em>kết quả</em> của glob — lọc
+          ra mọi path nhạy cảm trong danh sách kết quả trước khi trả về agent.
+        </p>
+
+        <Subheading level="h3" text="CVE-2026-40502 — path traversal không normalize" />
+        <CodeBlock caption="permissions/checker.py — CVE-2026-40502: path traversal">
+          <Fragment is:raw>{`
+# CVE-2026-40502: file_path not normalized before check
+# Attack payload: "/../../../.ssh/id_rsa"
+
+# Before fix:
+def old_is_sensitive(path: str) -> bool:
+    return any(fnmatch.fnmatch(path, p) for p in SENSITIVE_PATTERNS)
+# old_is_sensitive("/../../../.ssh/id_rsa") → False
+# fnmatch sees literal "/../../../.ssh/id_rsa", not "/home/user/.ssh/id_rsa"
+
+# After fix (current code):
+def is_sensitive_path(path: str | Path) -> bool:
+    resolved = Path(path).resolve()   # ← resolve FIRST
+    resolved_str = str(resolved)      # → "/home/user/.ssh/id_rsa"
+    for pattern in SENSITIVE_PATTERNS:
+        if resolved.match(pattern):   # matches "*/.ssh/*" ✓
+            return True
+    return False
+# is_sensitive_path("/../../../.ssh/id_rsa") → True ✓
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T19 (Sensitive path protection) trong permission pipeline:
+
+  Request đến
+      │
+      ▼
+  ┌─────────────────────────────────────────────────┐
+  │  Layer 1: T19 — is_sensitive_path(path)?        │  ← T19 chạy ĐẦU TIÊN
+  │  Nếu True → BLOCK ngay, không check gì thêm    │
+  └───────────────────────────────┬─────────────────┘
+                                  │ False (không phải sensitive path)
+                                  ▼
+  ┌─────────────────────────────────────────────────┐
+  │  Layer 2-5: Deny/Allow tool list, path rules,  │
+  │  command deny patterns (T20)                    │
+  └───────────────────────────────┬─────────────────┘
+                                  │
+                                  ▼
+  ┌─────────────────────────────────────────────────┐
+  │  Layer 6: T18 — Permission mode check           │
+  │  FULL_AUTO / DEFAULT / PLAN                     │
+  └───────────────────────────────┬─────────────────┘
+                                  │
+                                  ▼
+  ┌─────────────────────────────────────────────────┐
+  │  T21 — Async approval UI (nếu cần)             │
+  └─────────────────────────────────────────────────┘
+
+  Quan hệ quan trọng:
+  ├─ T18 (FULL_AUTO): KHÔNG bypass T19 — mode check là layer 6
+  ├─ T20 (6-layer eval): T19 chính là layer 1 của T20
+  ├─ T21 (Async approval): T19 block xảy ra trước khi approval UI hiện
+  └─ T10 (Bash tool): Bash command chứa sensitive path args cũng được check
+`}</Diagram>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: Pattern miss — credential file mới không có trong list" />
+        <CodeBlock caption="Ví dụ: ~/.config/op/credentials (1Password CLI) không bị chặn">
+          <Fragment is:raw>{`
+# ~/.config/op/credentials — 1Password CLI credential
+# Không nằm trong SENSITIVE_PATTERNS → không bị block
+
+# Mitigations:
+# 1. Thêm pattern mới vào SENSITIVE_PATTERNS khi phát hiện
+# 2. Thêm wildcard rộng hơn: "*/.config/*/*credentials*"
+# 3. Implement pluggable pattern list để operator có thể extend
+#    mà không cần fork OpenHarness
+
+# SENSITIVE_PATTERNS hiện tại bao phủ: AWS, GCP, Azure, kube,
+# SSH, GPG, .env, PEM/KEY — nhưng không phải mọi credential manager
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: Symlink escape — resolve() theo symlink đúng cách" />
+        <CodeBlock caption="Symlink attack: ln -s ~/.ssh/id_rsa /tmp/key.txt">
+          <Fragment is:raw>{`
+# Attack: tạo symlink trỏ đến sensitive file
+# ln -s ~/.ssh/id_rsa /tmp/key.txt
+
+# Thử bypass: is_sensitive_path("/tmp/key.txt")
+# Path("/tmp/key.txt").resolve() → "/home/user/.ssh/id_rsa"
+# (resolve() theo symlink đến đích thật)
+# Kết quả: match "*/.ssh/*" → BLOCK ✓
+
+# resolve() tự động follow symlinks — đây là behavior mong muốn.
+# Symlink attack bị chặn vì check được áp dụng lên ĐÍCH thật,
+# không phải tên symlink.
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 3: Archive bypass — tar không check files bên trong" />
+        <CodeBlock caption="Archive bypass: tar cf keys.tar ~/.ssh/ vẫn có thể thực thi">
+          <Fragment is:raw>{`
+# Attack: thay vì đọc trực tiếp, agent tạo archive
+# bash_tool: "tar cf /tmp/keys.tar ~/.ssh/"
+
+# T19 check: path argument của bash_tool là "/tmp/keys.tar" (output)
+# hoặc check command string "tar cf /tmp/keys.tar ~/.ssh/"
+# T20 layer 5 check command deny patterns — nhưng nếu pattern
+# không cover "tar ... ~/.ssh/", command có thể pass
+
+# Mitigations:
+# - Thêm command deny pattern: r"tar\s+.*\.ssh" vào layer 5 (T20)
+# - Block bash_tool hoàn toàn trong PLAN mode (T18)
+# - Audit bash command args cho known archive tools
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Hardcoded sensitive paths', 'Pre-check trước mode', 'CVE patches', 'Symlink follow']}
+          rows={[
+            [
+              '<strong>OpenHarness</strong>',
+              '12 patterns (<code>*/.ssh/*</code>, <code>**/.env</code>, <code>**/*.pem</code>...)',
+              'Có — unconditional layer 1',
+              'CVE-2026-40515 + CVE-2026-40502',
+              'Có (<code>resolve()</code>)',
+            ],
+            [
+              'Claude Code',
+              'Có (danh sách tương tự)',
+              'Có',
+              'N/A (upstream)',
+              'Partial',
+            ],
+            [
+              'Aider',
+              'Không có built-in',
+              'Không',
+              'N/A',
+              'Không',
+            ],
+            [
+              'AutoGPT',
+              'Không có built-in',
+              'Không',
+              'N/A',
+              'Không',
+            ],
+          ]}
+        />
+        <p>
+          OpenHarness và Claude Code đều có sensitive path list, nhưng OpenHarness vá thêm hai
+          CVE liên quan đến bypass qua root path và path traversal chưa normalize.
+          Aider và AutoGPT không có bảo vệ built-in — operator phải tự implement nếu cần.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>
+          Minimal sensitive path protection — đủ dùng cho agent harness mới,
+          bao gồm cả fix cho CVE-2026-40515 và CVE-2026-40502:
+        </p>
+        <CodeBlock caption="sensitive_paths.py — minimal implementation">
+          <Fragment is:raw>{`
+import fnmatch
+from pathlib import Path
+
+SENSITIVE = [
+    "*/.ssh/*", "*/.aws/credentials", "*/.aws/config",
+    "*/.kube/config", "*/.gnupg/*", "**/.env", "**/*.pem", "**/*.key",
+]
+
+def is_sensitive(path_str: str) -> bool:
+    # CVE-2026-40502 fix: resolve() TRƯỚC khi check
+    resolved = Path(path_str).resolve()
+    s = str(resolved)
+    return any(
+        resolved.match(pat) or fnmatch.fnmatch(s, "*/" + pat)
+        for pat in SENSITIVE
+    )
+
+def safe_read(path_str: str) -> str:
+    if is_sensitive(path_str):
+        raise PermissionError(f"Blocked: sensitive path {path_str}")
+    return Path(path_str).read_text()
+
+# CVE-2026-40515 fix: filter kết quả glob, không chỉ filter tham số
+def safe_glob(root: str, pattern: str) -> list[str]:
+    all_results = list(Path(root).glob(pattern))
+    return [str(p) for p in all_results if not is_sensitive(str(p))]
+
+# Usage:
+# safe_read("/../../../.ssh/id_rsa")  → PermissionError ✓
+# safe_glob("/", "**/*")              → trả về list đã lọc sensitive files ✓
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://platform.claude.com/docs/en/agents-and-tools/claude-code/security">Anthropic — Claude Code Security model</a> · Sensitive file protection, path checks trong Claude Code upstream',
+            '<a href="https://nvd.nist.gov/vuln/detail/CVE-2024-48289">NVD — Path traversal via unresolved symlinks</a> · Lớp CVE tương tự: path traversal qua symlink và non-normalized paths',
+            '<a href="https://owasp.org/www-community/attacks/Path_Traversal">OWASP — Path Traversal</a> · Taxonomy tấn công path traversal và các bypass pattern phổ biến',
+            '<a href="https://docs.python.org/3/library/pathlib.html#pathlib.Path.resolve">Python docs — Path.resolve()</a> · Tại sao resolve() là bước bắt buộc: follow symlinks + collapse ..',
+            '<a href="https://docs.python.org/3/library/fnmatch.html">Python docs — fnmatch</a> · Glob pattern matching — giới hạn của fnmatch với ** patterns',
+            '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Harness Engineering for Coding Agents</a> · Defensive layers trong coding agent harness: path protection best practices',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

@@ -1,0 +1,257 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T25 — Session-scoped permission state (once/always/reject) | opencode"
+  description="Phân tích sâu cơ chế permission state per session: once/always/reject reply. 'always' pattern auto-approve cho cả session. 'reject' cancel ngay tất cả pending. State không leak giữa sessions."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T25 — Session-scoped permission state"
+        subtitle="Ba reply mode: <strong>once</strong> (chỉ lần này), <strong>always</strong> (auto-approve pattern cả session), <strong>reject</strong> (cancel ngay). State scoped theo session — không leak sang session khác."
+        meta={[
+          { label: 'Nhóm',  value: 'E — Permission Model' },
+          { label: 'File',  value: '<code>permission/index.ts</code> · Lines 130–282' },
+          { label: 'ID',    value: 'E.2 / T25' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Permission">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Nếu mỗi bash command đều popup dialog → user spam Enter, permission mất ý nghĩa. Ngược lại, auto-approve hết → không có safety net. "always" cho phép user approve pattern một lần (<code>ls *</code>), agent execute thoải mái suốt session mà không hỏi lại. "reject" cancel ngay tất cả pending tool calls — cho user abort toàn bộ khi phát hiện agent đang làm sai. State scoped per session đảm bảo không có "permission leak" giữa projects.
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>UI decoupled qua event:</strong> Permission system emit <code>"permission.request"</code> event rồi await Deferred resolve — core không biết UI đang là TUI, web, hay desktop. Swap UI không cần touch core logic.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Permission state và ask() flow" />
+        <CodeBlock caption="permission/index.ts — Permission class" lang="typescript"><Fragment is:raw>{`
+interface PermissionState {
+  sessionId:   string
+  // Patterns đã được user approve với "always" trong session này
+  alwaysAllow: Array<{ permission: string; pattern: string }>
+  // Map requestId → Deferred (sync point cho UI response)
+  pending:     Map<string, Deferred<"allow" | "deny">>
+}
+
+export class Permission {
+  async ask(req: PermissionRequest): Promise<"allow" | "deny"> {
+    // 1. Check static rules từ config (T24)
+    const staticResult = evaluate(this.rules, req.permission, req.pattern)
+    if (staticResult !== "ask") return staticResult
+
+    // 2. Check session alwaysAllow
+    const alreadyAllowed = this.state.alwaysAllow.some(
+      (r) =>
+        Wildcard.match(req.permission, r.permission) &&
+        Wildcard.match(req.pattern,    r.pattern)
+    )
+    if (alreadyAllowed) return "allow"
+
+    // 3. Ask user via UI event
+    const deferred = makeDeferred<"allow" | "deny">()
+    this.state.pending.set(req.id, deferred)
+    this.emit("permission.request", req)
+
+    // Suspend until user responds
+    return await deferred.promise
+  }
+
+  // UI calls reply() khi user click button
+  reply(reqId: string, reply: "once" | "always" | "reject", pattern?: string) {
+    const d = this.state.pending.get(reqId)
+    if (!d) return
+
+    if (reply === "always" && pattern) {
+      // Lưu vào session alwaysAllow → auto-approve matching requests sau
+      this.state.alwaysAllow.push({
+        permission: d.req.permission,
+        pattern,                       // pattern user đã confirm (vd "ls *")
+      })
+    }
+
+    // "reject" → cancel TẤT CẢ pending requests cùng lúc
+    if (reply === "reject") {
+      for (const [id, def] of this.state.pending) {
+        def.resolve("deny")
+        this.state.pending.delete(id)
+      }
+      return
+    }
+
+    d.resolve(reply === "reject" ? "deny" : "allow")
+    this.state.pending.delete(reqId)
+  }
+}
+`}</Fragment></CodeBlock>
+
+        <Diagram>{`
+agent: bash tool muốn chạy "ls /home"
+         │
+         ▼
+permission.ask({ permission: "bash", pattern: "ls /home" })
+         │
+    ┌────┴──────────────────────────────────────┐
+    │  check static rules (T24)                 │
+    │  → "ask" (no static rule matches)         │
+    └────┬──────────────────────────────────────┘
+         │
+    ┌────┴──────────────────────────────────────┐
+    │  check session alwaysAllow                │
+    │  → "ls *" pattern? YES → return "allow"  │  ← 2nd time, no dialog
+    │  → no match? → continue                  │  ← 1st time
+    └────┬──────────────────────────────────────┘
+         │ (1st time only)
+         ▼
+    emit("permission.request", req)
+    await deferred.promise          ← suspend here
+         │
+    user clicks:
+    [once] → allow, no save
+    [always "ls *"] → save to alwaysAllow, allow
+    [reject] → deny + cancel all pending
+         │
+         ▼
+    deferred.resolve() → resume agent
+        `}</Diagram>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T24 (Static rules):</strong> T25 là layer thứ 2 sau T24. Static rules check trước — chỉ khi static rules trả "ask" mới đến dynamic session state check.</li>
+          <li><strong>T26 (Arity normalization):</strong> Pattern được suggest cho user khi approve "always" là normalized command (vd <code>"npm run build"</code> thay vì <code>"npm run build --watch --verbose"</code>). T26 tạo ra suggested pattern này.</li>
+          <li><strong>T3 (Deferred tool coordination):</strong> Permission Deferred và tool Deferred cùng pattern — Effect Deferred.make → await → resolve. Hai hệ thống dùng primitive giống nhau, dễ hiểu khi đọc codebase.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. User approve pattern quá rộng" />
+        <p>
+          User vội click "always" với pattern <code>"bash:*"</code> thay vì <code>"bash:ls *"</code> → agent có thể run bất kỳ bash command nào trong session mà không hỏi. Session-scope tránh được inter-session leak nhưng không cứu được trong-session.
+        </p>
+        <Callout type="warn">
+          <strong>UI recommendation:</strong> Highlight warning khi user sắp approve pattern rộng. Suggest narrow pattern dựa trên command cụ thể đang được request. Arity normalization (T26) giúp tạo suggested pattern hợp lý.
+        </Callout>
+
+        <Subheading level="h3" text="2. Deferred không bao giờ resolve" />
+        <p>
+          Nếu UI bị crash hoặc user đóng window mà pending request vẫn còn, agent bị treo indefinitely. Cần timeout cho permission request (vd 5 phút) sau đó default "deny".
+        </p>
+
+        <Subheading level="h3" text="3. alwaysAllow không persist" />
+        <p>
+          State chỉ tồn tại trong session — mỗi session mới phải approve lại. Đây là behavior có chủ ý (tránh leak), nhưng gây friction cho user dùng lặp lại cùng pattern mỗi ngày.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Session permission state', 'Persist to disk', 'Reject all']}
+          rows={[
+            ['opencode', 'alwaysAllow per session, once/always/reject', '❌ intentional', '✅ reject cancels all pending'],
+            ['Claude Code', 'alwaysDeny / alwaysAllow lists', '✅ persisted to config', '✅'],
+            ['Aider', 'Auto-approve flag (global)', '✅ config file', '⚠️ global stop only'],
+            ['Cline', 'Per-session approve cache', '❌', '✅'],
+            ['OpenHarness', 'Permission file + mailbox sync', '✅ file-based', '✅'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+// Minimal permission gate với session state
+class PermissionGate {
+  private alwaysAllow: Array<{ perm: string; ptn: string }> = []
+  private pending = new Map<string, {
+    resolve: (v: "allow" | "deny") => void
+    req:     PermissionRequest
+  }>()
+
+  async ask(req: PermissionRequest): Promise<"allow" | "deny"> {
+    // Check session cache first
+    if (this.alwaysAllow.some(r => match(req, r))) return "allow"
+
+    // Ask user via UI
+    return new Promise((resolve) => {
+      const id = crypto.randomUUID()
+      this.pending.set(id, { resolve, req })
+      ui.showPermissionDialog({ ...req, id })
+
+      // Timeout: auto-deny after 5 min
+      setTimeout(() => {
+        if (this.pending.has(id)) {
+          this.pending.get(id)!.resolve("deny")
+          this.pending.delete(id)
+        }
+      }, 5 * 60 * 1000)
+    })
+  }
+
+  reply(id: string, mode: "once" | "always" | "reject", pattern?: string) {
+    if (mode === "reject") {
+      // Cancel ALL pending
+      for (const [pid, p] of this.pending) {
+        p.resolve("deny")
+        this.pending.delete(pid)
+      }
+      return
+    }
+
+    const p = this.pending.get(id)
+    if (!p) return
+
+    if (mode === "always" && pattern) {
+      this.alwaysAllow.push({ perm: p.req.permission, ptn: pattern })
+    }
+
+    p.resolve("allow")
+    this.pending.delete(id)
+  }
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic — Claude Code auto mode: safer way to skip permissions</a>',
+            '<a href="https://opencode.ai/docs/permissions/">OpenCode — Permissions docs</a>',
+            '<a href="https://claudefa.st/blog/guide/development/permission-management">Claude Fast — Permission Management guide</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

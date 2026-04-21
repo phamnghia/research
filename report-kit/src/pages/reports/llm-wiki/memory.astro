@@ -1,0 +1,629 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RefList from '../../../components/RefList.astro';
+import DataTable from '../../../components/DataTable.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+
+const title = 'Deep Dive: Knowledge Lifecycle & Memory';
+const description = 'Phân tích LLM Wiki v2: confidence scoring, supersession, Ebbinghaus forgetting curves, bốn tầng memory (working/episodic/semantic/procedural), automation hooks và multi-agent memory sync.';
+---
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar
+      intro="Memory Deep Dive"
+      groups={[
+        {
+          title: 'Context',
+          items: [
+            { href: '#intro', label: 'Tổng quan', section: true },
+          ],
+        },
+        {
+          title: 'Lifecycle',
+          items: [
+            { href: '#t1', label: '1. Confidence Scoring' },
+            { href: '#t2', label: '2. Supersession' },
+            { href: '#t3', label: '3. Forgetting Curves' },
+            { href: '#t4', label: '4. Consolidation Tiers' },
+          ],
+        },
+        {
+          title: 'Automation',
+          items: [
+            { href: '#t5', label: '5. Event-driven Hooks' },
+            { href: '#t6', label: '6. Quality & Self-healing' },
+            { href: '#t7', label: '7. Crystallization' },
+          ],
+        },
+        {
+          title: 'Multi-agent',
+          items: [
+            { href: '#t8', label: '8. Multi-agent Sync' },
+            { href: '#t9', label: '9. Privacy & Governance' },
+          ],
+        },
+        {
+          title: 'Kết luận',
+          items: [
+            { href: '#wrap', label: 'Tổng kết', section: true },
+          ],
+        },
+      ]}
+    />
+
+    <main>
+      <Breadcrumb href="/reports/llm-wiki/" label="← LLM Wiki Overview" />
+
+      <Hero
+        title={title}
+        subtitle={`Phân tích chi tiết từ báo cáo <a href="/reports/llm-wiki/">Tổng quan LLM Wiki</a> — đào sâu vào memory lifecycle, confidence scoring, forgetting curves và automation.`}
+        meta={[
+          { label: 'Báo cáo cha', value: '<a href="/reports/llm-wiki/">← LLM Wiki Overview</a>' },
+          { label: 'Topic', value: 'Knowledge Lifecycle & Memory' },
+          { label: 'Nguồn', value: 'LLM Wiki v2 (rohitg00/agentmemory)' },
+          { label: 'Ngày', value: '2026-04-20' },
+        ]}
+      />
+
+      <Section id="intro" title="Tổng quan" themeTag="Intro">
+        <p>
+          Original LLM Wiki của Karpathy treat tất cả wiki content như equally valid forever.
+          Trong thực tế, knowledge có vòng đời: confidence decay theo thời gian, thông tin mới
+          supersede cũ, patterns được thấy nhiều lần đáng tin hơn patterns chỉ thấy một lần.
+        </p>
+        <p>
+          LLM Wiki v2 (từ rohitg00's agentmemory project) bổ sung một <strong>memory lifecycle
+          layer</strong> phía trên original pattern. Deep dive này đi vào chi tiết của layer đó:
+          confidence scoring, supersession, Ebbinghaus forgetting curves, bốn tầng memory, và
+          automation hooks để reduce maintenance burden về gần zero.
+        </p>
+
+        <Callout type="info">
+          <strong>Scope của deep dive này:</strong> Đây là "what the original gist missed" —
+          những patterns proven trong production qua agentmemory. Karpathy's original insight
+          đúng; v2 adds machinery để wiki stay healthy as it scales.
+        </Callout>
+      </Section>
+
+      <Section id="lifecycle" title="Knowledge Lifecycle" themeTag="Lifecycle">
+
+        <Technique id="t1" title="1. Confidence Scoring — Mỗi Fact Có Trọng Số" tid="1" location="LLM Wiki v2 — Memory lifecycle section">
+          <WhyImportant>
+            <strong>Không phải mọi claim đều đáng tin như nhau.</strong> "Project X uses Redis"
+            có thể đến từ 1 Slack message 6 tháng trước hay từ 3 architecture documents được
+            update tuần rồi. Confidence score captures sự khác biệt đó và cho LLM biết khi nào
+            nên nói "I'm fairly sure" vs "I'm less sure about this."
+          </WhyImportant>
+
+          <Subheading level="h4" text="Confidence formula" />
+          <CodeBlock caption="Confidence scoring model" lang="python" code={`# Confidence = base từ source count × decay factor
+
+def calculate_confidence(
+    source_count: int,
+    last_confirmed_days_ago: int,
+    has_contradiction: bool = False,
+    is_superseded: bool = False
+) -> float:
+    # Base confidence từ số sources
+    base = min(0.95, 0.3 + (source_count - 1) * 0.2)
+    # Tối đa: 1 source → 0.3, 2 sources → 0.5, 4 sources → 0.9
+
+    # Decay: 2% per week (Ebbinghaus-inspired)
+    weeks_old = last_confirmed_days_ago / 7
+    decay = 0.02 * weeks_old
+    decayed = max(0.1, base - decay)
+
+    # Penalties
+    if has_contradiction:
+        decayed *= 0.6  # contradiction halves trust
+    if is_superseded:
+        decayed = 0.05  # superseded → near-zero
+
+    return round(decayed, 2)
+
+# Examples:
+# 2 sources, 1 week old → confidence = 0.48
+# 4 sources, 0 days old → confidence = 0.90
+# 1 source, 3 months old → confidence = 0.04 (stale!)
+# 3 sources, 2 weeks + contradiction → confidence = 0.28`} />
+
+          <Subheading level="h4" text="Confidence trong entity page format" />
+          <CodeBlock caption="wiki/entities/redis-caching.md" lang="markdown" code={`# Redis Caching — Project X
+**Confidence**: 0.85
+**Sources**: [[raw/architecture-doc.md]], [[raw/infra-review.pdf]]
+**Last Confirmed**: 2026-04-10
+**Confidence History**: 0.30 (2025-10-01) → 0.50 (2026-01-15) → 0.85 (2026-04-10)
+
+Project X uses Redis for session caching with a 24h TTL.`} />
+
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Confidence Range', 'Ý nghĩa', 'Action']}
+            rows={[
+              ['0.8 – 0.95', '<strong>High</strong> — 3+ sources, recent', 'Use confidently'],
+              ['0.5 – 0.8', 'Medium — 2 sources or somewhat old', 'Use với caveat'],
+              ['0.3 – 0.5', 'Low — 1 source or old', 'Flag for verification'],
+              ['< 0.3', '<strong>Stale/unreliable</strong>', 'Lint action needed'],
+            ]}
+          />
+
+          <ProsCons
+            pros={[
+              'LLM có thể nói "I\'m fairly sure" vs "I\'m less sure" một cách grounded',
+              'Lint có thể automatically prioritize review dựa trên confidence',
+              'Confidence history shows how knowledge evolved',
+              'Contradiction detection naturally lowers confidence → review flagged',
+            ]}
+            cons={[
+              'Cần discipline để maintain confidence scores khi update pages',
+              'Formula không hoàn hảo — LLM interpretation có thể drift',
+              'Adds overhead cho mỗi page (thêm ~2 fields)',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t2" title="2. Supersession — Version Control cho Knowledge" tid="2" location="LLM Wiki v2 — Supersession">
+          <WhyImportant>
+            <strong>Knowledge update, không chỉ accumulate.</strong> Khi bạn tìm ra rằng
+            Redis đã bị replace bởi Memcached, claim cũ không nên chỉ có note nhỏ. Nó phải
+            được explicitly marked stale, linked đến claim mới, với timestamp và reasoning.
+            Đây là "version control for knowledge."
+          </WhyImportant>
+
+          <Subheading level="h4" text="Supersession pattern" />
+          <CodeBlock caption="Trước và sau supersession" lang="markdown">
+            <Fragment is:raw>{`<!-- TRƯỚC (stale claim) -->
+# Redis Caching — Project X
+**Confidence**: 0.85
+
+Project X uses Redis for session caching.
+
+---
+
+<!-- SAU (supersession applied) -->
+# Redis Caching — Project X
+**Confidence**: 0.05
+**Status**: ⚠️ SUPERSEDED by [[memcached-migration]]
+**Superseded on**: 2026-04-15
+**Reason**: Infrastructure migration completed, see [[raw/infra-migration-q2.md]]
+
+~~Project X uses Redis for session caching.~~
+
+> **Update (2026-04-15):** Project X migrated to Memcached.
+> See [[memcached-migration]] for current state.
+`}</Fragment>
+          </CodeBlock>
+
+          <CodeBlock caption="New claim page" lang="markdown" code={`# Memcached Migration — Project X
+**Confidence**: 0.90
+**Sources**: [[raw/infra-migration-q2.md]], [[raw/arch-review-2026-q2.pdf]]
+**Supersedes**: [[redis-caching]] (as of 2026-04-15)
+
+Project X completed migration to Memcached in Q2 2026.
+Reasons: lower memory footprint, better eviction policies for session data.`} />
+
+          <Subheading level="h4" text="Supersession ingest prompt" />
+          <CodeBlock caption="Ingest prompt khi có supersession" lang="markdown" code={`This source contains new information that may update existing wiki claims.
+
+For each factual claim in the source:
+1. Check if a similar claim exists in wiki/
+2. If the new claim UPDATES or CONTRADICTS existing:
+   a. Mark old page as superseded: add "⚠️ SUPERSEDED" badge, strikethrough old claim
+   b. Create/update new page with current claim
+   c. Set old page confidence to 0.05
+   d. Link old → new and new → old
+   e. Log: "[DATE] supersession | [old page] → [new page]"`} />
+
+          <Callout type="warn">
+            <strong>Không xóa superseded pages.</strong> Chúng là historical record. Bạn có thể
+            cần biết "ở thời điểm X, chúng ta nghĩ gì về Y?" Superseded ≠ deleted.
+          </Callout>
+        </Technique>
+
+        <Technique id="t3" title="3. Forgetting Curves — Ebbinghaus cho Knowledge Bases" tid="3" location="LLM Wiki v2 — Forgetting section">
+          <WhyImportant>
+            <strong>Wiki không nhớ tất cả mãi mãi.</strong> Wiki mà không bao giờ forget trở
+            thành noisy. Facts quan trọng nhưng không được reinforce nhiều tháng nên fade —
+            không bị xóa, nhưng deprioritized. Đây là Ebbinghaus forgetting curve applied
+            to knowledge management.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Ebbinghaus retention curve" />
+          <Diagram>{`
+Retention (%)
+100% │▄
+     │ ▄▄
+     │    ▄▄
+ 60% │       ▄▄▄
+     │           ▄▄▄▄▄
+ 30% │                  ▄▄▄▄▄▄▄▄▄▄▄▄▄
+     │
+  0% └──────────────────────────────────── Time
+       1day  1week  1month  6months  1year
+
+Nhưng mỗi lần review/access/reinforce → curve RESET từ 100%
+(retrieval practice effect — strengthens memory)
+          `}</Diagram>
+
+          <Subheading level="h4" text="Áp dụng vào LLM Wiki" />
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Loại knowledge', 'Decay rate', 'Ví dụ']}
+            rows={[
+              ['Architecture decisions', 'Rất chậm (months)', '"We use microservices because X"'],
+              ['API specs / interfaces', 'Chậm (weeks-months)', '"Auth service endpoint is /api/v2/auth"'],
+              ['Implementation details', 'Trung bình (weeks)', '"Redis TTL is set to 24h"'],
+              ['Transient bugs', 'Nhanh (days-weeks)', '"Bug #1234 affects login on Firefox"'],
+              ['Meeting notes', 'Nhanh (days)', '"Action item: review PR by Friday"'],
+            ]}
+          />
+
+          <CodeBlock caption="Automated decay check (weekly cron)" lang="python" code={`import datetime
+
+def calculate_retention(last_reinforced: datetime, decay_rate: float) -> float:
+    """
+    Ebbinghaus-inspired retention.
+    decay_rate: fraction lost per week (0.02 = 2%/week for architecture)
+    """
+    weeks_elapsed = (datetime.now() - last_reinforced).days / 7
+    retention = max(0.05, 1.0 * (1 - decay_rate) ** weeks_elapsed)
+    return round(retention, 2)
+
+def classify_retention_action(retention: float) -> str:
+    if retention > 0.7: return "active"
+    if retention > 0.4: return "review_soon"
+    if retention > 0.2: return "flag_for_review"
+    return "deprioritize"
+
+# Weekly lint: find facts with retention < 0.3 → flag for review
+# Annual cleanup: facts with retention < 0.1 and no inbound links → archive`} />
+
+          <Callout type="info">
+            <strong>Deprioritize ≠ Delete.</strong> Deprioritized facts vẫn accessible nhưng
+            LLM không proactively include chúng trong answers. Index.md có thể có separate section
+            "Archive" cho low-retention content.
+          </Callout>
+        </Technique>
+
+        <Technique id="t4" title="4. Consolidation Tiers — Bốn tầng memory" tid="4" location="LLM Wiki v2 — Consolidation tiers">
+          <WhyImportant>
+            <strong>Raw observations ≠ established facts.</strong> "I saw this once" khác với
+            "this is how things work." Bốn tầng memory là pipeline để promote information từ
+            volatile observations thành long-lived procedural knowledge.
+          </WhyImportant>
+
+          <Diagram>{`
+┌─────────────────────────────────────────────────────────┐
+│  Tier 1: WORKING MEMORY                                 │
+│  Recent observations, not yet processed                 │
+│  → volatile, session-scoped                             │
+│  Files: wiki/_inbox/, wiki/_sessions/                   │
+└──────────────────────┬──────────────────────────────────┘
+                       │ session end: compress
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│  Tier 2: EPISODIC MEMORY                                │
+│  Session summaries, compressed from raw observations    │
+│  → what happened, when, key takeaways                   │
+│  Files: wiki/episodes/YYYY-MM-DD.md                     │
+└──────────────────────┬──────────────────────────────────┘
+                       │ consolidation: extract patterns
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│  Tier 3: SEMANTIC MEMORY                                │
+│  Cross-session facts, consolidated from episodes        │
+│  → "this is true" (high confidence, time-stable)        │
+│  Files: wiki/entities/, wiki/concepts/                  │
+└──────────────────────┬──────────────────────────────────┘
+                       │ pattern recognition
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│  Tier 4: PROCEDURAL MEMORY                              │
+│  Workflows + patterns extracted from repeated semantics │
+│  → "this is how we do things here"                      │
+│  Files: wiki/procedures/, CLAUDE.md (schema updates)    │
+└─────────────────────────────────────────────────────────┘
+          `}</Diagram>
+
+          <Subheading level="h4" text="Consolidation prompt" />
+          <CodeBlock caption="Session-end consolidation prompt" lang="markdown" code={`Review today's session notes in wiki/_inbox/session-[DATE].md.
+
+Extract and promote:
+1. EPISODIC: Write wiki/episodes/[DATE].md with:
+   - What we worked on
+   - Key decisions made
+   - New information discovered
+   - Entities referenced (link to wiki pages)
+
+2. SEMANTIC: For each fact mentioned 3+ times or from authoritative source:
+   - Find or create entity page in wiki/entities/
+   - Update confidence (+0.1 for each corroboration)
+   - Add cross-references
+
+3. PROCEDURAL: If we repeated a workflow pattern:
+   - Check if wiki/procedures/ has this pattern
+   - If not: propose adding it
+   - If yes: update with new insight
+
+Then archive session notes to wiki/_archive/sessions/[DATE].md`} />
+
+          <ProsCons
+            pros={[
+              'Clear distinction between "raw observation" and "established fact"',
+              '"I saw this once" không contaminate "this is how things work"',
+              'Procedural tier → CLAUDE.md evolves based on real usage',
+              'Episodic tier → debugging tool: "what were we thinking on 2026-04-10?"',
+            ]}
+            cons={[
+              'Consolidation needs to be run deliberately — không fully automatic',
+              'Four-tier structure adds complexity to folder organization',
+              'LLM promotion heuristics (3+ times rule) có thể miss important 1-time events',
+            ]}
+          />
+        </Technique>
+      </Section>
+
+      <Section id="automation" title="Automation & Quality" themeTag="Automation">
+
+        <Technique id="t5" title="5. Event-driven Hooks — Zero Maintenance" tid="5" location="LLM Wiki v2 — Automation section">
+          <WhyImportant>
+            <strong>Lý do #1 wikis bị bỏ rơi: maintenance burden.</strong> Original LLM Wiki
+            là manual — bạn phải remember chạy lint, remember to file answers, remember to
+            ingest. Hooks eliminate cái burden đó bằng cách automate mọi bookkeeping operation.
+          </WhyImportant>
+
+          <Diagram>{`
+Events và Hooks:
+
+on_new_file_in_raw/
+  → auto-ingest (extract entities, update graph, update index)
+  → notification: "New source detected: {filename} — ingest now? [Y/N]"
+
+on_session_start
+  → read log.md (last 5 entries) → load relevant context
+  → inject summary of last 3 sessions into system prompt
+
+on_session_end
+  → compress session → wiki/_inbox/session-{date}.md
+  → prompt: "Found 3 potential wiki updates from today. File them? [Y/N]"
+
+on_query_response (quality_score > 0.8)
+  → "This answer looks valuable. File to wiki? [Y/N]"
+
+on_wiki_write
+  → check for contradictions với existing pages
+  → if contradiction found: flag, log, propose resolution
+
+on_schedule (daily 2am)
+  → confidence decay calculation
+  → flag pages with confidence < 0.3
+  → notification: "3 pages need review"
+
+on_schedule (weekly Sunday)
+  → lint pass
+  → consolidation tier promotion
+  → retention report
+          `}</Diagram>
+
+          <Callout type="success">
+            <strong>Human trong loop cho decisions.</strong> Hooks automate bookkeeping và
+            suggest actions — nhưng chỉ execute khi bạn confirm. Curation vẫn là job của bạn;
+            LLM handles filing, linking, và maintenance.
+          </Callout>
+        </Technique>
+
+        <Technique id="t6" title="6. Quality Scoring & Self-healing" tid="6" location="LLM Wiki v2 — Quality section">
+          <WhyImportant>
+            <strong>Không phải mọi content LLM viết đều tốt.</strong> Không có quality controls,
+            wiki accumulate noise. Self-healing lint tự động fix những gì có thể fix, flag những
+            gì cần human review.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Quality scoring cho wiki pages" />
+          <CodeBlock caption="Quality evaluation rubric" lang="markdown" code={`# Page Quality Checklist (0-10 score)
+
+Structure (3 pts):
+  [+1] Has Summary field
+  [+1] Has Tags field
+  [+1] Has Confidence + Last Updated
+
+Content (4 pts):
+  [+1] Summary is standalone (no "it"/"this" references)
+  [+1] Has at least 1 specific, verifiable claim
+  [+2] Cites sources with [[wiki-links]] or [[raw/]] links
+
+Connections (3 pts):
+  [+1] Has ≥1 inbound link (not orphan)
+  [+1] Has ≥1 outbound [[wiki-link]]
+  [+1] Relationships section filled with typed relations
+
+Score < 5 → flag for rewrite
+Score 5-7 → flag for improvement
+Score ≥ 8 → active status`} />
+
+          <Subheading level="h4" text="Self-healing lint" />
+          <CodeBlock caption="Self-healing lint prompt" lang="markdown" code={`Run self-healing lint on wiki/.
+
+For each issue found, FIX IT (don't just report):
+
+AUTO-FIX (do immediately):
+- Broken [[wiki-links]] → remove or redirect
+- Missing Tags field → infer from content, add
+- Orphan pages with obvious home → add backlink
+- Duplicate pages (same concept, different names) → merge, redirect
+
+FLAG FOR REVIEW (don't auto-fix):
+- Contradictions (need human judgment)
+- Confidence < 0.3 (need source verification)
+- Missing Summary (need human knowledge)
+
+After fixing, show summary:
+"Fixed: N items | Flagged: M items | Wiki health: X/10"`} />
+        </Technique>
+
+        <Technique id="t7" title="7. Crystallization — Biến Sessions thành Knowledge" tid="7" location="LLM Wiki v2 — Crystallization section">
+          <WhyImportant>
+            <strong>Explorations là một loại source, không phải disposable chat.</strong>
+            Một completed research session, debugging thread, hay analysis chain chứa insights
+            không có trong bất kỳ single source nào. Crystallization captures chúng.
+          </WhyImportant>
+
+          <Diagram>{`
+Research Session Complete
+      │
+      ▼
+Crystallization Process:
+  1. "What was the question?"
+  2. "What did we find?"
+  3. "What files/entities were involved?"
+  4. "What lessons emerged?"
+  5. "What changed in our understanding?"
+      │
+      ▼
+Crystal Page (wiki/crystals/[topic]-[date].md)
+  - First-class wiki page
+  - Linked to all relevant entities
+  - Lessons extracted as standalone facts → update entity pages
+  - Files back into wiki → indexed, searchable, citable
+          `}</Diagram>
+
+          <CodeBlock caption="Crystallization prompt" lang="markdown" code={`Today's research session on [TOPIC] is complete.
+
+Create a crystal page at wiki/crystals/[topic]-[date].md:
+
+1. QUESTION: What were we trying to understand?
+2. FINDINGS: What did we learn? (bullet list, each item linkable to a source/entity)
+3. ENTITIES TOUCHED: [[list of entity pages we read/updated]]
+4. LESSONS: What general principles emerged?
+   (these become candidates for wiki/entities/ if not already there)
+5. CONTRADICTIONS: Did we find anything that contradicts existing wiki?
+6. OPEN QUESTIONS: What's still unclear?
+
+After creating crystal page:
+- Add to wiki/index.md under "Crystals" section
+- For each lesson, check if it should strengthen existing entity confidence
+- Log: "[DATE] crystal | [topic]"`} />
+
+          <Callout type="unique">
+            <strong>The wiki learns from your thinking, not just from external sources.</strong>
+            Sau 50 sessions, wiki chứa distilled insights từ chính những research sessions của
+            bạn — không có AI tool nào khác capture điều này.
+          </Callout>
+        </Technique>
+      </Section>
+
+      <Section id="multiagent" title="Multi-agent & Privacy" themeTag="Advanced">
+
+        <Technique id="t8" title="8. Multi-agent Memory Sync" tid="8" location="LLM Wiki v2 — Multi-agent section">
+          <WhyImportant>
+            <strong>Original LLM Wiki là single-user, single-agent.</strong> Nhưng khi có nhiều
+            agents (different coding sessions, research threads, team members), observations cần
+            merge vào shared wiki mà không conflict.
+          </WhyImportant>
+
+          <Diagram>{`
+Agent A (Research)     Agent B (Coding)     Agent C (Review)
+     │                      │                      │
+     ▼                      ▼                      ▼
+wiki/agents/A/        wiki/agents/B/        wiki/agents/C/
+ (private scope)       (private scope)       (private scope)
+     │                      │                      │
+     └──────────────┬────────────────────┘
+                    ▼
+             Mesh Sync (on_session_end)
+                    │
+                    ▼
+             wiki/shared/              ← shared knowledge
+              (conflict resolution via timestamp + confidence)
+          `}</Diagram>
+
+          <Subheading level="h4" text="Conflict resolution" />
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Conflict type', 'Resolution']}
+            rows={[
+              ['Same fact, same confidence', 'Last-write-wins (timestamp)'],
+              ['Same fact, different confidence', 'Higher confidence wins'],
+              ['Contradiction (different facts)', 'Both preserved + ⚠️ flag + human review'],
+              ['Agent A: private, Agent B: shared', 'Private không merge vào shared automatically'],
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t9" title="9. Privacy & Governance — Sensitive Data" tid="9" location="LLM Wiki v2 — Privacy section">
+          <WhyImportant>
+            <strong>Sources thường chứa sensitive info.</strong> API keys, credentials, private
+            conversations, PII có thể nằm trong raw sources. Filter on ingest là mandatory,
+            không phải optional.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Filter on ingest" />
+          <CodeBlock caption="Pre-ingest sanitization" lang="python" code={`import re
+
+SENSITIVE_PATTERNS = [
+    r'(?i)(api[_-]?key|token|secret|password|credential)["\s:=]+\S+',
+    r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}',  # email
+    r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b',  # phone
+    r'sk-[a-zA-Z0-9]{48}',  # OpenAI API key pattern
+    r'Bearer [a-zA-Z0-9._-]+',  # auth tokens
+]
+
+def sanitize_for_wiki(text: str) -> str:
+    for pattern in SENSITIVE_PATTERNS:
+        text = re.sub(pattern, '[REDACTED]', text)
+    return text
+
+# Run before every ingest — not optional`} />
+
+          <Subheading level="h4" text="Audit trail" />
+          <CodeBlock caption="wiki/audit.log format" lang="text" code={`2026-04-20T14:23:01Z | INGEST | agent:claude | source:raw/paper1.pdf | pages_created:3 | pages_updated:5
+2026-04-20T15:01:22Z | QUERY  | agent:claude | question:"What is attention?" | answer_filed:yes | page:wiki/comparisons/attention-types.md
+2026-04-20T16:45:00Z | LINT   | agent:claude | issues_found:4 | auto_fixed:3 | human_flagged:1
+2026-04-20T17:00:00Z | DELETE | agent:claude | page:wiki/old-architecture.md | reason:superseded | archived:yes`} />
+
+          <Callout type="warn">
+            <strong>Bulk operations phải reversible.</strong> Trước khi chạy bulk-delete hoặc
+            bulk-merge: archive target pages vào <code>wiki/_archive/</code> với timestamp.
+            Không bao giờ permanently delete — bạn sẽ cần lại.
+          </Callout>
+        </Technique>
+      </Section>
+
+      <Section id="wrap" title="Tổng kết" themeTag="Wrap">
+        <p>
+          LLM Wiki v2 biến original pattern thành một <strong>living knowledge system</strong>:
+          confidence scores cho biết mức độ reliable của mỗi fact; supersession ensures knowledge
+          reflects current reality; forgetting curves prevent noise accumulation; bốn tầng memory
+          separate observation từ established knowledge.
+        </p>
+        <p>
+          Không cần implement tất cả ngay. Bắt đầu với confidence scoring (Tầng 2) sau khi wiki
+          có 50+ pages, thêm supersession pattern khi bạn lần đầu encounter contradicting sources,
+          và chỉ add automation hooks khi maintenance actually becomes burden.
+        </p>
+
+        <RefList
+          title="Tham khảo"
+          items={[
+            '<a href="https://gist.github.com/rohitg00/2067ab416f7bbe447c1977edaaa681e2">LLM Wiki v2 — rohitg00 (agentmemory project)</a>',
+            '<a href="https://github.com/rohitg00/agentmemory">agentmemory — persistent memory engine for AI agents</a>',
+            '<a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">LLM Wiki gist (original) — Andrej Karpathy</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

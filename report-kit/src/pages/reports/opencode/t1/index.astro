@@ -1,0 +1,390 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T1 — ReAct loop với finish-reason-aware exit | opencode"
+  description="Phân tích sâu kỹ thuật vòng lặp ReAct của opencode: cơ chế kiểm tra finish-reason sau khi tool execute, tránh exit sớm với tool call pending."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác với T-khác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+      <Hero
+        title="T1 — ReAct loop với finish-reason-aware exit"
+        subtitle="Vòng lặp agent của opencode kiểm tra <code>finish_reason</code> SAU khi tool execute xong — không phải trước — để tránh bỏ rơi tool call pending khi model trả <code>stop</code> không đúng thời điểm."
+        meta={[
+          { label: 'Nhóm', value: 'A — Agent Loop & Streaming' },
+          { label: 'File', value: '<code>session/prompt.ts</code>' },
+          { label: 'Hàm', value: '<code>runLoop()</code>' },
+          { label: 'Lines', value: '1305–1530' },
+          { label: 'ID', value: 'A.1' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          ReAct (Reasoning + Acting) là pattern phổ biến nhất cho agent harness hiện đại: model suy luận,
+          gọi tool, nhận kết quả, tiếp tục suy luận. Vòng lặp đơn giản về khái niệm — nhưng ẩn chứa
+          nhiều edge case nguy hiểm khi làm việc với streaming API thực tế.
+        </p>
+        <p>
+          Điểm khác biệt cốt lõi của opencode: <strong>kiểm tra exit condition SAU khi tool đã execute xong</strong>,
+          không phải ngay khi nhận <code>finish_reason</code> từ model. Nhiều harness khác break ngay
+          khi thấy <code>finishReason === "stop"</code> — điều này tạo ra silent corruption khi model
+          vừa gọi tool VÀ vừa trả <code>stop</code> trong cùng một response (behavior có ở một số provider).
+        </p>
+
+        <WhyImportant>
+          <strong>Tại sao quan trọng:</strong> Tool call không được execute = model nhận context thiếu = kết quả
+          sai hoặc agent bị kẹt. Lỗi này không throw exception — nó silent. Agent vẫn chạy bình thường
+          nhưng output sai hoàn toàn. Đây là loại bug khó nhất để debug trong production.
+        </WhyImportant>
+
+        <Callout type="warn">
+          <strong>Provider quirk thực tế:</strong> Một số LLM provider (đặc biệt khi dùng compatible API)
+          đôi khi trả <code>finish_reason: "stop"</code> trong khi <code>tool_calls</code> array vẫn có
+          dữ liệu. Naive harness sẽ exit và bỏ rơi tool calls đó.
+        </Callout>
+
+        <Callout type="unique">
+          <strong>opencode unique:</strong> Dùng Effect-TS Generator syntax (<code>yield*</code>) thay vì
+          async/await thuần — cho phép interrupt, retry, và structured concurrency mà không phải viết
+          try/catch phức tạp.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Điều kiện thoát vòng lặp — ba guard cùng lúc" />
+        <p>
+          opencode kiểm tra ba điều kiện ĐỒNG THỜI trước khi break. Thiếu bất kỳ điều kiện nào cũng có thể
+          gây ra lỗi:
+        </p>
+        <CodeBlock caption="session/prompt.ts — exit condition (runLoop)">
+          <Fragment is:raw>{`
+while (true) {
+  yield* status.set(sessionID, { type: "busy" })
+  let msgs = yield* MessageV2.filterCompactedEffect(sessionID)
+
+  // Guard 1: lastAssistant?.finish — model đã có response chưa?
+  // Guard 2: !["tool-calls"].includes(lastAssistant.finish) — không còn tool pending?
+  // Guard 3: !hasToolCalls — không có tool call nào trong current response?
+  // Guard 4: lastUser.id < lastAssistant.id — assistant đã respond sau user chưa?
+  if (
+    lastAssistant?.finish &&
+    !["tool-calls"].includes(lastAssistant.finish) &&
+    !hasToolCalls &&
+    lastUser.id < lastAssistant.id
+  ) {
+    yield* slog.info("exiting loop")
+    break
+  }
+
+  step++
+  const result = yield* handle.process(streamInput)
+  if (result === "stop") return "break"
+  if (result === "compact") yield* compaction.create(...)
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <p>
+          Điều kiện <code>lastAssistant?.finish</code> kiểm tra xem có phản hồi từ model chưa (tránh exit
+          ngay vòng đầu). Điều kiện <code>!["tool-calls"].includes(...)</code> chỉ exit khi finish reason
+          KHÔNG phải <code>tool-calls</code>. <code>!hasToolCalls</code> là double-check xem response hiện tại
+          có chứa tool call không. Cả bốn điều kiện phải thỏa mãn.
+        </p>
+
+        <Subheading level="h3" text="Step counter và compaction trigger" />
+        <p>
+          Biến <code>step</code> được tăng sau mỗi iteration (không phải trước exit check).
+          Nó phục vụ hai mục đích: (1) cung cấp context cho T5 (synthetic reminder chỉ chạy khi
+          <code>step &gt; 1</code>), và (2) trigger compaction check sau mỗi bước.
+        </p>
+        <CodeBlock caption="session/prompt.ts — sau exit check">
+          <Fragment is:raw>{`
+step++  // tăng SAU khi check exit, không trước
+
+const result = yield* handle.process(streamInput)
+// result có thể là:
+// "stop"    → user cancel hoặc error không thể recover
+// "compact" → context overflow, cần compact trước khi tiếp
+// undefined → normal, tiếp tục loop
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Effect Generator và structured concurrency" />
+        <p>
+          Toàn bộ loop chạy trong Effect Generator function (<code>function*</code> với <code>yield*</code>).
+          Điều này cho phép Effect runtime quản lý lifetime, interrupt, và resource cleanup mà không cần
+          code boilerplate.
+        </p>
+        <CodeBlock caption="Effect Generator pattern">
+          <Fragment is:raw>{`
+// Mỗi yield* là một "suspension point" — Effect có thể interrupt tại đây
+// nếu user cancel hoặc có lỗi unrecoverable
+yield* status.set(sessionID, { type: "busy" })
+yield* slog.info("loop", { step })
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <p>
+          T1 là orchestrator trung tâm — nó gọi hầu hết các kỹ thuật khác trong nhóm A:
+        </p>
+
+        <Diagram>{`
+┌─────────────────────────────────────────────────────────────┐
+│                    T1 — runLoop()                           │
+│                                                             │
+│  ┌─────────┐    ┌─────────────────────────────────────┐    │
+│  │  step   │    │        handle.process()              │    │
+│  │ counter │    │  (gọi T2 — stream demultiplexer)    │    │
+│  └────┬────┘    └──────────────┬──────────────────────┘    │
+│       │                        │                            │
+│  step>1?                 T2 consume stream                  │
+│       │                        │                            │
+│       ▼                        ▼                            │
+│  ┌─────────┐    ┌─────────────────────────────────────┐    │
+│  │   T5    │    │   T3 — Deferred coordination         │    │
+│  │reminder │    │   (đợi tất cả tool done)            │    │
+│  └─────────┘    └──────────────┬──────────────────────┘    │
+│                                │                            │
+│                    T4 wraps T2+T3 với ensuring              │
+│                                │                            │
+│                     doom loop check (T6)                    │
+│                     feeds exit condition                    │
+└─────────────────────────────────────────────────────────────┘
+
+Flow mỗi iteration:
+  check exit ──► NO ──► step++ ──► T2 stream
+                                      │
+                         T6 doom check trong T2
+                                      │
+                         T3 await all tools done
+                                      │
+                         T4 cleanup nếu interrupt
+                                      │
+                         vòng tiếp theo ──► check exit
+`}</Diagram>
+
+        <p>
+          T2 (streaming demultiplexer) được gọi bởi <code>handle.process()</code> — T1 không trực tiếp
+          đụng vào stream. T3 (Deferred coordination) chạy bên trong T2 và T4 (interruption cleanup)
+          bọc ngoài cả pipeline. T5 (synthetic reminder) chạy trong build-messages phase trước khi
+          T1 gửi request mới. T6 (doom loop) feed signal vào T2, và T2 trả về flag cho T1 để stop.
+        </p>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: Exit sớm với tool calls pending" />
+        <p>
+          Đây là lỗi phổ biến nhất. Naive harness break ngay khi nhận <code>finish_reason === "stop"</code>
+          mà không kiểm tra xem có tool call chưa được execute không.
+        </p>
+        <CodeBlock caption="Naive implementation — sai">
+          <Fragment is:raw>{`
+// WRONG: exit ngay khi stop, không kiểm tra tool_calls
+while (true) {
+  const resp = await llm.call(messages)
+  if (resp.finishReason === "stop") break  // có thể bỏ rơi tool calls!
+  for (const tc of resp.toolCalls) {
+    messages.push(await executeToolCall(tc))
+  }
+}
+// Nếu model trả finish_reason=stop VÀ tool_calls=[...] cùng lúc
+// → tool không được chạy → model nhận context thiếu
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: Không có doom loop guard" />
+        <p>
+          Nếu không tích hợp với T6, vòng lặp có thể chạy vô hạn khi model bị kẹt. opencode đặt
+          doom loop detection trong T2, nhưng T1 phải handle signal stop từ T2 (<code>result === "stop"</code>).
+        </p>
+        <CodeBlock caption="Thiếu stop signal handling">
+          <Fragment is:raw>{`
+// Nếu handle.process() không trả về "stop" khi doom loop detected
+// → T1 tiếp tục gọi model vô hạn
+const result = yield* handle.process(streamInput)
+// PHẢI check:
+if (result === "stop") return "break"
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 3: Step counter không reset khi retry" />
+        <p>
+          Nếu <code>step</code> không được reset đúng cách sau retry, các kỹ thuật phụ thuộc vào
+          <code>step</code> (như T5) sẽ bị confused. opencode handle điều này bằng cách reset
+          context đầy đủ trong cleanup.
+        </p>
+        <CodeBlock caption="Step counter và retry">
+          <Fragment is:raw>{`
+// Nếu retry không reset step → T5 sẽ wrap ALL user messages
+// ngay từ step đầu, không phải chỉ step > 1
+// → prompt bloated không cần thiết
+
+// opencode: step là local variable trong runLoop scope
+// mỗi session invocation bắt đầu từ 0
+let step = 0
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Loop style', 'Finish-reason guard', 'Điểm yếu']}
+          rows={[
+            [
+              '<strong>opencode</strong>',
+              'Effect Generator <code>while(true)</code>',
+              '<Chip variant="green">Có — check sau tool exec</Chip>',
+              'Complex state machine, Effect learning curve',
+            ],
+            [
+              'Claude Code',
+              'Recursive call style',
+              '<Chip variant="amber">Không rõ ràng</Chip>',
+              'Khó trace control flow qua recursion',
+            ],
+            [
+              'Aider',
+              'Prompt-first loop',
+              '<Chip variant="red">Không</Chip>',
+              'Gửi xong rồi mới check tools — sequential',
+            ],
+            [
+              'Cline',
+              'Sequential, one tool mỗi lần',
+              '<Chip variant="red">Không batch</Chip>',
+              'Không hỗ trợ parallel tool execution',
+            ],
+            [
+              'AutoGPT',
+              'while loop + max_iterations',
+              '<Chip variant="amber">Chỉ đếm số lần</Chip>',
+              'Count-based, không content-aware',
+            ],
+          ]}
+        />
+
+        <p>
+          opencode là harness duy nhất trong danh sách batch nhiều tool calls trong 1 step VÀ
+          có explicit finish-reason guard. Claude Code dùng recursion có thể làm điều tương đương
+          nhưng flow ít tường minh hơn.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>
+          Minimal TypeScript implementation của finish-reason-aware loop, không cần Effect dependency:
+        </p>
+        <CodeBlock caption="finish-reason-aware-loop.ts">
+          <Fragment is:raw>{`
+interface LLMResponse {
+  finishReason: "stop" | "tool_calls" | "length" | "end_turn"
+  toolCalls: ToolCall[]
+  content: string
+}
+
+interface ToolCall {
+  id: string
+  name: string
+  input: unknown
+}
+
+async function runFinishAwareLoop(
+  messages: Message[],
+  callLLM: (msgs: Message[]) => Promise<LLMResponse>,
+  executeTool: (tc: ToolCall) => Promise<unknown>,
+  options = { maxSteps: 50 }
+) {
+  let lastResponse: LLMResponse | null = null
+  let step = 0
+
+  while (true) {
+    // EXIT CHECK: tất cả điều kiện phải thỏa
+    const hasToolCalls = lastResponse?.toolCalls.length ?? 0 > 0
+    if (
+      lastResponse !== null &&
+      lastResponse.finishReason !== "tool_calls" &&
+      !hasToolCalls
+    ) {
+      break
+    }
+
+    if (step >= options.maxSteps) {
+      throw new Error("Max steps exceeded — possible doom loop")
+    }
+
+    step++
+
+    // Gọi model
+    const response = await callLLM(messages)
+    messages.push({ role: "assistant", content: response.content })
+    lastResponse = response
+
+    // Execute ALL tool calls — không skip ngay cả khi finishReason=stop
+    if (response.toolCalls.length > 0) {
+      const results = await Promise.all(
+        response.toolCalls.map(async (tc) => ({
+          toolCallId: tc.id,
+          result: await executeTool(tc),
+        }))
+      )
+      messages.push({ role: "tool", toolResults: results })
+    }
+  }
+
+  return lastResponse
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Callout type="info">
+          Recipe trên là simplified version. Production cần thêm: doom loop detection (T6),
+          synthetic reminder injection (T5), interruption handling (T4), và compaction trigger.
+        </Callout>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://www.ibm.com/think/topics/react-agent">IBM — What is a ReAct Agent?</a> · Giải thích Reasoning+Acting pattern cơ bản',
+            '<a href="https://react-lm.github.io/">ReAct: Synergizing Reasoning and Acting in Language Models (paper gốc)</a> · Yao et al., 2022',
+            '<a href="https://martinfowler.com/articles/harness-engineering.html">Martin Fowler — Harness Engineering</a> · Overview về agent harness design',
+            '<a href="https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text">Vercel AI SDK — streamText docs</a> · finish_reason values và lifecycle hooks',
+            '<a href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic — Claude Code auto mode</a> · Loop design insights từ production harness',
+            '<a href="https://github.com/anomalyco/opencode">anomalyco/opencode GitHub repo</a> · Source code tham chiếu chính — <code>session/prompt.ts</code>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

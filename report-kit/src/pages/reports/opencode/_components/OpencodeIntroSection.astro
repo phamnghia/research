@@ -1,0 +1,115 @@
+---
+import Section from "../../../../components/Section.astro";
+import Callout from "../../../../components/Callout.astro";
+import Diagram from "../../../../components/Diagram.astro";
+import Subheading from "../../../../components/Subheading.astro";
+import DataTable from "../../../../components/DataTable.astro";
+import SummaryTable from "../../../../components/SummaryTable.astro";
+import {
+  techStackHeaders,
+  techStackRows,
+  opencodeSummaryRows,
+} from "../../../../data/reports/opencode-report";
+---
+
+<Section id={"intro"} title={"1. Tổng quan opencode"} themeTag={"Intro"}>
+  <p>
+    <strong>opencode</strong> là một AI coding agent open-source chạy trên terminal,
+    IDE, và desktop. Repo
+    <a href="https://github.com/anomalyco/opencode">anomalyco/opencode</a> là fork
+    chính của
+    <code>sst/opencode</code> với rất nhiều package: core agent (<code
+      >packages/opencode</code
+    >), desktop app (Tauri + Electron), web console, plugin SDK, infrastructure
+    (SST), v.v.
+  </p>
+  <p>
+    Báo cáo này chỉ tập trung vào <strong>harness của core agent</strong> — phần "scaffolding"
+    xoay quanh LLM call để biến một model trần thành một coding agent hoạt động được.
+    Scope bao gồm 6 subsystem chính:
+  </p>
+  <ul>
+    <li>
+      <code>session/</code> — agent loop, streaming processor, compaction, retry
+    </li>
+    <li>
+      <code>tool/</code> — tool registry, tool implementations, truncation
+    </li>
+    <li>
+      <code>provider/</code> — abstraction cho 20+ LLM providers, message transformation,
+      error classification
+    </li>
+    <li><code>permission/</code> — permission engine với wildcard + arity</li>
+    <li>
+      <code>agent/</code> — agent definitions (build, plan, custom subagents)
+    </li>
+    <li><code>mcp/</code>, <code>plugin/</code> — extension points</li>
+  </ul>
+  <Subheading level="h3" id="what-is-harness" text="Harness là gì?" />
+  <p>
+    Cộng đồng coding-agent đang dần dùng thuật ngữ "harness" như một shorthand
+    cho
+    <em>tất cả những gì không phải model</em> — tức là: <strong
+      >Agent = Model + Harness</strong
+    >. Harness engineering là subset của context engineering, xoay quanh việc
+    quản lý context window, tool orchestration, state persistence, error
+    recovery, verification, safety, và lifecycle.
+  </p>
+  <Callout type="info">
+    <p>
+      <strong>Tham khảo về khái niệm harness:</strong>
+      Martin Fowler — <a
+        href="https://martinfowler.com/articles/harness-engineering.html"
+        >Harness engineering for coding agent users</a
+      >
+      · OpenAI — <a href="https://openai.com/index/harness-engineering/"
+        >Harness engineering: leveraging Codex in an agent-first world</a
+      >
+      · HumanLayer — <a
+        href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents"
+        >Skill Issue: Harness Engineering for Coding Agents</a
+      >
+      · Avi Chawla — <a
+        href="https://blog.dailydoseofds.com/p/the-anatomy-of-an-agent-harness"
+        >The Anatomy of an Agent Harness</a
+      >.
+    </p>
+  </Callout>
+  <Subheading level="h3" id="architecture" text="Kiến trúc tổng thể" />
+  <Diagram>
+    <Fragment is:raw>{`      ┌─────────────────────────────────────────────────────────────────────┐
+      │                          User input / CLI / TUI                     │
+      └────────────────────────────────┬────────────────────────────────────┘
+                                       │
+                          ┌────────────▼────────────┐
+                          │   session/prompt.ts     │  ← Main agent loop (runLoop)
+                          │   (ReAct-style, step++) │    Detect finish reason, retry, compact
+                          └────┬──────────────┬─────┘
+                               │              │
+               ┌───────────────▼────┐      ┌──▼─────────────────┐
+               │  session/llm.ts    │      │ session/processor  │  ← Handles stream events:
+               │  streamText() wrap │      │ Effect.Stream pipe │    reasoning/text/tool/finish
+               └────────┬───────────┘      └────────┬───────────┘
+                        │                           │
+               ┌────────▼──────────┐     ┌──────────▼─────────┐
+               │  provider/        │     │   tool/registry    │  ← Resolves available tools
+               │  SDK lazy-loaded  │     │   + permission gate│    per-agent, with truncation
+               └────────┬──────────┘     └──────────┬─────────┘
+                        │                           │
+               ┌────────▼──────────┐     ┌──────────▼─────────┐
+               │ provider/transform│     │   tool/*.ts        │  ← bash, edit, read, task,
+               │ per-provider quirk│     │   (each with .txt) │    skill, plan, webfetch, ...
+               └───────────────────┘     └────────────────────┘
+                        │                           │
+               ┌────────▼───────────────────────────▼─────────┐
+               │  permission/index.ts  (wildcard + arity)     │
+               │  session/compaction.ts (overflow → prune)    │
+               │  session/retry.ts (exp backoff + headers)    │
+               └──────────────────────────────────────────────┘
+    `}</Fragment>
+  </Diagram>
+  <Subheading level="h3" id="tech-stack" text="Tech stack" />
+  <DataTable headers={techStackHeaders} rows={techStackRows} richCells />
+  <Subheading level="h3" id="summary-table" text="Bảng tóm tắt 28 kỹ thuật" />
+  <SummaryTable rows={opencodeSummaryRows as any} />
+</Section>

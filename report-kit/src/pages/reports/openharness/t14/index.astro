@@ -1,0 +1,385 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T14 — Markdown-based skill system + frontmatter discovery | OpenHarness"
+  description="Phân tích sâu hệ thống skill SKILL.md của OpenHarness: three-stage loading, frontmatter validation, fallback parsing, và so sánh với Claude Code skills."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#three-stage', label: 'Three-stage loading' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/openharness/" label="← openharness report" />
+      <Hero
+        title="T14 — Markdown-based skill system + frontmatter discovery"
+        subtitle="OpenHarness triển khai skill như các file SKILL.md chứa YAML frontmatter + markdown body — agent tự scan, tự load, tự inject vào system prompt mà không cần code thêm."
+        meta={[
+          { label: 'Nhóm', value: 'D — Extension Ecosystem' },
+          { label: 'File', value: '<code>skills/loader.py:27-51</code>' },
+          { label: 'Scan dirs', value: 'bundled · <code>~/.openharness/skills/</code> · plugin skills' },
+          { label: 'ID', value: 'D.1' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          Skill là unit nhỏ nhất của "reusable behavior" trong agent harness — một tập hướng dẫn
+          có tên, mô tả, và nội dung, mà agent có thể invoke bằng slash command.
+          OpenHarness implement skill theo định dạng SKILL.md: YAML frontmatter xác định metadata,
+          markdown body chứa nội dung thực thi.
+        </p>
+        <WhyImportant>
+          <strong>Punchline từ Claude Code Extensions guide:</strong>
+          <em>"Think of skills like macros — instead of pasting the same 200-word prompt every time,
+          you write a SKILL.md once and call the command forever."</em>
+          Điều này capture đúng giá trị cốt lõi: skill không phải code, không phải plugin — chỉ là
+          prompt có tên, có thể version control, có thể chia sẻ.
+        </WhyImportant>
+        <Callout type="unique">
+          <strong>OpenHarness vs Claude Code skills:</strong> Claude Code skills scan
+          <code>~/.claude/skills/</code> và <code>.claude/skills/</code>. OpenHarness mở rộng thêm
+          <strong>plugin skills</strong> — skills được bundle trong plugin manifest, giúp
+          distribute một tập skills cùng với hooks và MCP config như một đơn vị duy nhất.
+        </Callout>
+        <Callout type="info">
+          Skill cũng là điểm mà <strong>permission gating</strong> được áp dụng —
+          OpenHarness chỉ inject skill names vào system prompt nếu agent có quyền dùng skill đó
+          (xem T18 — permission mode).
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code: skills/loader.py" themeTag="Anatomy">
+        <Subheading level="h3" text="Bước 1: Scan 3 nguồn theo thứ tự ưu tiên" />
+        <CodeBlock caption="skills/loader.py:27-51 — discovery logic">
+          <Fragment is:raw>{`
+def load_all_skills(plugin_dirs: list[Path] | None = None) -> list[Skill]:
+    skills: list[Skill] = []
+    seen_names: set[str] = set()
+
+    # 1. Bundled skills (ship cùng với package)
+    bundled = Path(__file__).parent / "bundled"
+    skills.extend(_load_from_dir(bundled, seen_names))
+
+    # 2. User skills (~/.openharness/skills/<skill>/SKILL.md)
+    user_dir = Path.home() / ".openharness" / "skills"
+    if user_dir.exists():
+        skills.extend(_load_from_dir(user_dir, seen_names))
+
+    # 3. Plugin-contributed skills (từ plugin manifest)
+    for plugin_dir in (plugin_dirs or []):
+        skills_path = plugin_dir / "skills"
+        if skills_path.exists():
+            skills.extend(_load_from_dir(skills_path, seen_names))
+
+    return skills
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          Thứ tự <code>bundled → user → plugin</code> cho phép plugin override user skill,
+          và user override bundled skill bằng cách đặt cùng tên. <code>seen_names</code>
+          dedup để tránh inject 2 skill cùng tên vào system prompt.
+        </p>
+
+        <Subheading level="h3" text="Bước 2: Parse frontmatter + fallback" />
+        <CodeBlock caption="skills/loader.py — _parse_skill_file()">
+          <Fragment is:raw>{`
+def _parse_skill_file(path: Path) -> Skill | None:
+    text = path.read_text(encoding="utf-8")
+
+    # Try YAML frontmatter (--- ... ---)
+    if text.startswith("---"):
+        end = text.index("---", 3)
+        fm = yaml.safe_load(text[3:end])
+        body = text[end + 3:].strip()
+        return Skill(
+            name=fm.get("name") or path.parent.name,
+            description=fm.get("description", ""),
+            body=body,
+            source=path,
+        )
+
+    # Fallback: heading + first paragraph
+    lines = text.splitlines()
+    name = lines[0].lstrip("# ").strip() if lines else path.parent.name
+    desc = next((l for l in lines[1:] if l.strip()), "")
+    return Skill(name=name, description=desc, body=text, source=path)
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          Fallback về heading + first paragraph đảm bảo skill vẫn load được kể cả khi author
+          quên viết frontmatter — tăng tolerance cho user-contributed skills.
+        </p>
+
+        <Subheading level="h3" text="Bước 3: Inject vào system prompt" />
+        <CodeBlock caption="prompts/context.py — skills section">
+          <Fragment is:raw>{`
+def _build_skills_section(skills: list[Skill], permitted: set[str]) -> str:
+    visible = [s for s in skills if s.name in permitted]
+    if not visible:
+        return ""
+    lines = ["## Available Skills", ""]
+    for s in visible:
+        lines.append(f"- **{s.name}**: {s.description}")
+    lines.append("")
+    lines.append("Invoke a skill with /skill-name or ask me to use it by name.")
+    return "\n".join(lines)
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          Chỉ inject <em>name + description</em> vào system prompt (không phải body).
+          Body được load on-demand khi agent invoke skill — tiết kiệm token theo pattern
+          <em>progressive disclosure</em>.
+        </p>
+      </Section>
+
+      <Section id="three-stage" title="Three-stage loading pattern" themeTag="Pattern">
+        <p>
+          Theo <a href="https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview">Anthropic Agent Skills docs</a>,
+          skill loading tốt nhất tuân theo 3 stage:
+        </p>
+        <Diagram>{`
+Stage 1: DISCOVERY
+  Scan dirs → parse frontmatter
+  → inject name + description vào system prompt
+  (agent biết skill có tồn tại, nhưng chưa đọc body)
+         │
+         ▼
+Stage 2: INSTRUCTIONS LOADING
+  Agent invoke skill (/skill-name hoặc ask by name)
+  → load SKILL.md body vào context
+  (agent đọc hướng dẫn chi tiết)
+         │
+         ▼
+Stage 3: RESOURCE ACCESS
+  Body reference thêm file (ví dụ: [template](./template.py))
+  → load referenced files on-demand
+  (chỉ load những gì thực sự cần)
+
+Key insight: Name/description ở Stage 1 cần rất ít token.
+Body + resources chỉ tốn token khi thực sự invoke.
+`}</Diagram>
+        <p>
+          Đây là pattern <strong>lazy loading theo demand</strong> — giữ system prompt ngắn gọn
+          (chỉ skill names) trong khi cho phép skill body rất dài khi cần.
+          Anthropic docs khuyến cáo: <em>"Keep SKILL.md body under 500 lines for optimal
+          performance. If your content exceeds this, split it into separate files using the
+          progressive disclosure patterns."</em>
+        </p>
+        <Callout type="warn">
+          <strong>Validation rules từ Anthropic docs:</strong> name ≤ 64 chars, chỉ lowercase/numbers/hyphens,
+          không có XML tags, không có reserved words. Description ≤ 1024 chars.
+          <strong>Critical:</strong> "The name field must match the parent directory name.
+          If the name does not match, the skill is not loaded." OpenHarness fallback về
+          <code>path.parent.name</code> tự động handle trường hợp này.
+        </Callout>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T14 (Skill loader) tương tác với:
+
+  T15 (Hook system)
+    └─ Skills có thể trigger hooks — khi skill được invoke,
+       POST_TOOL_USE hook chạy sau nếu skill dùng tool nội bộ
+
+  T16 (Plugin manifest)
+    └─ Plugin định nghĩa skills_dir → T14 load từ đó (stage 3 discovery)
+       Plugin bundle = skills + hooks + mcp_file như 1 unit
+
+  T18 (Permission mode)
+    └─ T14 filter skills theo permitted set
+       DEFAULT mode: tất cả skills visible
+       PLAN mode: skills có mutation (write, deploy) bị ẩn
+
+  T6 (System prompt assembly — 9 sections)
+    └─ Skills section được inject vào section #4 của system prompt
+       Rebuild mỗi turn → permission changes phản ánh ngay
+`}</Diagram>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: Name mismatch → skill không load" />
+        <CodeBlock caption="Ví dụ: tên trong frontmatter khác directory name">
+          <Fragment is:raw>{`
+# Directory: ~/.openharness/skills/code-review/SKILL.md
+---
+name: code_review   # BUG: dùng underscore, directory dùng hyphen
+description: Review code changes
+---
+
+# Kết quả: skill không được load vào seen_names
+# Agent không biết skill tồn tại → user invoke /code_review → "skill not found"
+
+# Fix: name phải khớp với directory name
+---
+name: code-review
+description: Review code changes
+---
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: Body quá dài → token bloat" />
+        <CodeBlock caption="Anti-pattern: nhét tất cả vào body">
+          <Fragment is:raw>{`
+# BAD: SKILL.md body 2000 dòng với inline templates, examples, code snippets
+# → Mỗi lần invoke: load 2000 dòng vào context
+# → Tốn ~4000+ tokens chỉ cho skill body
+# → Ít chỗ cho tool results và conversation
+
+# GOOD: Progressive disclosure
+# SKILL.md body: < 200 dòng (what + how summary)
+# skills/code-review/
+#   SKILL.md       ← summary + references
+#   checklist.md   ← detailed checklist (load on-demand)
+#   template.py    ← code template (load on-demand)
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 3: Scan miss plugin skills" />
+        <p>
+          Nếu <code>load_all_skills()</code> được gọi trước khi plugin manifest loaded,
+          plugin skills sẽ bị miss. OpenHarness giải quyết bằng cách
+          pass <code>plugin_dirs</code> explicitly sau khi plugin load xong.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Skill format', 'Discovery', 'Fallback', 'Permission gating']}
+          rows={[
+            [
+              '<strong>OpenHarness</strong>',
+              'SKILL.md + YAML frontmatter',
+              'bundled + user dir + plugin dirs',
+              'heading + first paragraph',
+              'Có — filter by permission mode',
+            ],
+            [
+              'Claude Code',
+              'SKILL.md + YAML frontmatter',
+              '~/.claude/skills/ + .claude/skills/',
+              'Không rõ',
+              'Có — permission-gated',
+            ],
+            [
+              'Aider',
+              'Không có skill system',
+              'N/A',
+              'N/A',
+              'N/A',
+            ],
+            [
+              'Cursor / Composer',
+              '.cursorrules + custom instructions',
+              'Project root auto-detect',
+              'Không có',
+              'Không',
+            ],
+          ]}
+        />
+        <p>
+          OpenHarness là một trong số ít harnesses triển khai đầy đủ 3-stage loading
+          (discovery → instructions → resources) với fallback parsing và permission gating.
+          Phần lớn harness khác chỉ có 1 loại context injection (rules file hoặc custom instructions)
+          không có khái niệm skill-as-named-unit.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>Minimal skill loader với 3-stage pattern, viết thuần Python:</p>
+        <CodeBlock caption="skill_loader.py — minimal implementation">
+          <Fragment is:raw>{`
+from dataclasses import dataclass
+from pathlib import Path
+import yaml
+
+@dataclass
+class Skill:
+    name: str
+    description: str
+    body: str  # không inject vào system prompt mặc định
+    source: Path
+
+def load_skills(dirs: list[Path]) -> list[Skill]:
+    skills, seen = [], set()
+    for d in dirs:
+        for skill_dir in sorted(d.iterdir()):
+            md = skill_dir / "SKILL.md"
+            if not md.exists():
+                continue
+            s = _parse(md)
+            if s and s.name not in seen:
+                skills.append(s)
+                seen.add(s.name)
+    return skills
+
+def _parse(path: Path) -> Skill | None:
+    text = path.read_text()
+    if text.startswith("---"):
+        try:
+            end = text.index("---", 3)
+            fm = yaml.safe_load(text[3:end])
+            return Skill(fm["name"], fm.get("description",""), text[end+3:].strip(), path)
+        except Exception:
+            pass
+    lines = [l for l in text.splitlines() if l.strip()]
+    if not lines:
+        return None
+    name = lines[0].lstrip("# ").strip() or path.parent.name
+    desc = lines[1].strip() if len(lines) > 1 else ""
+    return Skill(name, desc, text, path)
+
+# Stage 1: discovery — chỉ inject name + description
+def skills_to_system_prompt(skills: list[Skill]) -> str:
+    if not skills:
+        return ""
+    return "## Skills\n" + "\n".join(f"- **{s.name}**: {s.description}" for s in skills)
+
+# Stage 2: load body khi invoke
+def load_skill_body(skill: Skill) -> str:
+    return skill.body  # đã parse sẵn, chỉ cần dùng
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices">Anthropic — Skill authoring best practices</a> · Frontmatter validation rules, 500-line body limit, progressive disclosure pattern',
+            '<a href="https://skywork.ai/blog/ai-agent/claude-skills-skill-md-resources-runtime-loading/">Skywork.ai — What Is SKILL.md: Structure, Resources & Loading</a> · Giải thích 3-stage loading chi tiết',
+            '<a href="https://abvijaykumar.medium.com/deep-dive-skill-md-part-1-2-09fc9a536996">Medium — Deep Dive SKILL.md (Part 1/2)</a> · Anatomy từng phần của SKILL.md file',
+            '<a href="https://muneebsa.medium.com/claude-code-extensions-explained-skills-mcp-hooks-subagents-agent-teams-plugins-9294907e84ff">Medium — Claude Code Extensions Explained</a> · Punchline "Skills like macros" + so sánh skills vs plugins',
+            '<a href="https://opencode.ai/docs/skills/">OpenCode — Agent Skills docs</a> · opencode implementation tham chiếu',
+            '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Harness Engineering for Coding Agents</a> · Framing harness engineering bao gồm skills/hooks',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

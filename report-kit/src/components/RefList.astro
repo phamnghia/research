@@ -1,0 +1,16 @@
+---
+// RefList.astro — section "Tham khảo" ở cuối technique
+// Mỗi item là HTML (thường chứa <a>) để tiện trích nguồn.
+interface Props {
+  title?: string;
+  items: string[];
+}
+
+const { title = 'Tham khảo', items } = Astro.props;
+---
+<div class="refs">
+  <strong>{title}</strong>
+  <ul>
+    {items.map((item) => <li set:html={item} />)}
+  </ul>
+</div>

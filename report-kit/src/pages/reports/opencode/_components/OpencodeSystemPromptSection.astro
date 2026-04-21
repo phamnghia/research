@@ -1,0 +1,141 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import CodeBlock from "../../../../components/CodeBlock.astro";
+import WhyImportant from "../../../../components/WhyImportant.astro";
+import DeepDiveLink from "../../../../components/DeepDiveLink.astro";
+
+const __code_OpencodeSystemPromptSection_1 = `        import PROMPT_ANTHROPIC from "./prompts/anthropic.txt" import PROMPT_GPT
+        from "./prompts/gpt.txt" import PROMPT_BEAST from "./prompts/beast.txt"
+        // gpt-4 | o1 import PROMPT_GEMINI from "./prompts/gemini.txt" import
+        PROMPT_DEFAULT from "./prompts/default.txt" function
+        pickTemplate(modelId: string): string { if
+        (/^(gpt-4|o1|o3)/i.test(modelId)) return PROMPT_BEAST if
+        (/^gpt/i.test(modelId)) return PROMPT_GPT if (/^gemini/i.test(modelId))
+        return PROMPT_GEMINI if (/claude/i.test(modelId)) return
+        PROMPT_ANTHROPIC return PROMPT_DEFAULT } export function
+        buildSystem(model: Model, ctx: Ctx): string[] { const template =
+        pickTemplate(model.id) const envBlock = \` &lt;env&gt; directory:
+        \${ctx.cwd} worktree: \${ctx.worktree} git: \${ctx.gitStatusShort}
+        platform: \${process.platform} &lt;/env&gt; \` const skillsBlock =
+        renderSkills(ctx.skills, { permissionGate: ctx.perm }) const
+        projectBlock = ctx.agentsFile ?? "" return [template, envBlock,
+        skillsBlock, projectBlock] }
+      `;
+const __code_OpencodeSystemPromptSection_2 = `        const PROMPTS = { anthropic: ANTHROPIC_TEMPLATE, openai:
+        OPENAI_TEMPLATE, gemini: GEMINI_TEMPLATE, } function systemFor(model:
+        string, ctx: Ctx) { const template = PROMPTS[detectFamily(model)] ??
+        DEFAULT_TEMPLATE const env = \`&lt;env&gt;cwd=\${ctx.cwd}; git=\${ctx.git};
+        os=\${process.platform}&lt;/env&gt;\` return [template, env,
+        ctx.projectInstructions ?? ""].join("\\n\\n") }
+      `;
+const __code_OpencodeSystemPromptSection_3 = `        const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md", "CONTEXT.md"]
+        export async function findProjectInstructions(cwd: string, worktree:
+        string) { let dir = path.resolve(cwd) const stop =
+        path.resolve(worktree) while (dir.startsWith(stop)) { for (const name of
+        INSTRUCTION_FILES) { const candidate = path.join(dir, name) if (await
+        fs.pathExists(candidate)) { return { path: candidate, content: await
+        fs.readFile(candidate, "utf8") } } } const parent = path.dirname(dir) if
+        (parent === dir) break // reached root dir = parent } return null } //
+        Per-message "claims tracking" prevent duplicate attach const
+        attachedFiles = new Set&lt;string&gt;() export function
+        attachInstructionIfNew(file: InstructionFile) { if
+        (attachedFiles.has(file.path)) return null // already in conversation
+        attachedFiles.add(file.path) return \`&lt;project-instruction
+        src="\${file.path}"&gt;\\n\${file.content}\\n&lt;/project-instruction&gt;\` }
+      `;
+const __code_OpencodeSystemPromptSection_4 = `        async function findInstructions(cwd: string, repoRoot: string) { let dir
+        = cwd while (dir.startsWith(repoRoot)) { for (const name of
+        ["AGENTS.md", "CLAUDE.md"]) { const p = path.join(dir, name) if (await
+        exists(p)) return { path: p, body: await readFile(p, "utf8") } } const
+        parent = path.dirname(dir) if (parent === dir) break dir = parent }
+        return null } const attached = new Set&lt;string&gt;() function
+        buildInstructionBlock(f: { path: string; body: string }) { if
+        (attached.has(f.path)) return "" attached.add(f.path) return
+        \`&lt;project-instructions
+        src="\${f.path}"&gt;\\n\${f.body}\\n&lt;/project-instructions&gt;\` }
+      `;
+---
+
+<Section
+  id={"section-f"}
+  title={"F. System Prompt & Instructions — Layer của bối cảnh"}
+>
+  <p class="lead">
+    System prompt không phải là 1 string cố định — nó là nhiều layer:
+    model-specific template, env dynamic, project AGENTS.md/CLAUDE.md cascading.
+    opencode dispatch prompt theo model family, inject env sạch mỗi call, và tìm
+    file instruction theo cây thư mục.
+  </p>
+  <Technique
+    id={"t27"}
+    title={"T27. Model-specific system prompt dispatch + dynamic env"}
+    tid={"F.1"}
+    location={"<strong>File:</strong> <code>session/system.ts</code> · <strong>Lines:</strong> 19-77"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeSystemPromptSection_1} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Claude thích format khác GPT-4 khác Gemini
+      — cùng 1 prompt cho tất cả → performance thấp nhất common denominator. Dispatch
+      theo model family + env block fresh mỗi call (git status, platform) giúp agent
+      luôn aware bối cảnh hiện tại (file nào đã uncommitted, working dir ở đâu).
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeSystemPromptSection_2} />
+    <ProsCons
+      pros={[
+        "Mỗi model family có prompt tuned → chất lượng tăng",
+        "Env block cập nhật realtime → agent không dựa vào env cũ",
+        "Skills list permission-gated → model chỉ thấy skill mà nó được phép dùng",
+      ]}
+      cons={[
+        "4-5 template = 4-5 nơi cần sửa khi update policy → drift rủi ro",
+        "Regex detect family không bền với tên model exotic",
+        "Env block mỗi call → invalidate prompt cache (trade-off với T10)",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.humanlayer.dev/blog/writing-a-good-claude-md">HumanLayer — Writing a good CLAUDE.md</a>',
+        '<a href="https://www.deployhq.com/blog/ai-coding-config-files-guide">DeployHQ — Configure Every AI Coding Assistant</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t27/">Phân tích sâu T27 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t28"}
+    title={"T28. AGENTS.md / CLAUDE.md cascading (findUp)"}
+    tid={"F.2"}
+    location={"<strong>File:</strong> <code>session/instruction.ts</code> · <strong>Lines:</strong> 52-62, 120-228"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeSystemPromptSection_3} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Multi-project monorepo + user home config.
+      Nếu đọc tất cả AGENTS.md từ cwd lên root → confict / lượng lớn tokens. First-match-wins
+      từ cwd lên worktree root (dừng trước home) = rule gần nhất thắng. Claims tracking
+      tránh attach lại cùng file khi user hỏi nhiều message trong cùng session.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeSystemPromptSection_4} />
+    <ProsCons
+      pros={[
+        "Convention over configuration — user không cần khai báo path",
+        "First-match-wins: rule gần scope nhất win (monorepo package-level override root)",
+        "Không re-attach → tiết kiệm token trong session dài",
+      ]}
+      cons={[
+        "Không stack: nếu user muốn COMBINE root + subdir rules, phải duplicate",
+        "FindUp I/O mỗi session — cost nhỏ nhưng repetitive",
+        "3 filename tried theo thứ tự → user nhầm tên là miss",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://agents.md/">agents.md — official format</a>',
+        '<a href="https://medium.com/data-science-collective/the-complete-guide-to-ai-agent-memory-files-claude-md-agents-md-and-beyond-49ea0df5c5a9">Medium — The Complete Guide to AI Agent Memory Files</a>',
+        '<a href="https://www.augmentcode.com/guides/how-to-build-agents-md">Augment Code — How to Build Your AGENTS.md</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t28/">Phân tích sâu T28 →</DeepDiveLink>
+  </Technique>
+</Section>

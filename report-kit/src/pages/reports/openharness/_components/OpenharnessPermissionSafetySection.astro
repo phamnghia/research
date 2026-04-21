@@ -1,0 +1,407 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import Callout from "../../../../components/Callout.astro";
+---
+
+<Section
+  id={"section-e"}
+  title={"E. Permission & Safety"}
+  themeTag={"4 kỹ thuật"}
+>
+  <Fragment is:raw>
+    <p>Permission model của OpenHarness có 3 mode + built-in sensitive path
+    protection + 6-layer hierarchical evaluation + async interactive approval.
+    Đây là điểm OpenHarness <em>cẩn thận hơn</em> opencode: sensitive path
+    protection không thể bị override, ngay cả trong FULL_AUTO.</p>
+  </Fragment>
+  <Technique
+    id={"t18"}
+    title={"T18. 3-mode permission system (DEFAULT / PLAN / FULL_AUTO)"}
+    tid={"E.1"}
+    location={"<strong>File:</strong> <code>src/openharness/permissions/modes.py</code> · <strong>Hằng:</strong> <code>PermissionMode.DEFAULT / PLAN / FULL_AUTO</code>"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">from</span> enum
+      <span class="kw">import</span> Enum <span class="kw">class</span> <span
+      class="type">PermissionMode</span>(Enum): DEFAULT = <span
+      class="str">"default"</span> <span class="com"># read OK; write &amp;
+      mutation need confirm</span> PLAN = <span class="str">"plan"</span> <span
+      class="com"># only read; block all mutations (even bash read-only)</span>
+      FULL_AUTO = <span class="str">"full_auto"</span> <span class="com">#
+      everything OK (except sensitive paths)</span> <span class="com"># Used in
+      PermissionChecker.evaluate() — see T20</span> <span class="kw">if</span>
+      self._settings.mode == PermissionMode.FULL_AUTO: <span
+      class="kw">return</span> PermissionDecision(allowed=<span
+      class="kw">True</span>, reason=<span class="str">"Auto mode allows all
+      tools"</span>) <span class="kw">if</span> is_read_only: <span
+      class="kw">return</span> PermissionDecision(allowed=<span
+      class="kw">True</span>, reason=<span class="str">"read-only tools are
+      allowed"</span>) <span class="kw">if</span> self._settings.mode ==
+      PermissionMode.PLAN: <span class="kw">return</span> PermissionDecision(
+      allowed=<span class="kw">False</span>, reason=<span class="str">"Plan mode
+      blocks mutating tools until the user exits plan mode"</span>, ) <span
+      class="com"># DEFAULT: require confirmation for mutating tools</span>
+      <span class="kw">return</span> PermissionDecision( allowed=<span
+      class="kw">False</span>, requires_confirmation=<span
+      class="kw">True</span>, reason=<span class="str">"Mutating tools require
+      user confirmation in default mode. ..."</span>, )</code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> 3 mode cover 3 workflow:
+      (1) DEFAULT — cẩn trọng, user-in-the-loop cho mỗi mutation; (2) PLAN —
+      "chỉ nghĩ, không làm" cho research/brainstorm; (3) FULL_AUTO — unattended
+      runs như cron autopilot. Mode <em>tách biệt</em> khỏi approval flow —
+      checker chỉ return decision, UI chịu trách nhiệm show prompt. Giống Claude
+      Code "auto mode" nhưng có thêm PLAN mode (opencode không có).</div>
+      <h4>Code example (generic)</h4> <pre><code><span class="kw">from</span>
+      enum <span class="kw">import</span> Enum <span class="kw">class</span>
+      <span class="type">Mode</span>(Enum): DEFAULT = <span
+      class="str">"default"</span>; PLAN = <span class="str">"plan"</span>;
+      FULL_AUTO = <span class="str">"full_auto"</span> <span
+      class="kw">def</span> <span class="fn">decide</span>(mode: Mode,
+      is_read_only: <span class="kw">bool</span>) -&gt; <span
+      class="kw">str</span>: <span class="kw">if</span> mode == Mode.FULL_AUTO:
+      <span class="kw">return</span> <span class="str">"allow"</span> <span
+      class="kw">if</span> is_read_only: <span class="kw">return</span> <span
+      class="str">"allow"</span> <span class="kw">if</span> mode == Mode.PLAN:
+      <span class="kw">return</span> <span class="str">"deny"</span> <span
+      class="kw">return</span> <span class="str">"confirm"</span> <span
+      class="com"># DEFAULT needs user approval</span></code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "3 modes cover trivial → unattended workflow",
+        "Mode tách biệt khỏi approval → checker pure function",
+        'PLAN đặc biệt hữu ích cho "research mode"',
+        "User intent rõ ràng — không cần edit config",
+      ]}
+      cons={[
+        '3 modes không đủ granular (vd: "allow bash, confirm edit")',
+        "FULL_AUTO có thể bị lạm dụng trên production",
+        "PLAN block bash read-only (git status) nếu tool self-declare mutating",
+        "Mode toggle không persist per project",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://code.claude.com/docs/en/permissions">Claude Code — Configure permissions</a>',
+        '<a href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic — Claude Code auto mode</a>',
+        '<a href="https://dev.to/klement_gunndu/lock-down-claude-code-with-5-permission-patterns-4gcn">DEV — 5 Permission Patterns in Claude Code</a>',
+      ]}
+    />
+    <p><a href="/reports/openharness/t18/">→ Phân tích sâu T18: 3-mode permission system (DEFAULT / PLAN / FULL_AUTO)</a></p>
+  </Technique>
+  <Technique
+    id={"t19"}
+    title={"T19. Built-in sensitive path protection (hardcoded glob)"}
+    tid={"E.2"}
+    location={"<strong>File:</strong> <code>src/openharness/permissions/checker.py</code> · <strong>Lines:</strong> 14–37 · <strong>Patterns:</strong> 10+ hardcoded"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="com"># Paths that are
+      always denied regardless of permission mode or user config.</span> <span
+      class="com"># These protect high-value credential and key material from
+      LLM-directed access</span> <span class="com"># (including via prompt
+      injection). Patterns use fnmatch syntax and are matched</span> <span
+      class="com"># against the fully-resolved absolute path produced by the
+      query engine.</span> SENSITIVE_PATH_PATTERNS: <span
+      class="kw">tuple</span>[<span class="kw">str</span>, ...] = ( <span
+      class="com"># SSH keys and config</span> <span
+      class="str">"*/.ssh/*"</span>, <span class="com"># AWS credentials</span>
+      <span class="str">"*/.aws/credentials"</span>, <span
+      class="str">"*/.aws/config"</span>, <span class="com"># GCP
+      credentials</span> <span class="str">"*/.config/gcloud/*"</span>, <span
+      class="com"># Azure credentials</span> <span
+      class="str">"*/.azure/*"</span>, <span class="com"># GPG keys</span> <span
+      class="str">"*/.gnupg/*"</span>, <span class="com"># Docker
+      credentials</span> <span class="str">"*/.docker/config.json"</span>, <span
+      class="com"># Kubernetes credentials</span> <span
+      class="str">"*/.kube/config"</span>, <span class="com"># OpenHarness own
+      credential stores</span> <span
+      class="str">"*/.openharness/credentials.json"</span>, <span
+      class="str">"*/.openharness/copilot_auth.json"</span>, ) <span
+      class="kw">def</span> <span class="fn">evaluate</span>(self, tool_name, *,
+      is_read_only, file_path=<span class="kw">None</span>, command=<span
+      class="kw">None</span>): <span class="com"># Sensitive path check runs
+      FIRST, cannot be overridden</span> <span class="kw">if</span> file_path:
+      <span class="kw">for</span> candidate <span class="kw">in</span>
+      _policy_match_paths(file_path): <span class="kw">for</span> pattern <span
+      class="kw">in</span> SENSITIVE_PATH_PATTERNS: <span class="kw">if</span>
+      fnmatch.fnmatch(candidate, pattern): <span class="kw">return</span>
+      PermissionDecision( allowed=<span class="kw">False</span>, reason=<span
+      class="fn">f</span><span class="str">"Access denied: {file_path} is a
+      sensitive credential path"</span> ) <span class="com"># ... rest of
+      evaluation ...</span></code></pre> <div class="why"><strong>Tại sao quan
+      trọng:</strong> Prompt injection có thể lừa LLM đọc
+      <code>~/.ssh/id_rsa</code> rồi paste vào response. OpenHarness đặt
+      sensitive path check <strong>ngoài</strong> permission mode — ngay cả
+      FULL_AUTO cũng không bypass được. 10+ pattern cover
+      SSH/AWS/GCP/Azure/GPG/Docker/K8s/own credentials. <code>fnmatch</code>
+      thay vì regex để pattern đơn giản (wildcards <code>*/</code>), không cần
+      escape đặc biệt.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">import</span> fnmatch <span class="kw">from</span> pathlib
+      <span class="kw">import</span> Path SENSITIVE = ( <span
+      class="str">"*/.ssh/*"</span>, <span
+      class="str">"*/.aws/credentials"</span>, <span
+      class="str">"*/.gnupg/*"</span>, <span
+      class="str">"*/.kube/config"</span>, <span
+      class="str">"*/.azure/*"</span>, <span
+      class="str">"*/.docker/config.json"</span>, ) <span class="kw">def</span>
+      <span class="fn">is_sensitive_path</span>(path: <span
+      class="kw">str</span>) -&gt; <span class="kw">bool</span>: <span
+      class="com"># Match against both "dir" and "dir/" to catch directory
+      roots</span> normalized = path.rstrip(<span class="str">"/"</span>)
+      candidates = (normalized, normalized + <span class="str">"/"</span>) <span
+      class="kw">return</span> any(fnmatch.fnmatch(c, pat) <span
+      class="kw">for</span> c <span class="kw">in</span> candidates <span
+      class="kw">for</span> pat <span class="kw">in</span> SENSITIVE) <span
+      class="kw">def</span> <span class="fn">check_permission</span>(path,
+      mode): <span class="kw">if</span> is_sensitive_path(path): <span
+      class="kw">return</span> {<span class="str">"allowed"</span>: <span
+      class="kw">False</span>, <span class="str">"reason"</span>: <span
+      class="fn">f</span><span class="str">"{path} is sensitive"</span>} <span
+      class="com"># ... other checks by mode ...</span></code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Defence-in-depth against prompt injection",
+        "Cannot be bypassed by mode / config",
+        "Standard well-known credential paths",
+        "fnmatch patterns — easy to audit",
+      ]}
+      cons={[
+        "Hardcoded list — cần update khi có cloud provider mới",
+        "Không cover custom credential locations (<code>~/.company-secrets/</code>)",
+        "False positive: legit debug cho <code>~/.ssh/config</code>",
+        "Không protect Windows paths (<code>%USERPROFILE%\\.ssh\\</code>)",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://adversa.ai/blog/claude-code-security-bypass-deny-rules-disabled/">Adversa — Claude Code Deny rules silently bypassed</a>',
+        '<a href="https://owasp.org/www-project-container-security/">OWASP — Container Security (credential protection)</a>',
+        '<a href="https://docs.python.org/3/library/fnmatch.html">Python fnmatch docs</a>',
+      ]}
+    />
+    <p><a href="/reports/openharness/t19/">→ Phân tích sâu T19: Built-in sensitive path protection (hardcoded glob)</a></p>
+  </Technique>
+  <Technique
+    id={"t20"}
+    title={"T20. 6-layer hierarchical permission evaluation + path normalization"}
+    tid={"E.3"}
+    location={"<strong>File:</strong> <code>src/openharness/permissions/checker.py</code> · <strong>Hàm:</strong> <code>evaluate()</code> · <strong>Lines:</strong> 75–169"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">def</span> <span
+      class="fn">evaluate</span>(self, tool_name, *, is_read_only,
+      file_path=<span class="kw">None</span>, command=<span
+      class="kw">None</span>): <span class="com"># Layer 1: sensitive path
+      protection (see T19)</span> <span class="kw">if</span> file_path: <span
+      class="kw">for</span> candidate <span class="kw">in</span>
+      _policy_match_paths(file_path): <span class="kw">for</span> pattern <span
+      class="kw">in</span> SENSITIVE_PATH_PATTERNS: <span class="kw">if</span>
+      fnmatch.fnmatch(candidate, pattern): <span class="kw">return</span>
+      PermissionDecision(allowed=<span class="kw">False</span>, reason=<span
+      class="str">"sensitive"</span>) <span class="com"># Layer 2: explicit tool
+      deny list</span> <span class="kw">if</span> tool_name <span
+      class="kw">in</span> self._settings.denied_tools: <span
+      class="kw">return</span> PermissionDecision(allowed=<span
+      class="kw">False</span>, reason=<span class="fn">f</span><span
+      class="str">"{tool_name} is explicitly denied"</span>) <span class="com">#
+      Layer 3: explicit tool allow list</span> <span class="kw">if</span>
+      tool_name <span class="kw">in</span> self._settings.allowed_tools: <span
+      class="kw">return</span> PermissionDecision(allowed=<span
+      class="kw">True</span>, reason=<span class="fn">f</span><span
+      class="str">"{tool_name} is explicitly allowed"</span>) <span
+      class="com"># Layer 4: path rules (glob-based)</span> <span
+      class="kw">if</span> file_path <span class="kw">and</span>
+      self._path_rules: <span class="kw">for</span> candidate <span
+      class="kw">in</span> _policy_match_paths(file_path): <span
+      class="kw">for</span> rule <span class="kw">in</span> self._path_rules:
+      <span class="kw">if</span> fnmatch.fnmatch(candidate, rule.pattern): <span
+      class="kw">if not</span> rule.allow: <span class="kw">return</span>
+      PermissionDecision(allowed=<span class="kw">False</span>, reason=<span
+      class="fn">f</span><span class="str">"deny rule: {rule.pattern}"</span>)
+      <span class="com"># Layer 5: command deny patterns (bash-specific)</span>
+      <span class="kw">if</span> command: <span class="kw">for</span> pattern
+      <span class="kw">in</span> getattr(self._settings, <span
+      class="str">"denied_commands"</span>, []): <span class="kw">if</span>
+      isinstance(pattern, <span class="kw">str</span>) <span
+      class="kw">and</span> fnmatch.fnmatch(command, pattern): <span
+      class="kw">return</span> PermissionDecision(allowed=<span
+      class="kw">False</span>, reason=<span class="fn">f</span><span
+      class="str">"cmd deny: {pattern}"</span>) <span class="com"># Layer 6:
+      fall back to mode (FULL_AUTO / PLAN / DEFAULT)</span> <span
+      class="kw">if</span> self._settings.mode == PermissionMode.FULL_AUTO:
+      <span class="kw">return</span> PermissionDecision(allowed=<span
+      class="kw">True</span>) <span class="kw">if</span> is_read_only: <span
+      class="kw">return</span> PermissionDecision(allowed=<span
+      class="kw">True</span>) <span class="kw">if</span> self._settings.mode ==
+      PermissionMode.PLAN: <span class="kw">return</span>
+      PermissionDecision(allowed=<span class="kw">False</span>, reason=<span
+      class="str">"plan blocks mutations"</span>) <span class="kw">return</span>
+      PermissionDecision(allowed=<span class="kw">False</span>,
+      requires_confirmation=<span class="kw">True</span>) <span
+      class="kw">def</span> <span
+      class="fn">_policy_match_paths</span>(file_path: <span
+      class="kw">str</span>) -&gt; <span class="kw">tuple</span>[<span
+      class="kw">str</span>, ...]: <span class="str">"""Return path forms that
+      should participate in policy matching. Appending a trailing slash lets
+      glob-style deny patterns like ``*/.ssh/*`` and ``/etc/*`` match the
+      directory root itself. """</span> normalized = file_path.rstrip(<span
+      class="str">"/"</span>) <span class="kw">if not</span> normalized: <span
+      class="kw">return</span> (file_path,) <span class="kw">return</span>
+      (normalized, normalized + <span class="str">"/"</span>)</code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> 6 layer đúng thứ tự quan
+      trọng: sensitive &gt; deny &gt; allow &gt; path rules &gt; command deny
+      &gt; mode. Sensitive luôn win — không config nào override được. Đặc biệt
+      tinh tế là <code>_policy_match_paths</code>: trả về cả
+      <code>"/home/x/.ssh"</code> <em>và</em> <code>"/home/x/.ssh/"</code>. Vì
+      glob tool có thể gọi với path không có trailing slash, và pattern
+      <code>"*/.ssh/*"</code> sẽ không match mỗi bản — nếu không normalize, có
+      thể bypass. Đây là lỗ hổng kinh điển mà Adversa publish cho Claude Code
+      deny rules.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">def</span> <span class="fn">evaluate_perm</span>(tool, *,
+      path=<span class="kw">None</span>, cmd=<span class="kw">None</span>,
+      settings, mode): <span class="com"># Layer 1: sensitive paths
+      (hardcoded)</span> <span class="kw">if</span> path <span
+      class="kw">and</span> is_sensitive(path): <span class="kw">return</span>
+      deny(<span class="str">"sensitive"</span>) <span class="com"># Layer 2:
+      tool deny list</span> <span class="kw">if</span> tool <span
+      class="kw">in</span> settings.denied_tools: <span class="kw">return</span>
+      deny(<span class="str">"tool denied"</span>) <span class="com"># Layer 3:
+      tool allow list</span> <span class="kw">if</span> tool <span
+      class="kw">in</span> settings.allowed_tools: <span
+      class="kw">return</span> allow(<span class="str">"tool allowed"</span>)
+      <span class="com"># Layer 4: path rules</span> <span class="kw">if</span>
+      path <span class="kw">and</span> (r := match_path_rule(path,
+      settings.path_rules)): <span class="kw">if not</span> r.allow: <span
+      class="kw">return</span> deny(<span class="fn">f</span><span
+      class="str">"path rule: {r.pattern}"</span>) <span class="com"># Layer 5:
+      command deny</span> <span class="kw">if</span> cmd <span
+      class="kw">and</span> any(fnmatch.fnmatch(cmd, p) <span
+      class="kw">for</span> p <span class="kw">in</span>
+      settings.denied_commands): <span class="kw">return</span> deny(<span
+      class="str">"command deny"</span>) <span class="com"># Layer 6:
+      mode</span> <span class="kw">return</span> mode_decision(mode,
+      tool.is_read_only)</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        'Hierarchy rõ ràng — dễ audit "tại sao tool bị allow/deny"',
+        "Path normalization tránh bypass bằng trailing slash",
+        "Mỗi layer có reason riêng cho log",
+        "Sensitive path first — cannot be overridden",
+      ]}
+      cons={[
+        "6 layer phức tạp — user khó predict behavior",
+        "Layer 3 (allow) override layer 4 (path rule) — counter-intuitive",
+        "Không có conflict detection giữa allow/deny cùng pattern",
+        "Bash arg parsing không sophisticated như opencode tree-sitter",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://code.claude.com/docs/en/permissions">Claude Code — Configure permissions</a>',
+        '<a href="https://adversa.ai/blog/claude-code-security-bypass-deny-rules-disabled/">Adversa — Claude Code Deny rules silently bypassed</a>',
+        '<a href="https://docs.python.org/3/library/fnmatch.html">Python fnmatch — glob matching</a>',
+      ]}
+    />
+    <p><a href="/reports/openharness/t20/">→ Phân tích sâu T20: 6-layer hierarchical permission evaluation + path normalization</a></p>
+  </Technique>
+  <Technique
+    id={"t21"}
+    title={"T21. Async interactive approval với UUID + 300s timeout + lock"}
+    tid={"E.4"}
+    location={"<strong>File:</strong> <code>src/openharness/ui/backend_host.py</code> · <strong>Lines:</strong> 684–706 · <strong>Timeout:</strong> 300s · <strong>Lock:</strong> <code>_permission_lock</code>"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      asyncio, uuid <span class="kw">from</span> dataclasses <span
+      class="kw">import</span> dataclass <span class="fn">@dataclass</span>
+      <span class="kw">class</span> <span class="type">PendingApproval</span>:
+      request_id: str tool_name: str tool_input: dict future:
+      asyncio.Future[PermissionResolution] <span class="kw">class</span> <span
+      class="type">BackendHost</span>: <span class="kw">def</span> <span
+      class="fn">__init__</span>(self): self._pending_approvals: <span
+      class="kw">dict</span>[<span class="kw">str</span>, PendingApproval] = {}
+      self._permission_lock = asyncio.Lock() <span class="kw">async def</span>
+      <span class="fn">request_approval</span>(self, tool_name, tool_input, *,
+      timeout=<span class="num">300.0</span>): <span class="kw">async
+      with</span> self._permission_lock: <span class="com"># only one approval
+      at a time</span> request_id = <span class="kw">str</span>(uuid.uuid4())
+      fut: asyncio.Future[PermissionResolution] =
+      asyncio.get_running_loop().create_future()
+      self._pending_approvals[request_id] = PendingApproval(
+      request_id=request_id, tool_name=tool_name, tool_input=tool_input,
+      future=fut, ) <span class="com"># Emit event to UI with request_id; UI
+      sends back resolve_approval() later</span> <span class="kw">await</span>
+      self._emit(ApprovalRequestEvent( request_id=request_id,
+      tool_name=tool_name, tool_input=tool_input, )) <span
+      class="kw">try</span>: <span class="kw">return await</span>
+      asyncio.wait_for(fut, timeout=timeout) <span class="kw">except</span>
+      asyncio.TimeoutError: <span class="kw">return</span>
+      PermissionResolution(approved=<span class="kw">False</span>, reason=<span
+      class="str">"timeout"</span>) <span class="kw">finally</span>:
+      self._pending_approvals.pop(request_id, <span class="kw">None</span>)
+      <span class="kw">def</span> <span class="fn">resolve_approval</span>(self,
+      request_id: <span class="kw">str</span>, approved: <span
+      class="kw">bool</span>, remember: <span class="kw">bool</span> = <span
+      class="kw">False</span>): <span class="com"># Called from UI when user
+      clicks Allow/Deny</span> pending = self._pending_approvals.get(request_id)
+      <span class="kw">if</span> pending <span class="kw">is not None and
+      not</span> pending.future.done():
+      pending.future.set_result(PermissionResolution(approved=approved,
+      remember=remember))</code></pre> <div class="why"><strong>Tại sao quan
+      trọng:</strong> UI và engine chạy async ở hai "luồng" khác nhau — cần cơ
+      chế sync. <code>Future</code> là cầu nối: engine <code>await fut</code>,
+      UI <code>fut.set_result(...)</code>. UUID gán duy nhất cho mỗi approval →
+      race an toàn khi nhiều tool call concurrent. <code>_permission_lock</code>
+      đảm bảo chỉ một approval dialog show cùng lúc (UX). Timeout 300s phòng
+      user walk away. Cleanup trong <code>finally</code> tránh memory
+      leak.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">import</span> asyncio, uuid <span class="kw">class</span> <span
+      class="type">ApprovalHost</span>: <span class="kw">def</span> <span
+      class="fn">__init__</span>(self): self.pending = {} self.lock =
+      asyncio.Lock() <span class="kw">async def</span> <span
+      class="fn">ask</span>(self, payload, timeout=<span class="num">300</span>)
+      -&gt; <span class="kw">bool</span>: <span class="kw">async with</span>
+      self.lock: rid = <span class="kw">str</span>(uuid.uuid4()) fut =
+      asyncio.get_running_loop().create_future() self.pending[rid] = fut <span
+      class="kw">await</span> self.notify_ui({<span class="str">"id"</span>:
+      rid, <span class="str">"payload"</span>: payload}) <span
+      class="kw">try</span>: <span class="kw">return await</span>
+      asyncio.wait_for(fut, timeout) <span class="kw">except</span>
+      asyncio.TimeoutError: <span class="kw">return False</span> <span
+      class="kw">finally</span>: self.pending.pop(rid, <span
+      class="kw">None</span>) <span class="kw">def</span> <span
+      class="fn">resolve</span>(self, rid: <span class="kw">str</span>,
+      approved: <span class="kw">bool</span>): <span class="kw">if</span> (fut
+      := self.pending.get(rid)) <span class="kw">and not</span> fut.done():
+      fut.set_result(approved)</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Async-native — không block event loop",
+        "UUID tránh race giữa nhiều tool pending",
+        'Lock giữ UX "one dialog at a time"',
+        "Timeout tránh stuck session",
+      ]}
+      cons={[
+        "Lock serialize → multiple tool call latency tăng",
+        "300s timeout có thể quá ngắn khi user busy",
+        'Không có "remember always" semantics ở đây (layer khác)',
+        "Future leak nếu UI ghost không bao giờ resolve",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://docs.python.org/3/library/asyncio-future.html">Python asyncio — Future</a>',
+        '<a href="https://docs.python.org/3/library/asyncio-sync.html">Python asyncio — Lock</a>',
+        '<a href="https://code.claude.com/docs/en/permissions">Claude Code — Permissions (interactive prompt pattern)</a>',
+      ]}
+    />
+    <p><a href="/reports/openharness/t21/">→ Phân tích sâu T21: Async interactive approval với UUID + 300s timeout + lock</a></p>
+  </Technique>
+</Section>

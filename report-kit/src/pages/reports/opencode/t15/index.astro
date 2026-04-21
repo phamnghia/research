@@ -1,0 +1,245 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T15 — Output truncation với tail-keep + file spill | opencode"
+  description="Phân tích sâu kỹ thuật truncate tool output theo giới hạn dòng/byte, giữ lại phần đuôi (quan trọng nhất), và spill full output ra disk — 'lossy on model, lossless on disk'."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T15 — Output truncation với tail-keep + file spill"
+        subtitle='<strong>MAX_LINES=2000, MAX_BYTES=50KB.</strong> Giữ phần đuôi (tail) của output — thường quan trọng nhất — và spill full output ra file trên disk để agent truy cập lại. <em>"Lossy on model, lossless on disk."</em>'
+        meta={[
+          { label: 'Nhóm',  value: 'C — Tool Design' },
+          { label: 'File',  value: '<code>tool/truncate.ts</code> · Lines 64–126' },
+          { label: 'ID',    value: 'C.3 / T15' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Tool Design">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> <code>bash ls -R /</code>, <code>grep -r "" .</code>, hay <code>npm install</code> verbose có thể trả về hàng megabyte output. Đưa raw vào context = context window đầy ngay, model không làm gì khác được. Truncate đơn thuần (chỉ cắt) làm mất thông tin quan trọng nhất — thường nằm ở phần cuối của bash output (kết quả cuối, lỗi cuối). opencode giải quyết bằng hai hành động đồng thời: <strong>giữ tail</strong> trong context và <strong>spill full ra file</strong> để agent đọc lại nếu cần.
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>Nguyên tắc "lossy on model, lossless on disk":</strong> Model chỉ thấy phần tail (đủ để quyết định bước tiếp), nhưng không có thông tin nào bị mất hoàn toàn — full output luôn có trên disk tại path được thông báo rõ ràng.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Hai tham số giới hạn và direction" />
+        <CodeBlock caption="tool/truncate.ts — core logic" lang="typescript"><Fragment is:raw>{`
+const MAX_LINES = 2_000
+const MAX_BYTES = 50_000   // ~50KB
+
+export function truncateOutput(
+  output: string,
+  opts: {
+    direction?: "head" | "tail"   // head cho compile errors, tail cho bash log
+    toolName: string
+    callId:   string
+  } = {},
+) {
+  const { direction = "tail", toolName, callId } = opts
+  const lines = output.split("\n")
+
+  // Không cần truncate nếu trong giới hạn
+  if (lines.length <= MAX_LINES && output.length <= MAX_BYTES) return output
+
+  // Giữ lại "tail" hoặc "head" theo direction
+  const kept = direction === "tail"
+    ? lines.slice(-MAX_LINES).join("\n")
+    : lines.slice(0,  MAX_LINES).join("\n")
+
+  // Spill full output ra file để agent đọc lại
+  const spillPath = `/tmp/opencode-overflow/${toolName}-${callId}.txt`
+  fs.writeFileSync(spillPath, output)
+
+  return `${kept}
+<truncated-notice>
+Output truncated to last ${MAX_LINES} lines / ${MAX_BYTES} bytes.
+Full output saved to: ${spillPath}
+Use the Read or Grep tool to access specific parts.
+</truncated-notice>`
+}
+`}</Fragment></CodeBlock>
+
+        <Diagram>{`
+bash output: 50,000 lines (5MB)
+         │
+         ▼
+  ┌─────────────────────────────┐
+  │   truncateOutput()          │
+  │                             │
+  │  lines.slice(-2000)  ──────►│──► context (tail 2000 lines)
+  │                             │
+  │  fs.writeFileSync() ───────►│──► /tmp/opencode-overflow/bash-abc.txt
+  │                             │
+  └─────────────────────────────┘
+         │
+         ▼
+  Model nhận được:
+  [2000 lines của tail]
+  <truncated-notice>
+    Full output: /tmp/opencode-overflow/bash-abc.txt
+    Use Read/Grep to inspect.
+  </truncated-notice>
+        `}</Diagram>
+
+        <Subheading level="h3" text="Khi nào dùng head vs tail" />
+        <p>
+          <strong>Tail (default):</strong> Hầu hết bash output — lỗi runtime, kết quả build, output cuối cùng quan trọng hơn phần đầu verbose.
+        </p>
+        <p>
+          <strong>Head:</strong> Compile error thường xuất hiện ở đầu. Ví dụ: TypeScript compiler trả 10,000 dòng lỗi — lỗi đầu là root cause, cuối là cascade.
+        </p>
+
+        <CodeBlock caption="Generic implementation với spill" lang="typescript"><Fragment is:raw>{`
+async function truncateAndSpill(
+  output: string,
+  meta: { tool: string; callId: string },
+): Promise<string> {
+  if (output.length <= 50_000) return output
+
+  // Giữ tail 50KB
+  const tail = output.slice(-50_000)
+
+  // Spill to disk
+  const path = `/tmp/agent-overflow/${meta.tool}-${meta.callId}.log`
+  await fs.writeFile(path, output)
+
+  return tail + `\n\n[Output was ${output.length} bytes, truncated to last 50k. ` +
+    `Full content: ${path}. Use Read/Grep to inspect.]`
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T14 (Effect lazy tool init):</strong> <code>truncate.apply(id, result)</code> trong <code>wrap()</code> là điểm gọi T15. Toàn bộ tool registry tự động được bảo vệ.</li>
+          <li><strong>T7 (Token overflow detection):</strong> Truncation ở T15 là biện pháp phòng thủ để tránh overflow. T7 detect khi context gần đầy và trigger compaction — T15 phòng ngừa ngay từ đầu ở tool level.</li>
+          <li><strong>T19 (Sub-agent Task tool):</strong> Sub-agent thường làm search/explore — output search thường rất lớn. T15 quan trọng nhất ở đây: sub-agent trả về summary nhỏ gọn, không bị bulk output ô nhiễm parent context.</li>
+          <li><strong>T18 (Bash tree-sitter):</strong> Tree-sitter parse bash command trước khi execute — nếu command rõ ràng sẽ produce large output (ls -R, find...), tool có thể warn hoặc redirect trực tiếp tới T15.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. Agent quên path spill" />
+        <p>
+          Model nhận truncation notice nhưng không dùng Read/Grep để đọc file → tiếp tục với thông tin thiếu. Đây là limitation của approach: phụ thuộc vào model "nhớ" và "muốn" đọc full output.
+        </p>
+        <Callout type="warn">
+          <strong>Mitigation:</strong> Notice phải rõ ràng và actionable — không chỉ nói "truncated" mà còn nói "Use Read tool to inspect /path/to/file". opencode viết notice dạng instruction, không dạng thông báo thuần.
+        </Callout>
+
+        <Subheading level="h3" text="2. Disk full / temp cleanup" />
+        <p>
+          Nếu <code>/tmp/opencode-overflow/</code> không được clean up, disk sẽ đầy theo thời gian (đặc biệt với agent chạy nhiều lệnh verbose). Cần cleanup job hoặc TTL-based deletion.
+        </p>
+
+        <Subheading level="h3" text="3. Giới hạn magic number" />
+        <p>
+          2000 dòng / 50KB là ngưỡng được chọn theo kinh nghiệm. Workload khác nhau cần khác:
+          cargo build cho Rust project lớn có thể cần nhiều hơn; simple file listing cần ít hơn.
+          Hiện tại không có per-tool override.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Truncation strategy', 'Spill to disk', 'Direction']}
+          rows={[
+            ['opencode', 'Tail 2000 lines / 50KB', '✅ + path trong notice', '✅ head/tail'],
+            ['Claude Code', 'Truncate + file spill tương tự', '✅', '✅'],
+            ['Aider', 'Byte limit, no spill', '❌', '❌'],
+            ['Cline', 'Char limit per tool, no spill', '❌', '❌'],
+            ['OpenHarness', 'Line limit nhưng không spill', '❌', '❌'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+import { writeFileSync, mkdirSync } from "node:fs"
+import { join } from "node:path"
+import { randomUUID } from "node:crypto"
+
+const SPILL_DIR = join(process.env.TMPDIR ?? "/tmp", "agent-overflow")
+mkdirSync(SPILL_DIR, { recursive: true })
+
+export function truncateOutput(
+  output: string,
+  opts: { toolName: string; direction?: "head" | "tail" } = { toolName: "tool" }
+): string {
+  const MAX_LINES = 2_000
+  const MAX_BYTES = 50_000
+  const { toolName, direction = "tail" } = opts
+  const lines = output.split("\n")
+
+  if (lines.length <= MAX_LINES && output.length <= MAX_BYTES) return output
+
+  const kept = direction === "tail"
+    ? lines.slice(-MAX_LINES).join("\n")
+    : lines.slice(0,  MAX_LINES).join("\n")
+
+  const callId  = randomUUID().slice(0, 8)
+  const spillPath = join(SPILL_DIR, `${toolName}-${callId}.txt`)
+  writeFileSync(spillPath, output)
+
+  return [
+    kept,
+    "",
+    `[Output truncated: ${lines.length} lines → ${MAX_LINES} lines kept (${direction}).`,
+    ` Full output (${output.length} bytes) saved to: ${spillPath}`,
+    ` Use Read or Grep tool to inspect specific sections.]`,
+  ].join("\n")
+}
+`}</Fragment></CodeBlock>
+
+        <Callout type="success">
+          <strong>Recommendation:</strong> Áp dụng truncation <em>sau</em> mọi tool execute, không phải trước. Truncation ở output layer (không phải input layer) đảm bảo tool luôn chạy đầy đủ, chỉ output gửi về model mới bị giới hạn.
+        </Callout>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Skill Issue: Harness Engineering for Coding Agents</a>',
+            '<a href="https://gist.github.com/Haseeb-Qureshi/2213cc0487ea71d62572a645d7582518">Gist — AI Coding Agent Architecture: Claude Code vs Codex vs Cline vs OpenCode</a>',
+            '<a href="https://kargarisaac.medium.com/the-fundamentals-of-context-management-and-compaction-in-llms-171ea31741a2">Medium — Fundamentals of Context Management and Compaction in LLMs</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

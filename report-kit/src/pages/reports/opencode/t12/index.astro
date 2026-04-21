@@ -1,0 +1,379 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T12 — Structured compaction template | opencode"
+  description="Phân tích template 5-section bắt buộc LLM tạo summary có cấu trúc khi compact — Goal, Instructions, Discoveries, Accomplished, Relevant files — và cơ chế plugin override."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T12 — Structured compaction template"
+        subtitle="Template 5-section yêu cầu LLM sinh summary theo cấu trúc cố định khi compact — đảm bảo agent mới biết mục tiêu, rules, codebase facts, việc đã làm, và file liên quan."
+        meta={[
+          { label: 'Nhóm',  value: 'B — Context Management' },
+          { label: 'File',  value: '<code>session/compaction.ts</code>' },
+          { label: 'Lines', value: '277–299' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      {/* ── 1. Overview ── */}
+      <Section id="overview" title="Tổng quan" themeTag="Context">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Khi LLM tóm tắt free-form, nó thường
+          tập trung vào "câu chuyện" của conversation nhưng bỏ sót thông tin kỹ thuật
+          thiết yếu: file paths, function names, error messages, rules người dùng đã đặt ra.
+          Agent mới sau compact sẽ "mất trí nhớ" về codebase — dẫn đến đặt câu hỏi lại,
+          làm lại việc đã làm, vi phạm rules đã thỏa thuận.
+        </WhyImportant>
+
+        <p>
+          opencode giải quyết bằng template 5-section bắt buộc LLM phân loại thông tin
+          vào đúng bucket, không tự do diễn giải:
+        </p>
+        <ul>
+          <li><strong>Goal</strong> — 1 câu mục tiêu user muốn đạt được</li>
+          <li><strong>Instructions</strong> — bullet list rules/constraints user đã đặt ra</li>
+          <li><strong>Discoveries</strong> — facts kỹ thuật về codebase (file paths, patterns, symbols)</li>
+          <li><strong>Accomplished</strong> — list hành động đã thực hiện (edits, commands, changes)</li>
+          <li><strong>Relevant files</strong> — list file với 1-line description mỗi file</li>
+        </ul>
+
+        <p>
+          Plugin có thể override template bằng <code>plugins.compactionTemplate?.()</code> —
+          cho phép domain-specific summary (ví dụ: thêm section "Test results", "API endpoints").
+        </p>
+
+        <Callout type="unique">
+          <strong>5 sections = 5 memory types.</strong> Mỗi section ánh xạ đến một loại
+          "trí nhớ" khác nhau: Goal = working memory, Instructions = rule memory,
+          Discoveries = semantic memory, Accomplished = episodic memory,
+          Relevant files = spatial memory. Đây là thiết kế cognitive-informed.
+        </Callout>
+      </Section>
+
+      {/* ── 2. Anatomy ── */}
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Template gốc — DEFAULT_COMPACTION_TEMPLATE" />
+        <p>
+          Template là một user message prompt yêu cầu LLM sinh summary với 5 markdown headers.
+          Thứ tự sections quan trọng: Goal đứng đầu để model hiểu ngữ cảnh khi đọc
+          các section sau.
+        </p>
+        <CodeBlock caption="session/compaction.ts:277-299 — default template">
+          <Fragment is:raw>{`
+export const DEFAULT_COMPACTION_TEMPLATE = \`
+Your task is to create a detailed summary of our conversation so far.
+This summary will be used to restore context after compaction.
+
+Please structure your summary with these EXACT 5 sections:
+
+## Goal
+One sentence: what is the user ultimately trying to accomplish?
+
+## Instructions
+Bullet list of rules, constraints, or preferences the user has stated.
+Include coding style preferences, naming conventions, forbidden approaches.
+
+## Discoveries
+Technical facts learned about the codebase:
+- File paths and their purpose
+- Key functions/classes/symbols and what they do
+- Patterns, conventions, or architecture decisions
+- Environment details (language versions, dependencies, config)
+
+## Accomplished
+Chronological list of actions taken:
+- Files created, edited, or deleted (with brief reason)
+- Commands run and their outcome
+- Decisions made and why
+
+## Relevant files
+List of files relevant to the current task:
+- \`path/to/file.ts\` — one-line description of relevance
+
+Keep each section focused and factual. Avoid narrative prose.
+\`
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Plugin override mechanism" />
+        <p>
+          Plugin có thể thay thế hoàn toàn template bằng domain-specific prompt.
+          Ví dụ: plugin cho Android development có thể thêm section "Gradle config"
+          và "Device targets".
+        </p>
+        <CodeBlock caption="session/compaction.ts — plugin override">
+          <Fragment is:raw>{`
+export function getCompactionTemplate(
+  plugins: Plugin[]
+): string {
+  // Plugin override: lấy template từ plugin đầu tiên có implement
+  for (const plugin of plugins) {
+    const customTemplate = plugin.compactionTemplate?.()
+    if (customTemplate) return customTemplate
+  }
+
+  return DEFAULT_COMPACTION_TEMPLATE
+}
+
+// Trong T8 compact call:
+const template  = getCompactionTemplate(session.plugins)
+const summaryLLM = await llm.complete({
+  messages: [...head, { role: 'user', content: template }],
+})
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Output validation (optional enhancement)" />
+        <p>
+          opencode hiện không validate output của LLM — tin tưởng model tuân theo template.
+          Một số harness implement section detection để fallback nếu output thiếu section.
+        </p>
+        <CodeBlock caption="Enhancement — section validation">
+          <Fragment is:raw>{`
+const REQUIRED_SECTIONS = [
+  '## Goal', '## Instructions', '## Discoveries',
+  '## Accomplished', '## Relevant files',
+]
+
+function validateSummary(summary: string): boolean {
+  return REQUIRED_SECTIONS.every(section =>
+    summary.includes(section)
+  )
+}
+// Nếu validateSummary = false → retry với reminder
+// hoặc dùng summary partial (tốt hơn không có gì)
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      {/* ── 3. Interaction ── */}
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T8 compact() — orchestrator
+         │
+         ├── 1. T9: prune tool outputs
+         │
+         ├── 2. split head / tail
+         │
+         └── 3. LLM compact call:
+                    │
+                    ▼
+              ┌──────────────────────────────┐
+              │    T12 — Compaction Template  │
+              │                              │
+              │  getCompactionTemplate()     │
+              │    ↓                         │
+              │  Plugin override?  ──Yes──→  │
+              │    ↓ No                      │
+              │  DEFAULT_COMPACTION_TEMPLATE │
+              │    ↓                         │
+              │  → passed as last user msg   │
+              │    to LLM compact call       │
+              └──────────────────────────────┘
+                         │
+                         ▼
+                   summary string (5 sections)
+                         │
+                         ▼
+              T8: wrap in <prior-conversation-summary>
+              T11: inject continuation message
+              T1: agent loop nhận messages mới
+                  với summary trong system msg
+
+Plugin override: plugin.compactionTemplate?.()
+→ domain-specific sections (thêm/bớt/đổi tên)
+`}</Diagram>
+
+        <p>
+          Output của T12 (summary string) được T8 đặt vào system message với wrapper
+          <code>&lt;prior-conversation-summary&gt;...&lt;/prior-conversation-summary&gt;</code>.
+          XML tag này giúp model phân biệt summary với system instructions thật.
+        </p>
+      </Section>
+
+      {/* ── 4. Failure modes ── */}
+      <Section id="failure" title="Failure modes" themeTag="Risk">
+        <Subheading level="h3" text="FM-1: Free-form summary (không có template)" />
+        <CodeBlock caption="Anti-pattern — free-form compact prompt">
+          <Fragment is:raw>{`
+// ❌ Free-form — model tự quyết định cấu trúc
+const template = "Please summarize our conversation so far."
+// Kết quả điển hình:
+// "We discussed a coding task where the user wanted to...
+//  The assistant helped by... Overall, the key points were..."
+// → Mất hoàn toàn: file paths, symbols, rules, accomplished actions
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          Sau compact với free-form summary, agent thường hỏi lại "bạn đang làm việc
+          với file nào?" — mất hoàn toàn spatial memory về codebase.
+        </p>
+
+        <Subheading level="h3" text="FM-2: Template yếu — thiếu Relevant files" />
+        <p>
+          Nếu không có section "Relevant files", agent sau compact không biết file nào
+          liên quan → phải đọc lại nhiều file → context overflow cycle tái diễn sớm hơn.
+        </p>
+        <CodeBlock caption="Anti-pattern — template thiếu file list">
+          <Fragment is:raw>{`
+// ❌ Template không yêu cầu file list
+const WEAK_TEMPLATE = \`
+Summarize the conversation:
+1. What is the goal?
+2. What was accomplished?
+\`
+// Thiếu: file paths, rules, discoveries, relevant files
+// Agent mới không biết relevant context về codebase
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="FM-3: Plugin override quá khác biệt" />
+        <p>
+          Plugin thay đổi template hoàn toàn (xóa core sections) → summary không còn
+          chứa đủ thông tin cần thiết cho agent tiếp tục. Khuyến nghị: plugin chỉ
+          <em>thêm</em> sections, không xóa 5 sections gốc.
+        </p>
+
+        <ProsCons
+          pros={[
+            '5 sections → 5 memory types: goal, rules, facts, history, files',
+            'Plugin override — linh hoạt per domain',
+            'Factual, không narrative — dễ parse và ít bị hallucinate',
+            'XML wrapper — model phân biệt summary vs system instructions',
+          ]}
+          cons={[
+            'Không validate output — model có thể bỏ section',
+            'Chỉ 1 level override (plugin) — không per-session override',
+            'Phụ thuộc model quality — model yếu có thể tóm tắt sai',
+          ]}
+        />
+      </Section>
+
+      {/* ── 5. Compare ── */}
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Compaction template?', 'Structured sections?', 'Plugin override?']}
+          rows={[
+            ['<strong>opencode</strong>', '<span style="color:var(--chip-green-fg)">Có — 5 sections cố định</span>', '<span style="color:var(--chip-green-fg)">Goal, Instructions, Discoveries, Accomplished, Files</span>', '<span style="color:var(--chip-green-fg)">Có — <code>plugin.compactionTemplate()</code></span>'],
+            ['Claude Code', '<span style="color:var(--chip-amber-fg)">Có template (not public)</span>', '<span style="color:var(--chip-amber-fg)">Có, không rõ chi tiết</span>', '<span style="color:var(--chip-amber-fg)">Không rõ</span>'],
+            ['LangChain', '<span style="color:var(--chip-red-fg)">Không có structured template</span>', '<span style="color:var(--chip-red-fg)">Free-form summary</span>', '<span style="color:var(--chip-red-fg)">Không</span>'],
+            ['Microsoft CoPilot Studio', '<span style="color:var(--chip-green-fg)">Custom template per-agent</span>', '<span style="color:var(--chip-amber-fg)">Flexible, không standard</span>', '<span style="color:var(--chip-green-fg)">Có — per-agent config</span>'],
+          ]}
+        />
+
+        <Callout type="info">
+          <strong>HumanLayer CLAUDE.md</strong> khuyến nghị tương tự: yêu cầu LLM luôn
+          list relevant files và accomplished actions trong compaction — đồng thuận với
+          thiết kế của opencode T12.
+        </Callout>
+      </Section>
+
+      {/* ── 6. Recipe ── */}
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock caption="compaction-template.ts — structured template với validation">
+          <Fragment is:raw>{`
+// compaction-template.ts — structured 5-section template
+
+export const DEFAULT_COMPACTION_TEMPLATE = \`
+Create a structured summary with EXACTLY these 5 sections:
+
+## Goal
+One sentence: the user's ultimate objective.
+
+## Instructions
+Bullet list of rules/constraints/preferences stated by user.
+
+## Discoveries
+Technical facts about the codebase:
+- File paths and purpose
+- Key symbols (functions, classes, types) and what they do
+- Patterns, conventions, architectural decisions
+
+## Accomplished
+Chronological actions taken:
+- Files created/edited/deleted (with reason)
+- Commands run and outcomes
+- Decisions made and rationale
+
+## Relevant files
+Files relevant to the current task:
+- \`path/to/file\` — one-line relevance description
+
+Be factual and concise. No narrative prose.
+\`
+
+const REQUIRED_SECTIONS = [
+  '## Goal',
+  '## Instructions',
+  '## Discoveries',
+  '## Accomplished',
+  '## Relevant files',
+] as const
+
+export function validateSummary(summary: string): {
+  valid: boolean
+  missingSections: string[]
+} {
+  const missing = REQUIRED_SECTIONS.filter(s => !summary.includes(s))
+  return { valid: missing.length === 0, missingSections: missing }
+}
+
+export function getTemplate(plugins: Plugin[]): string {
+  for (const p of plugins) {
+    const t = p.compactionTemplate?.()
+    if (t) return t
+  }
+  return DEFAULT_COMPACTION_TEMPLATE
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      {/* ── 7. Refs ── */}
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://humanlayer.dev/docs/claude-md-guide">HumanLayer — CLAUDE.md guide: structured compaction best practices</a>',
+            '<a href="https://medium.com/@ai-engineering/context-management-compaction">Medium — Context management: why structured summaries matter</a>',
+            '<a href="https://learn.microsoft.com/en-us/microsoft-365-copilot/extensibility/agent-context-templates">Microsoft CoPilot Studio — Agent context templates</a>',
+            '<a href="https://github.com/sst/opencode/blob/main/packages/opencode/src/session/compaction.ts">opencode source — session/compaction.ts (lines 277–299)</a>',
+            '<a href="https://www.anthropic.com/research/long-context-agents">Anthropic Research — Long context agent memory strategies</a>',
+            '<a href="https://arxiv.org/abs/2404.14423">arXiv 2404.14423 — Structured summarization for agent continuity</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

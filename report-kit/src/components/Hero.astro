@@ -1,0 +1,27 @@
+---
+// Hero.astro — tiêu đề lớn + subtitle + meta bar cho báo cáo
+export interface MetaItem {
+  label: string;
+  value: string;
+}
+
+interface Props {
+  title: string;
+  /** HTML được render trực tiếp (để có thể chèn <a>, <code>) */
+  subtitle?: string;
+  meta?: MetaItem[];
+}
+
+const { title, subtitle = '', meta = [] } = Astro.props;
+---
+<header class="hero">
+  <h1>{title}</h1>
+  {subtitle && <div class="sub" set:html={subtitle} />}
+  {meta.length > 0 && (
+    <div class="meta">
+      {meta.map((m) => (
+        <span><strong>{m.label}:</strong> <Fragment set:html={m.value} /></span>
+      ))}
+    </div>
+  )}
+</header>

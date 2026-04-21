@@ -1,0 +1,466 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import Callout from "../../../../components/Callout.astro";
+---
+
+<Section
+  id={"section-a"}
+  title={"A. Agent Loop & Streaming"}
+  themeTag={"5 kỹ thuật"}
+>
+  <Fragment is:raw>
+    <p>Engine là trung tâm harness của OpenHarness: file
+    <code>engine/query.py</code> (805 LOC) chứa coroutine <code>run_query</code>
+    — một async generator emit stream events cho UI. Điểm thú vị: loop branch
+    giữa <em>sequential</em> (1 tool) và <em>parallel</em> (2+ tool via
+    <code>asyncio.gather</code>), auto-compact ngay trước mỗi turn, pre/post
+    tool hook intercept, và carryover tool metadata qua nhiều lần compact.</p>
+  </Fragment>
+  <Technique
+    id={"t1"}
+    title={"T1. Async ReAct loop với single/parallel tool branching"}
+    tid={"A.1"}
+    location={"<strong>File:</strong> <code>src/openharness/engine/query.py</code> · <strong>Hàm:</strong> <code>run_query()</code> · <strong>Lines:</strong> 516–651"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">turn_count</span>
+      = <span class="num">0</span> <span class="kw">while</span>
+      context.max_turns <span class="kw">is None</span> <span
+      class="kw">or</span> turn_count &lt; context.max_turns: turn_count +=
+      <span class="num">1</span> <span class="com"># --- auto-compact check
+      before calling the model ---------------</span> <span class="kw">async
+      for</span> event, usage <span class="kw">in</span>
+      _stream_compaction(trigger=<span class="str">"auto"</span>): <span
+      class="kw">yield</span> event, usage messages, was_compacted =
+      last_compaction_result final_message: ConversationMessage | <span
+      class="kw">None</span> = <span class="kw">None</span> <span
+      class="kw">async for</span> event <span class="kw">in</span>
+      context.api_client.stream_message( ApiMessageRequest(model=context.model,
+      messages=messages, system_prompt=context.system_prompt,
+      tools=context.tool_registry.to_api_schema()): <span class="kw">if</span>
+      isinstance(event, ApiTextDeltaEvent): <span class="kw">yield</span>
+      AssistantTextDelta(text=event.text), <span class="kw">None</span> <span
+      class="kw">elif</span> isinstance(event, ApiMessageCompleteEvent):
+      final_message = event.message <span class="kw">if not</span>
+      final_message.tool_uses: <span class="kw">return</span> <span
+      class="com"># natural end of turn</span> tool_calls =
+      final_message.tool_uses <span class="kw">if</span> len(tool_calls) ==
+      <span class="num">1</span>: <span class="com"># Single tool: sequential
+      (stream events immediately)</span> tc = tool_calls[<span
+      class="num">0</span>] <span class="kw">yield</span>
+      ToolExecutionStarted(tool_name=tc.name, tool_input=tc.input), <span
+      class="kw">None</span> result = <span class="kw">await</span>
+      _execute_tool_call(context, tc.name, tc.id, tc.input) <span
+      class="kw">yield</span> ToolExecutionCompleted(tool_name=tc.name,
+      output=result.content, is_error=result.is_error), <span
+      class="kw">None</span> tool_results = [result] <span
+      class="kw">else</span>: <span class="com"># Multiple tools: execute
+      concurrently, emit events after</span> <span class="kw">for</span> tc
+      <span class="kw">in</span> tool_calls: <span class="kw">yield</span>
+      ToolExecutionStarted(tool_name=tc.name, tool_input=tc.input), <span
+      class="kw">None</span> <span class="com"># return_exceptions=True tránh
+      orphan tool_use blocks</span> raw_results = <span class="kw">await</span>
+      asyncio.gather( *[_run(tc) <span class="kw">for</span> tc <span
+      class="kw">in</span> tool_calls], return_exceptions=<span
+      class="kw">True</span> ) <span class="com"># wrap exceptions thành
+      ToolResultBlock(is_error=True)</span> ...
+      messages.append(ConversationMessage(role=<span class="str">"user"</span>,
+      content=tool_results))</code></pre> <div class="why"><strong>Tại sao quan
+      trọng:</strong> Hầu hết harness Python đơn giản chạy tool sequential để dễ
+      quản lý state. OpenHarness branching: khi chỉ có 1 tool thì emit event
+      realtime (UX mượt), khi nhiều tool thì <code>asyncio.gather</code> để giảm
+      latency. Quan trọng nhất là <code>return_exceptions=True</code>: nếu một
+      tool raise, các tool khác không bị <em>cancelled</em>. Lý do được comment
+      rất kỹ: Anthropic API reject request tiếp theo nếu có bất kỳ
+      <code>tool_use</code> nào thiếu <code>tool_result</code> tương ứng.</div>
+      <h4>Code example (generic)</h4> <pre><code><span class="kw">async
+      def</span> <span class="fn">run_agent_turn</span>(messages, tools): resp =
+      <span class="kw">await</span> llm.call(messages, tools) <span
+      class="kw">if not</span> resp.tool_uses: <span class="kw">return</span>
+      resp <span class="kw">if</span> len(resp.tool_uses) == <span
+      class="num">1</span>: tc = resp.tool_uses[<span class="num">0</span>]
+      results = [<span class="kw">await</span> exec_tool(tc)] <span
+      class="kw">else</span>: <span class="com"># CRITICAL:
+      return_exceptions=True</span> <span class="com"># otherwise failed tool
+      leaves siblings cancelled</span> <span class="com"># → orphan tool_use
+      blocks → next API call rejected</span> raw = <span class="kw">await</span>
+      asyncio.gather( *[exec_tool(tc) <span class="kw">for</span> tc <span
+      class="kw">in</span> resp.tool_uses], return_exceptions=<span
+      class="kw">True</span>, ) results = [wrap_exception(tc, r) <span
+      class="kw">for</span> tc, r <span class="kw">in</span> zip(resp.tool_uses,
+      raw)] messages.append({<span class="str">"role"</span>: <span
+      class="str">"user"</span>, <span class="str">"content"</span>: results})
+      <span class="kw">return</span> results</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Parallel giảm latency khi nhiều tool độc lập (Read 3 files cùng lúc)",
+        "Single path vẫn stream event realtime — UX không bị delay",
+        "<code>return_exceptions=True</code> bảo vệ khỏi orphan tool_use bug",
+        "async-native, không cần thread pool",
+      ]}
+      cons={[
+        "Parallel race condition nếu tool cùng sửa file — không enforce ordering",
+        "Unbounded concurrency khi nhiều tool call → overload disk/API",
+        "Ẩn side effect khó debug khi tool đan xen",
+        "Không có mechanism cancel/timeout toàn turn như opencode Effect.Stream",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://docs.python.org/3/library/asyncio-task.html">Python docs — asyncio.gather &amp; return_exceptions</a>',
+        '<a href="https://www.ibm.com/think/topics/react-agent">IBM — What is a ReAct Agent</a>',
+        '<a href="https://martinfowler.com/articles/harness-engineering.html">Martin Fowler — Harness engineering</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t2"}
+    title={"T2. Auto-compact before-turn + reactive on overflow"}
+    tid={"A.2"}
+    location={"<strong>File:</strong> <code>src/openharness/engine/query.py</code> · <strong>Lines:</strong> 519–562 · <strong>Service:</strong> <code>services/compact/</code> · <strong>Hằng:</strong> <code>AUTOCOMPACT_BUFFER_TOKENS = 13_000</code>"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="com"># 1. Before-turn
+      auto-compact</span> <span class="kw">async for</span> event, usage <span
+      class="kw">in</span> _stream_compaction(trigger=<span
+      class="str">"auto"</span>): <span class="kw">yield</span> event, usage
+      messages, was_compacted = last_compaction_result <span class="com"># 2.
+      Reactive compact khi provider trả prompt-too-long</span> <span
+      class="kw">except</span> Exception <span class="kw">as</span> exc:
+      error_msg = str(exc) <span class="kw">if not</span>
+      reactive_compact_attempted <span class="kw">and</span>
+      _is_prompt_too_long_error(exc): reactive_compact_attempted = <span
+      class="kw">True</span> <span class="kw">yield</span>
+      StatusEvent(message=REACTIVE_COMPACT_STATUS_MESSAGE), <span
+      class="kw">None</span> <span class="kw">async for</span> event, usage
+      <span class="kw">in</span> _stream_compaction(trigger=<span
+      class="str">"reactive"</span>, force=<span class="kw">True</span>): <span
+      class="kw">yield</span> event, usage messages, was_compacted =
+      last_compaction_result <span class="kw">if</span> was_compacted: <span
+      class="kw">continue</span> <span class="com"># retry turn với messages đã
+      compact</span> <span class="com"># 3. services/compact/microcompact.py —
+      cheap, fast first pass</span> <span class="com"># Drop stale
+      ToolResultBlock content (keep tool_use structure)</span> <span
+      class="com"># 4. services/compact/summary.py — LLM summarize khi
+      microcompact không đủ</span> <span class="com"># 5.
+      services/compact/ptl_retry.py — truncate_head_for_ptl_retry()</span> <span
+      class="com"># last-chance cắt head khi reactive vẫn
+      overflow</span></code></pre> <div class="why"><strong>Tại sao quan
+      trọng:</strong> Ba tầng compaction phòng vệ: (1) <em>proactive</em> —
+      trước mỗi turn ước lượng token, nếu gần giới hạn chạy microcompact xóa
+      tool_result cũ; (2) <em>reactive</em> — khi API trả 400 "prompt too long",
+      retry với LLM summary; (3) <em>last-resort</em> — nếu vẫn overflow,
+      truncate head messages. Điều này giúp session dài (hàng trăm turn) không
+      bị die. Buffer 13k tokens là "đệm" cho response + tool output của turn
+      kế.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">class</span> <span class="type">CompactionOrchestrator</span>:
+      <span class="kw">async def</span> <span
+      class="fn">maybe_compact</span>(self, messages, trigger=<span
+      class="str">"auto"</span>): estimate =
+      self.token_counter.estimate(messages) <span class="kw">if</span> estimate
+      &lt; self.threshold: <span class="kw">return</span> messages, <span
+      class="kw">False</span> <span class="com"># Phase 1: cheap — drop old
+      ToolResultBlock content only</span> pruned = self.microcompact(messages)
+      <span class="kw">if</span> self.token_counter.estimate(pruned) &lt;
+      self.threshold: <span class="kw">return</span> pruned, <span
+      class="kw">True</span> <span class="com"># Phase 2: expensive — LLM
+      summarize</span> summary = <span class="kw">await</span>
+      self.llm_summarize(pruned) <span class="kw">return</span> [system_prompt,
+      summary] + pruned[-<span class="num">5</span>:], <span
+      class="kw">True</span> <span class="kw">async def</span> <span
+      class="fn">run_turn</span>(self, messages): messages, _ = <span
+      class="kw">await</span> self.maybe_compact(messages) <span
+      class="kw">try</span>: <span class="kw">return await</span>
+      llm.call(messages) <span class="kw">except</span> PromptTooLongError:
+      messages, _ = <span class="kw">await</span> self.maybe_compact(messages,
+      trigger=<span class="str">"reactive"</span>) <span class="kw">return
+      await</span> llm.call(messages) <span class="com"># one
+      retry</span></code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Ba-tầng graceful — rẻ trước, đắt sau",
+        "Session dài tự survive mà không cần user can thiệp",
+        "Reactive fallback nếu token estimate sai",
+        "Event progress để UI show đang compact",
+      ]}
+      cons={[
+        "LLM summary rủi ro mất thông tin quan trọng",
+        "13k buffer arbitrary — không tune theo model",
+        "Truncate head có thể xóa system hint / CLAUDE.md context",
+        "Khi reactive fail lần 2, agent die (không có fallback thứ 3)",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://learn.microsoft.com/en-us/agent-framework/agents/conversations/compaction">Microsoft — Context compaction</a>',
+        '<a href="https://blog.jetbrains.com/research/2025/12/efficient-context-management/">JetBrains Research — Smarter Context Management</a>',
+        '<a href="https://www.morphllm.com/compaction-vs-summarization">Morph — Compaction vs Summarization</a>',
+        '<a href="https://arxiv.org/html/2511.22729v1">arXiv — Solving Context Window Overflow</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t3"}
+    title={"T3. Streaming events union + CompactProgressEvent 9-phase"}
+    tid={"A.3"}
+    location={"<strong>File:</strong> <code>src/openharness/engine/stream_events.py</code> · <strong>Lines:</strong> toàn bộ file"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">from dataclasses
+      import</span> dataclass <span class="kw">from typing import</span>
+      Literal, Union <span class="com"># 7 event types yielded from
+      run_query()</span> <span class="fn">@dataclass(frozen=True)</span> <span
+      class="kw">class</span> <span class="type">AssistantTextDelta</span>:
+      text: str <span class="fn">@dataclass(frozen=True)</span> <span
+      class="kw">class</span> <span class="type">AssistantTurnComplete</span>:
+      message: ConversationMessage; usage: UsageSnapshot <span
+      class="fn">@dataclass(frozen=True)</span> <span class="kw">class</span>
+      <span class="type">ToolExecutionStarted</span>: tool_name: str;
+      tool_input: dict <span class="fn">@dataclass(frozen=True)</span> <span
+      class="kw">class</span> <span class="type">ToolExecutionCompleted</span>:
+      tool_name: str; output: object; is_error: bool <span
+      class="fn">@dataclass(frozen=True)</span> <span class="kw">class</span>
+      <span class="type">StatusEvent</span>: message: str <span
+      class="fn">@dataclass(frozen=True)</span> <span class="kw">class</span>
+      <span class="type">ErrorEvent</span>: message: str <span
+      class="fn">@dataclass(frozen=True)</span> <span class="kw">class</span>
+      <span class="type">CompactProgressEvent</span>: phase: Literal[ <span
+      class="str">"hooks_start"</span>, <span
+      class="str">"context_collapse_start"</span>, <span
+      class="str">"context_collapse_end"</span>, <span
+      class="str">"session_memory_start"</span>, <span
+      class="str">"session_memory_end"</span>, <span
+      class="str">"compact_start"</span>, <span
+      class="str">"compact_retry"</span>, <span
+      class="str">"compact_end"</span>, <span
+      class="str">"compact_failed"</span>, ] message: str StreamEvent = Union[
+      AssistantTextDelta, AssistantTurnComplete, ToolExecutionStarted,
+      ToolExecutionCompleted, StatusEvent, ErrorEvent, CompactProgressEvent,
+      ]</code></pre> <div class="why"><strong>Tại sao quan trọng:</strong> Thay
+      vì union mơ hồ <code>dict[str, Any]</code>, OpenHarness dùng <em>tagged
+      union</em> với <code>@dataclass(frozen=True)</code>. UI bên Rich/Textual
+      pattern-match bằng <code>isinstance()</code> cho từng event type — mypy
+      strict đảm bảo không bỏ sót case. Event đặc biệt nhất là
+      <code>CompactProgressEvent</code> với 9 phase: UI hiện progress bar chi
+      tiết (đang collapse context → đang save memory → đang summarize →
+      done/fail) thay vì chỉ "compacting...". Mức độ observability này trong bản
+      port Python rất hiếm.</div> <h4>Code example (generic)</h4>
+      <pre><code><span class="kw">from typing import</span> Union, Literal <span
+      class="kw">from dataclasses import</span> dataclass <span
+      class="fn">@dataclass(frozen=True)</span> <span class="kw">class</span>
+      <span class="type">TextDelta</span>: text: str <span
+      class="fn">@dataclass(frozen=True)</span> <span class="kw">class</span>
+      <span class="type">ToolStart</span>: tool: str; input: dict <span
+      class="fn">@dataclass(frozen=True)</span> <span class="kw">class</span>
+      <span class="type">ToolEnd</span>: tool: str; output: str; error: bool
+      Event = Union[TextDelta, ToolStart, ToolEnd] <span class="kw">async
+      def</span> <span class="fn">render_events</span>(gen): <span
+      class="kw">async for</span> ev <span class="kw">in</span> gen: match ev:
+      <span class="kw">case</span> TextDelta(text): console.print(text,
+      end=<span class="str">""</span>) <span class="kw">case</span>
+      ToolStart(tool, _): ui.mark_tool(tool, <span class="str">"running"</span>)
+      <span class="kw">case</span> ToolEnd(tool, _, error): ui.mark_tool(tool,
+      <span class="str">"error"</span> <span class="kw">if</span> error <span
+      class="kw">else</span> <span class="str">"done"</span>)</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Type-safe: mypy strict bắt bỏ sót case",
+        "UI logic tách rời khỏi engine",
+        "CompactProgressEvent 9-phase → UX chi tiết lúc compact",
+        "Dễ serialize sang JSON cho remote UI",
+      ]}
+      cons={[
+        "Thêm event type cần cập nhật nhiều chỗ (engine + UI + tests)",
+        'Frozen dataclass immutable → không "accumulate" được (phải tạo object mới mỗi delta)',
+        "Không có ID liên kết parent-child event (tool_start ↔ tool_end phải match bằng tool_name)",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://docs.python.org/3/library/dataclasses.html">Python docs — dataclasses (frozen)</a>',
+        '<a href="https://docs.pydantic.dev/latest/">Pydantic — discriminated unions</a>',
+        '<a href="https://opentelemetry.io/blog/2025/ai-agent-observability/">OpenTelemetry — AI Agent Observability (2025)</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t4"}
+    title={"T4. Pre/Post tool hook interception"}
+    tid={"A.4"}
+    location={"<strong>File:</strong> <code>src/openharness/engine/query.py</code> · <strong>Hàm:</strong> <code>_execute_tool_call()</code> · <strong>Lines:</strong> 654–720"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">async def</span>
+      <span class="fn">_execute_tool_call</span>( context: QueryContext,
+      tool_name: str, tool_use_id: str, tool_input: dict[str, object], ) -&gt;
+      ToolResultBlock: <span class="com"># ---- PRE_TOOL_USE hook ----</span>
+      <span class="kw">if</span> context.hook_executor <span class="kw">is not
+      None</span>: pre_hooks = <span class="kw">await</span>
+      context.hook_executor.execute( HookEvent.PRE_TOOL_USE, {<span
+      class="str">"tool_name"</span>: tool_name, <span
+      class="str">"tool_input"</span>: tool_input, <span
+      class="str">"event"</span>: HookEvent.PRE_TOOL_USE.value}, ) <span
+      class="kw">if</span> pre_hooks.blocked: <span class="kw">return</span>
+      ToolResultBlock( tool_use_id=tool_use_id, content=pre_hooks.reason <span
+      class="kw">or</span> <span class="fn">f</span><span
+      class="str">"pre_tool_use hook blocked {tool_name}"</span>, is_error=<span
+      class="kw">True</span>, ) <span class="com"># ---- Actual tool execution
+      ----</span> result = <span class="kw">await</span>
+      context.tool_registry.execute(tool_name, tool_input, ...) <span
+      class="com"># ---- POST_TOOL_USE hook (observation only, cannot block)
+      ----</span> <span class="kw">if</span> context.hook_executor <span
+      class="kw">is not None</span>: <span class="kw">await</span>
+      context.hook_executor.execute( HookEvent.POST_TOOL_USE, {<span
+      class="str">"tool_name"</span>: tool_name, <span
+      class="str">"tool_input"</span>: tool_input, <span
+      class="str">"tool_result"</span>: result.content, <span
+      class="str">"is_error"</span>: result.is_error}, ) <span
+      class="kw">return</span> result</code></pre> <div class="why"><strong>Tại
+      sao quan trọng:</strong> Hook cho phép user/plugin inject policy
+      <em>ngoài</em> permission system — ví dụ: chặn <code>git push</code> sau
+      6pm, log bash vào SIEM, validate Edit pattern. PRE hook có thể
+      <em>blocked=True</em> → short-circuit thành ToolResultBlock error (LLM
+      thấy như tool fail bình thường, tự điều chỉnh). POST hook chỉ observe —
+      không thể undo execution đã xong. Thiết kế này giống Claude Code hooks
+      (tham chiếu <code>code.claude.com/docs/en/hooks</code>).</div> <h4>Code
+      example (generic)</h4> <pre><code><span class="kw">class</span> <span
+      class="type">HookExecutor</span>: <span class="kw">async def</span> <span
+      class="fn">execute</span>(self, event: HookEvent, payload: dict) -&gt;
+      HookResult: blocked = <span class="kw">False</span>; reason = <span
+      class="kw">None</span> <span class="kw">for</span> hook <span
+      class="kw">in</span> self.hooks.get(event, []): res = <span
+      class="kw">await</span> hook.run(payload) <span class="kw">if</span>
+      res.blocked: blocked = <span class="kw">True</span>; reason = res.reason;
+      <span class="kw">break</span> <span class="kw">return</span>
+      HookResult(blocked=blocked, reason=reason) <span class="com"># Usage
+      inside tool execution</span> <span class="kw">async def</span> <span
+      class="fn">run_tool</span>(name, args): pre = <span
+      class="kw">await</span> hooks.execute(HookEvent.PRE_TOOL_USE, {<span
+      class="str">"tool_name"</span>: name, <span class="str">"args"</span>:
+      args}) <span class="kw">if</span> pre.blocked: <span
+      class="kw">return</span> {<span class="str">"error"</span>: pre.reason
+      <span class="kw">or</span> <span class="str">"blocked by hook"</span>}
+      result = <span class="kw">await</span> tool.execute(args) <span
+      class="kw">await</span> hooks.execute(HookEvent.POST_TOOL_USE, {<span
+      class="str">"tool_name"</span>: name, <span class="str">"result"</span>:
+      result}) <span class="kw">return</span> result</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Policy tách khỏi permission system — hai layer bảo vệ",
+        "PRE có thể block; POST có thể audit/log",
+        "Hot-reload hooks qua <code>HookReloader</code> watch mtime",
+        "Shell/Prompt/HTTP/Agent types — đa dạng",
+      ]}
+      cons={[
+        "Hook chạy sync trong hot path → latency mỗi tool",
+        "Prompt hook gọi LLM → cost + race với main loop",
+        'Không có "retry with modified args" — chỉ block or pass',
+        "Hook mis-config có thể làm agent stuck mà khó debug",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://code.claude.com/docs/en/hooks">Claude Code — Hooks documentation</a>',
+        '<a href="https://dev.to/klement_gunndu/lock-down-claude-code-with-5-permission-patterns-4gcn">DEV — 5 Permission Patterns in Claude Code</a>',
+        '<a href="https://www.anthropic.com/engineering/claude-code-auto-mode">Anthropic — Claude Code auto mode</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t5"}
+    title={"T5. Tool metadata carryover across turns"}
+    tid={"A.5"}
+    location={"<strong>File:</strong> <code>src/openharness/engine/query.py</code> · <strong>Lines:</strong> 146–250 · <strong>Struct:</strong> <code>QueryContext</code> (deque-based tracking)"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">from collections
+      import</span> deque <span class="fn">@dataclass</span> <span
+      class="kw">class</span> <span class="type">QueryContext</span>: <span
+      class="com"># Recent work tracking — persisted across compaction
+      rounds</span> recent_goals: deque[str] = field(default_factory=<span
+      class="kw">lambda</span>: deque(maxlen=<span class="num">5</span>))
+      recent_reads: deque[str] = field(default_factory=<span
+      class="kw">lambda</span>: deque(maxlen=<span class="num">6</span>))
+      active_artifacts: deque[str] = field(default_factory=<span
+      class="kw">lambda</span>: deque(maxlen=<span class="num">8</span>))
+      async_agent_tasks: deque[AgentTaskRef] = field(default_factory=<span
+      class="kw">lambda</span>: deque(maxlen=<span class="num">12</span>))
+      work_log: deque[WorkLogEntry] = field(default_factory=<span
+      class="kw">lambda</span>: deque(maxlen=<span class="num">10</span>)) ...
+      <span class="com"># Updated on every ToolExecutionCompleted:</span> <span
+      class="kw">def</span> <span class="fn">record_tool_execution</span>(ctx:
+      QueryContext, tc: ToolUseBlock, result: ToolResultBlock): <span
+      class="kw">if</span> tc.name == <span class="str">"Read"</span>: path =
+      tc.input.get(<span class="str">"file_path"</span>) <span
+      class="kw">if</span> path: ctx.recent_reads.append(path) <span
+      class="kw">elif</span> tc.name == <span class="str">"Write"</span> <span
+      class="kw">or</span> tc.name == <span class="str">"Edit"</span>: path =
+      tc.input.get(<span class="str">"file_path"</span>) <span
+      class="kw">if</span> path: ctx.active_artifacts.append(path) <span
+      class="kw">elif</span> tc.name == <span class="str">"Task"</span>:
+      ctx.async_agent_tasks.append(AgentTaskRef(id=..., status=<span
+      class="str">"pending"</span>))
+      ctx.work_log.append(WorkLogEntry(tool=tc.name, ts=time.time(), ok=<span
+      class="kw">not</span> result.is_error)) <span class="com"># When compact
+      happens, these deques get injected into summary:</span> <span
+      class="com"># "Recently read: path1, path2, ..."</span> <span
+      class="com"># "Active artifacts: draft.md, report.html, ..."</span> <span
+      class="com"># "Pending subagents: task-abc (status=running),
+      ..."</span></code></pre> <div class="why"><strong>Tại sao quan
+      trọng:</strong> Khi compact xảy ra, messages cũ bị drop nhưng
+      <strong>deque carryover sống sót</strong>. Lần call tiếp theo, summary
+      prompt chèn: "Agent đã đọc X, đang sửa Y, có task Z đang chạy". Điều này
+      giải quyết nỗi đau lớn nhất của compaction: agent "mất trí nhớ" về công
+      việc đang làm. Mỗi deque có <code>maxlen</code> nhỏ (5, 6, 8, 10, 12) →
+      bounded, không tự overflow.</div> <h4>Code example (generic)</h4>
+      <pre><code><span class="kw">from collections import</span> deque <span
+      class="kw">class</span> <span class="type">AgentMemory</span>: <span
+      class="kw">def</span> <span class="fn">__init__</span>(self):
+      self.recent_goals = deque(maxlen=<span class="num">5</span>)
+      self.recent_reads = deque(maxlen=<span class="num">6</span>)
+      self.pending_tasks = deque(maxlen=<span class="num">12</span>) <span
+      class="kw">def</span> <span class="fn">on_tool</span>(self, name, args,
+      ok): <span class="kw">if</span> name == <span class="str">"Read"</span>:
+      self.recent_reads.append(args[<span class="str">"file_path"</span>]) <span
+      class="kw">elif</span> name == <span class="str">"Task"</span>:
+      self.pending_tasks.append(args[<span class="str">"id"</span>]) <span
+      class="kw">def</span> <span class="fn">summary_block</span>(self) -&gt;
+      str: <span class="kw">return</span> ( <span class="fn">f</span><span
+      class="str">"Recent files read: {', '.join(self.recent_reads)}\n"</span>
+      <span class="fn">f</span><span class="str">"Active artifacts: {',
+      '.join(self.active_artifacts)}\n"</span> <span class="fn">f</span><span
+      class="str">"Pending subagents: {', '.join(self.pending_tasks)}"</span> )
+      <span class="com"># Inject into compact summary prompt:</span> compact_msg
+      = f<span class="str">"Previous conversation summary:
+      ...\n\n{memory.summary_block()}"</span></code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        'Giảm "amnesia" sau compact',
+        "Bounded deque → predictable memory",
+        "Metadata structural → easy to render in UI",
+        "Có thể inject vào system prompt mỗi turn (không chỉ khi compact)",
+      ]}
+      cons={[
+        "Tracking logic hard-code theo từng tool — cần update khi thêm tool",
+        'Không có "why" chỉ có "what" — agent biết đọc X nhưng không nhớ lý do',
+        "Deque maxlen arbitrary — session rất dài vẫn overflow",
+        "Có thể trùng lặp info với LLM-generated summary",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://factory.ai/news/compressing-context">Factory.ai — Compressing Context</a>',
+        '<a href="https://medium.com/data-science-collective/the-complete-guide-to-ai-agent-memory-files-claude-md-agents-md-and-beyond-49ea0df5c5a9">Complete Guide to AI Agent Memory Files</a>',
+        '<a href="https://github.com/mem0ai/mem0">Mem0 — Personalized memory</a>',
+      ]}
+    />
+  </Technique>
+</Section>

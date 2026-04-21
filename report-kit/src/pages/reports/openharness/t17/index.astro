@@ -1,0 +1,419 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T17 — MCP stdio + HTTP transport với dynamic adapter | OpenHarness"
+  description="Phân tích sâu McpClientManager của OpenHarness: STDIO vs Streamable HTTP transport, AsyncExitStack lifecycle, dynamic Pydantic model từ JSON schema, và flat-namespace tool aggregation."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#transport', label: 'STDIO vs HTTP' },
+        { href: '#dynamic-model', label: 'Dynamic Pydantic model' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/openharness/" label="← openharness report" />
+      <Hero
+        title="T17 — MCP stdio + HTTP transport với dynamic adapter"
+        subtitle="OpenHarness triển khai McpClientManager để aggregate tools từ N MCP servers — mỗi server có thể dùng STDIO (local process) hoặc Streamable HTTP (remote service), với AsyncExitStack đảm bảo lifecycle độc lập."
+        meta={[
+          { label: 'Nhóm', value: 'D — Extension Ecosystem' },
+          { label: 'File', value: '<code>mcp/client.py:29-95</code>' },
+          { label: 'Transport', value: 'STDIO · Streamable HTTP' },
+          { label: 'ID', value: 'D.4' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          MCP (Model Context Protocol) là giao thức chuẩn để agent kết nối với external tool servers.
+          OpenHarness implement <code>McpClientManager</code> — một lớp aggregate quản lý kết nối
+          đồng thời tới nhiều MCP servers, expose toàn bộ tools vào một flat namespace duy nhất
+          mà agent có thể gọi.
+        </p>
+        <WhyImportant>
+          <strong>Punchline kiến trúc:</strong>
+          <em>"Use STDIO for local tools where latency matters; use Streamable HTTP for remote services
+          where stateful connections become a bottleneck."</em>
+          Việc hỗ trợ cả 2 transport trong cùng 1 manager cho phép mix local + remote MCP servers
+          trong 1 agent session mà không cần code khác nhau.
+        </WhyImportant>
+        <Callout type="unique">
+          <strong>Dynamic Pydantic models:</strong> OpenHarness không cần biết schema của tool tại compile time.
+          <code>build_dynamic_pydantic_model()</code> tạo Pydantic model từ JSON schema nhận được runtime từ
+          MCP server — <em>"runtime type validation without compile-time schema knowledge"</em>.
+        </Callout>
+        <Callout type="info">
+          <strong>AsyncExitStack per manager:</strong> Tất cả sessions được manage bởi 1
+          <code>AsyncExitStack</code> duy nhất. Khi <code>stop()</code> được gọi, stack tự cleanup
+          mọi session theo đúng thứ tự — không cần manually track từng session.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code: mcp/client.py" themeTag="Anatomy">
+        <Subheading level="h3" text="McpClientManager: connect + aggregate" />
+        <CodeBlock caption="mcp/client.py:29-95 — McpClientManager core">
+          <Fragment is:raw>{`
+class McpClientManager:
+    def __init__(self, configs: list[McpServerConfig]):
+        self._configs = configs
+        self._sessions: dict[str, ClientSession] = {}
+        self._exit_stack = AsyncExitStack()
+
+    async def start(self) -> None:
+        for config in self._configs:
+            session = await self._connect(config)
+            self._sessions[config.name] = session
+
+    async def _connect(self, config: McpServerConfig) -> ClientSession:
+        if config.transport == "stdio":
+            transport = await self._exit_stack.enter_async_context(
+                stdio_client(StdioServerParameters(
+                    command=config.command,
+                    args=config.args,
+                    env=config.env,
+                ))
+            )
+        else:  # streamable_http
+            transport = await self._exit_stack.enter_async_context(
+                streamablehttp_client(config.url, headers=config.headers)
+            )
+        session = await self._exit_stack.enter_async_context(
+            ClientSession(*transport)
+        )
+        await session.initialize()
+        return session
+
+    async def list_all_tools(self) -> list[Tool]:
+        """Aggregate tools from all servers into flat namespace."""
+        tools = []
+        for name, session in self._sessions.items():
+            result = await session.list_tools()
+            for tool in result.tools:
+                tools.append(ToolWithServer(
+                    tool=tool,
+                    server_name=name,
+                ))
+        return tools
+
+    async def stop(self) -> None:
+        await self._exit_stack.aclose()
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          Key design decisions: <code>_sessions</code> dùng dict keyed by server name — collision
+          khi 2 server cùng tên sẽ overwrite. <code>list_all_tools()</code> wrap mỗi tool với
+          <code>ToolWithServer</code> để routing biết gọi session nào khi tool được invoke.
+        </p>
+
+        <Subheading level="h3" text="Dynamic Pydantic model từ JSON schema" />
+        <CodeBlock caption="mcp/client.py — build_dynamic_pydantic_model()">
+          <Fragment is:raw>{`
+def build_dynamic_pydantic_model(tool_schema: dict) -> type[BaseModel]:
+    """Create runtime Pydantic model from MCP tool JSON schema."""
+    fields = {}
+    properties = tool_schema.get("properties", {})
+    required = set(tool_schema.get("required", []))
+
+    for field_name, field_schema in properties.items():
+        python_type = _json_type_to_python(field_schema)
+        if field_name in required:
+            fields[field_name] = (python_type, ...)
+        else:
+            default = field_schema.get("default", None)
+            fields[field_name] = (python_type | None, default)
+
+    return create_model("DynamicToolInput", **fields)
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          <code>create_model()</code> là Pydantic v2 API để tạo model class động.
+          Ellipsis (<code>...</code>) đánh dấu required field — không có default.
+          Optional fields dùng <code>python_type | None</code> union type.
+        </p>
+      </Section>
+
+      <Section id="transport" title="STDIO vs Streamable HTTP" themeTag="Pattern">
+        <Diagram>{`
+STDIO Transport (local processes):
+  Agent process
+    │
+    ├─ subprocess: python -m my_tool_server
+    │       │
+    │       └─ stdin/stdout pipes (low latency, same machine)
+    │
+    └─ stdio_client(StdioServerParameters(
+           command="python",
+           args=["-m", "my_tool_server"],
+           env={"API_KEY": "..."}
+       ))
+
+Key: Process lifecycle tied to agent process.
+     Server crash → AsyncExitStack cleanup fires.
+     No network overhead — ideal cho file ops, local git.
+
+─────────────────────────────────────────────────────────
+
+Streamable HTTP Transport (remote services):
+  Agent process
+    │
+    └─ streamablehttp_client(url, headers={"Authorization": "Bearer ..."})
+           │
+           └─ HTTP/SSE connection tới remote MCP server
+                  │
+                  └─ Server có thể ở cloud, có auth, có rate limiting
+
+Key: Connection stateful nhưng recoverable.
+     Auth token expire → session dies, cần reconnect.
+     Ideal cho cloud tools: web search, DB queries.
+`}</Diagram>
+        <Callout type="info">
+          <strong>Khi nào dùng STDIO:</strong> file system tools, local git operations,
+          database clients trên cùng máy, bất kỳ tool nào cần low latency hoặc
+          access trực tiếp vào local environment variables/files.
+        </Callout>
+        <Callout type="warn">
+          <strong>Khi nào dùng Streamable HTTP:</strong> web APIs, cloud services,
+          tools cần auth token riêng, tools chạy trên infrastructure khác.
+          Lưu ý: token expiry mid-session là failure mode cần xử lý (xem #failure).
+        </Callout>
+      </Section>
+
+      <Section id="dynamic-model" title="Dynamic Pydantic model pattern" themeTag="Pattern">
+        <p>
+          MCP servers expose tool schemas dưới dạng JSON Schema tại runtime. Agent không thể
+          biết schema này tại compile time vì tools được define phía server. OpenHarness giải quyết
+          bằng cách tạo Pydantic model động:
+        </p>
+        <Diagram>{`
+MCP Server → list_tools() response:
+  {
+    "name": "search_docs",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {"type": "string"},
+        "limit": {"type": "integer", "default": 10}
+      },
+      "required": ["query"]
+    }
+  }
+        │
+        ▼
+build_dynamic_pydantic_model(inputSchema)
+        │
+        ▼
+  DynamicToolInput(BaseModel):
+    query: str          # required (no default)
+    limit: int | None   # optional, default=10
+        │
+        ▼
+Agent gọi tool → validate args → dispatch tới server
+`}</Diagram>
+        <p>
+          Pattern này implement đúng tinh thần
+          <em>"runtime type validation without compile-time schema knowledge"</em> —
+          agent vẫn có full type safety khi gọi tool, chỉ là schema được biết
+          muộn hơn (tại connection time thay vì compile time).
+        </p>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T17 (McpClientManager) tương tác với:
+
+  T16 (Plugin manifest)
+    └─ Plugin's mcp_file → danh sách McpServerConfig
+       McpClientManager nhận configs này và thêm vào pool servers
+       Plugin bundle = skills + hooks + mcp_file như 1 unit
+
+  T14 (Skills)
+    └─ Skills có thể invoke MCP tools thông qua agent
+       SKILL.md body có thể reference tên MCP tool
+       Agent routing tìm tool trong flat namespace của T17
+
+  T20 (6-layer permission evaluation)
+    └─ MCP tool calls đi qua permission check trước khi dispatch
+       T17 chỉ thực thi call sau khi T20 approve
+       Tool name + args được inspect tại layer evaluation
+
+  T21 (Async approval flow)
+    └─ Remote MCP tool call có thể trigger interactive approval
+       Ví dụ: "Gọi API xoá record?" → cần human confirm
+       T17 await approval response trước khi forward tới server
+`}</Diagram>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: STDIO process crash" />
+        <CodeBlock caption="Kịch bản: MCP server subprocess crash giữa session">
+          <Fragment is:raw>{`
+# Kịch bản: my_tool_server process crash (OOM, exception, etc.)
+# AsyncExitStack cleanup fires cho server đó
+# Các session khác trong stack KHÔNG bị ảnh hưởng
+
+# "AsyncExitStack ensures each MCP server's lifecycle is managed
+#  independently — one server crash doesn't cascade"
+
+# Vấn đề: _sessions["my_tool"] vẫn tồn tại trong dict
+# → Agent cố gọi tool → session đã dead → RuntimeError
+# Fix cần: health check hoặc reconnect logic trong _connect()
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: JSON schema có unsupported types" />
+        <CodeBlock caption="build_dynamic_pydantic_model() gặp type lạ">
+          <Fragment is:raw>{`
+# MCP server trả về schema với type "anyOf" hoặc nested $ref
+tool_schema = {
+    "properties": {
+        "config": {
+            "anyOf": [{"type": "string"}, {"type": "object"}]  # union type
+        }
+    }
+}
+
+# _json_type_to_python() không handle "anyOf"
+# → KeyError hoặc fallback về Any
+# → Tool vẫn xuất hiện nhưng với type Any (mất validation)
+# → Hoặc Exception → tool invisible (không được add vào list_all_tools)
+
+# Fix: handle "anyOf" → Union type, "$ref" → resolve schema
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 3: Streamable HTTP auth token expire" />
+        <p>
+          Khi agent session kéo dài và auth token của remote MCP server hết hạn,
+          <code>ClientSession</code> chết mid-conversation. Không có reconnect logic tự động
+          trong implementation hiện tại — agent sẽ nhận exception khi cố gọi tool.
+          Fix đúng: implement token refresh callback trong <code>streamablehttp_client</code>
+          hoặc catch exception và re-call <code>_connect()</code>.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'STDIO', 'HTTP transport', 'Tool aggregation', 'Dynamic schema']}
+          rows={[
+            [
+              '<strong>OpenHarness</strong>',
+              'Có',
+              'Streamable HTTP',
+              'Flat namespace (tất cả servers)',
+              'Runtime Pydantic',
+            ],
+            [
+              'Claude Code',
+              'Có',
+              'Streamable HTTP',
+              'Per-server namespace',
+              'Static',
+            ],
+            [
+              'LangChain',
+              'Có',
+              'SSE (legacy)',
+              'Manual aggregation',
+              'Manual',
+            ],
+            [
+              'LangGraph',
+              'Có',
+              'SSE/HTTP',
+              'Manual aggregation',
+              'TypedDict',
+            ],
+          ]}
+        />
+        <p>
+          OpenHarness là harness duy nhất trong bảng này combine flat-namespace aggregation
+          với dynamic Pydantic model. Flat namespace đơn giản hóa agent routing (không cần
+          biết tool thuộc server nào) nhưng tạo risk collision khi 2 server expose cùng tên tool.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>Minimal McpClientManager — connect, aggregate, cleanup:</p>
+        <CodeBlock caption="minimal_mcp_manager.py — đủ dùng cho production">
+          <Fragment is:raw>{`
+import asyncio
+from contextlib import AsyncExitStack
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+async def minimal_mcp_manager(configs):
+    """Minimal McpClientManager — connects, aggregates, cleans up."""
+    stack = AsyncExitStack()
+    sessions = {}
+
+    async with stack:
+        for cfg in configs:
+            params = StdioServerParameters(
+                command=cfg["command"],
+                args=cfg.get("args", []),
+            )
+            transport = await stack.enter_async_context(stdio_client(params))
+            session = await stack.enter_async_context(ClientSession(*transport))
+            await session.initialize()
+            sessions[cfg["name"]] = session
+
+        # Aggregate tools from all servers
+        all_tools = []
+        for name, session in sessions.items():
+            result = await session.list_tools()
+            for tool in result.tools:
+                all_tools.append({"server": name, "tool": tool})
+
+        return all_tools
+        # AsyncExitStack cleans up all sessions on exit
+
+# Usage:
+# configs = [
+#     {"name": "git", "command": "python", "args": ["-m", "git_mcp"]},
+#     {"name": "search", "command": "npx", "args": ["@search/mcp-server"]},
+# ]
+# tools = asyncio.run(minimal_mcp_manager(configs))
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://modelcontextprotocol.io/specification/2025-03-26/basic/transports">MCP Specification — Transports (2025-03-26)</a> · Định nghĩa chính thức STDIO và Streamable HTTP transport',
+            '<a href="https://modelcontextprotocol.io/docs/concepts/transports">MCP Docs — Transports overview</a> · Khi nào dùng STDIO vs HTTP, lifecycle model',
+            '<a href="https://docs.pydantic.dev/latest/concepts/postponed_annotations/#create_model">Pydantic v2 — create_model() API</a> · Dynamic model creation từ field definitions',
+            '<a href="https://docs.python.org/3/library/contextlib.html#contextlib.AsyncExitStack">Python docs — AsyncExitStack</a> · Lifecycle management pattern cho async context managers',
+            '<a href="https://muneebsa.medium.com/claude-code-extensions-explained-skills-mcp-hooks-subagents-agent-teams-plugins-9294907e84ff">Medium — Claude Code Extensions Explained</a> · MCP integration trong agent harness context',
+            '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Harness Engineering for Coding Agents</a> · Tại sao MCP aggregation là thành phần cốt lõi của harness',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

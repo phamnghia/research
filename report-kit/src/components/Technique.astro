@@ -1,0 +1,23 @@
+---
+// Technique.astro — card một kỹ thuật harness
+// Slots:
+//   - default: body (code, giải thích, proscons, refs)
+// Props:
+//   id (anchor), title, tid (badge như "A.1"), location (HTML string, có thể chứa <code>)
+interface Props {
+  id: string;
+  title: string;
+  tid?: string;
+  location?: string;
+}
+
+const { id, title, tid, location } = Astro.props;
+---
+<div class="technique" id={id}>
+  <div class="technique-head">
+    <h3>{title}</h3>
+    {tid && <span class="tid">{tid}</span>}
+  </div>
+  {location && <div class="location" set:html={location} />}
+  <slot />
+</div>

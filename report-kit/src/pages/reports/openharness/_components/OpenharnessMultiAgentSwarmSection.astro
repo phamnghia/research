@@ -1,0 +1,553 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import Callout from "../../../../components/Callout.astro";
+---
+
+<Section
+  id={"section-f"}
+  title={"F. Multi-Agent Swarm"}
+  themeTag={"5 kỹ thuật · UNIQUE vs opencode"}
+>
+  <Callout type="unique">
+    <Fragment is:raw>
+      Đây là mảng OpenHarness <strong>khác biệt hoàn toàn</strong> với opencode.
+      opencode chỉ có <em>sub-agent Task tool</em> chạy in-session (spawn child
+      "khả năng" trong cùng process). OpenHarness có <em>agent
+      organization</em>: mỗi agent = 1 subprocess có inbox riêng, worktree
+      riêng, permission sync qua file. Scale từ "agent pair" (leader + worker)
+      đến "agent team" (coordinator + N workers).
+    </Fragment>
+  </Callout>
+  <Technique
+    id={"t22"}
+    title={"T22. Subprocess-based subagent spawning"}
+    tid={"F.1"}
+    location={"<strong>File:</strong> <code>src/openharness/swarm/subprocess_backend.py</code> · <strong>Lines:</strong> 28–103 · <strong>Manager:</strong> <code>BackgroundTaskManager</code> · <strong>API:</strong> <code>create_agent_task()</code>"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      asyncio, os, sys <span class="kw">from</span> pathlib <span
+      class="kw">import</span> Path <span class="kw">class</span> <span
+      class="type">SubprocessAgent</span>: <span class="kw">def</span> <span
+      class="fn">__init__</span>(self, agent_id: str, definition:
+      AgentDefinition, team_dir: Path, worktree: Path | <span
+      class="kw">None</span>): self.agent_id = agent_id self.definition =
+      definition self.team_dir = team_dir <span class="com"># shared team
+      state</span> self.worktree = worktree <span class="com"># git worktree for
+      isolation</span> self.proc: asyncio.subprocess.Process | <span
+      class="kw">None</span> = <span class="kw">None</span> <span
+      class="kw">async def</span> <span class="fn">spawn</span>(self): <span
+      class="com"># Build CLI args — forward relevant flags from parent</span>
+      cmd = [ sys.executable, <span class="str">"-m"</span>, <span
+      class="str">"openharness"</span>, <span class="str">"run-agent"</span>,
+      <span class="str">"--agent-id"</span>, self.agent_id, <span
+      class="str">"--team-dir"</span>, <span
+      class="kw">str</span>(self.team_dir), <span class="str">"--model"</span>,
+      self.definition.model, <span class="str">"--effort"</span>,
+      self.definition.effort, <span class="str">"--permission-mode"</span>,
+      self.definition.permission_mode.value, ] <span class="kw">if</span>
+      self.definition.max_turns <span class="kw">is not None</span>: cmd +=
+      [<span class="str">"--max-turns"</span>, <span
+      class="kw">str</span>(self.definition.max_turns)] cwd = <span
+      class="kw">str</span>(self.worktree) <span class="kw">if</span>
+      self.worktree <span class="kw">else None</span> <span class="com">#
+      Inherit env but add OPENHARNESS_SWARM_AGENT_ID</span> env =
+      os.environ.copy() env[<span
+      class="str">"OPENHARNESS_SWARM_AGENT_ID"</span>] = self.agent_id env[<span
+      class="str">"OPENHARNESS_SWARM_TEAM_DIR"</span>] = <span
+      class="kw">str</span>(self.team_dir) self.proc = <span
+      class="kw">await</span> asyncio.create_subprocess_exec( *cmd, cwd=cwd,
+      env=env, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+      stderr=asyncio.subprocess.PIPE, ) log.info(<span class="str">"spawned
+      subagent pid=%s id=%s"</span>, self.proc.pid, self.agent_id) <span
+      class="kw">class</span> <span class="type">BackgroundTaskManager</span>:
+      <span class="str">"""Registry of running subagents; support
+      list/kill/wait."""</span> <span class="kw">def</span> <span
+      class="fn">__init__</span>(self): self._agents: dict[str, SubprocessAgent]
+      = {} <span class="kw">async def</span> <span
+      class="fn">create_agent_task</span>(self, definition: AgentDefinition, *,
+      worktree=<span class="kw">None</span>) -&gt; str: agent_id = <span
+      class="fn">f</span><span class="str">"task-{uuid.uuid4().hex[:8]}"</span>
+      agent = SubprocessAgent(agent_id, definition, self.team_dir, worktree)
+      <span class="kw">await</span> agent.spawn() self._agents[agent_id] = agent
+      <span class="kw">return</span> agent_id</code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> Mỗi agent là một
+      <em>process độc lập</em> → (1) <strong>fault isolation</strong>: một agent
+      crash không lôi theo cả team; (2) <strong>parallel CPU</strong>: Python
+      GIL không block vì multi-process; (3) <strong>permission scope</strong>:
+      mỗi process có mode riêng, model riêng, turn limit riêng; (4)
+      <strong>worktree isolation</strong>: có thể chạy <code>cwd=</code>worktree
+      khác, sửa branch khác. Đánh đổi: overhead spawn (~500ms-1s), không share
+      memory → cần IPC (xem T23 mailbox).</div> <h4>Code example (generic)</h4>
+      <pre><code><span class="kw">import</span> asyncio, os, sys, uuid <span
+      class="kw">class</span> <span class="type">SubprocessAgent</span>: <span
+      class="kw">def</span> <span class="fn">__init__</span>(self, agent_id,
+      model, team_dir, cwd=<span class="kw">None</span>): self.agent_id =
+      agent_id; self.model = model self.team_dir = team_dir; self.cwd = cwd
+      <span class="kw">async def</span> <span class="fn">spawn</span>(self): cmd
+      = [sys.executable, <span class="str">"-m"</span>, <span
+      class="str">"myagent"</span>, <span class="str">"worker"</span>, <span
+      class="str">"--id"</span>, self.agent_id, <span
+      class="str">"--model"</span>, self.model, <span
+      class="str">"--team-dir"</span>, self.team_dir] env = {**os.environ, <span
+      class="str">"AGENT_ID"</span>: self.agent_id} self.proc = <span
+      class="kw">await</span> asyncio.create_subprocess_exec( *cmd,
+      cwd=self.cwd, env=env, stdin=asyncio.subprocess.DEVNULL,
+      stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, ) <span
+      class="kw">return</span> self.proc.pid</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Fault isolation — 1 agent die không kéo theo team",
+        "Parallel CPU thực sự (không bị GIL)",
+        "Permission/model scope per-agent",
+        "Clean shutdown qua subprocess signaling",
+      ]}
+      cons={[
+        "Spawn overhead 500ms-1s mỗi agent",
+        "Không share in-memory cache → I/O overhead",
+        "IPC qua filesystem → latency",
+        "Debugging khó hơn single-process (stderr tách)",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic — Multi-agent research system</a>',
+        '<a href="https://google.github.io/adk-docs/agents/multi-agents/">Google ADK — Multi-agent systems</a>',
+        '<a href="https://github.com/openai/swarm">OpenAI Swarm — Research framework</a>',
+        '<a href="https://dev.to/aws/build-multi-agent-systems-using-the-agents-as-tools-pattern-jce">DEV — Agents as Tools Pattern (comparison)</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t23"}
+    title={"T23. File-based async mailbox với atomic writes"}
+    tid={"F.2"}
+    location={"<strong>File:</strong> <code>src/openharness/swarm/mailbox.py</code> · <strong>Lines:</strong> 1–95 · <strong>Layout:</strong> <code>~/.openharness/teams/&lt;team&gt;/agents/&lt;id&gt;/inbox/</code>"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      json, os, uuid, time <span class="kw">from</span> pathlib <span
+      class="kw">import</span> Path <span class="kw">class</span> <span
+      class="type">Mailbox</span>: <span class="str">"""File-based inbox for a
+      single agent. Layout: inbox/ &lt;sort_key&gt;-&lt;uuid&gt;.tmp ← being
+      written (atomic) &lt;sort_key&gt;-&lt;uuid&gt;.json ← delivered
+      (consumable) """</span> <span class="kw">def</span> <span
+      class="fn">__init__</span>(self, agent_dir: Path): self.inbox = agent_dir
+      / <span class="str">"inbox"</span> self.inbox.mkdir(parents=<span
+      class="kw">True</span>, exist_ok=<span class="kw">True</span>) <span
+      class="kw">def</span> <span class="fn">send</span>(self, envelope: dict):
+      <span class="str">"""Atomic write: write .tmp then rename to
+      .json."""</span> sort_key = <span class="fn">f</span><span
+      class="str">"{time.time_ns():020d}"</span> <span class="com"># nanosecond
+      for ordering</span> msg_id = uuid.uuid4().hex[:<span class="num">8</span>]
+      base = self.inbox / <span class="fn">f</span><span
+      class="str">"{sort_key}-{msg_id}"</span> tmp = base.with_suffix(<span
+      class="str">".tmp"</span>) final = base.with_suffix(<span
+      class="str">".json"</span>) tmp.write_text(json.dumps(envelope,
+      ensure_ascii=<span class="kw">False</span>)) os.rename(tmp, final) <span
+      class="com"># atomic on POSIX</span> <span class="kw">async def</span>
+      <span class="fn">poll</span>(self, interval=<span
+      class="num">0.25</span>): <span class="str">"""Yield envelopes as they
+      arrive. Caller deletes after consume."""</span> <span class="kw">while
+      True</span>: <span class="kw">for</span> msg_path <span
+      class="kw">in</span> sorted(self.inbox.glob(<span
+      class="str">"*.json"</span>)): <span class="kw">try</span>: envelope =
+      json.loads(msg_path.read_text()) <span class="kw">except</span>
+      json.JSONDecodeError: <span class="kw">continue</span> <span class="com">#
+      partial write? skip</span> <span class="kw">yield</span> envelope
+      msg_path.unlink(missing_ok=<span class="kw">True</span>) <span
+      class="kw">await</span> asyncio.sleep(interval) <span class="com">#
+      Envelope types (message kinds)</span> <span class="com"># {"kind":
+      "user_message", "text": "..."}</span> <span class="com"># {"kind":
+      "permission_request", "request_id": "...", "tool": "...", "args":
+      {...}}</span> <span class="com"># {"kind": "shutdown", "reason":
+      "..."}</span> <span class="com"># {"kind": "tool_result", "tool": "...",
+      "result": ..., "is_error": bool}</span></code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> Mailbox filesystem =
+      zero-infra IPC. Atomic write (<code>.tmp</code> → rename) đảm bảo
+      <em>reader không bao giờ thấy partial file</em> — rename là atomic trên
+      POSIX. Sort-key nano-second đảm bảo thứ tự delivery. Poll loop đơn giản
+      (không cần fsnotify) — latency 250ms acceptable. Envelope kind enum →
+      message-kind routing trong consumer. Không cần Redis/RabbitMQ/Kafka →
+      scale đến ~10 agent thoải mái.</div> <h4>Code example (generic)</h4>
+      <pre><code><span class="kw">import</span> os, json, uuid, time, asyncio
+      <span class="kw">from</span> pathlib <span class="kw">import</span> Path
+      <span class="kw">class</span> <span class="type">FileMailbox</span>: <span
+      class="kw">def</span> <span class="fn">__init__</span>(self, inbox: Path):
+      self.inbox = inbox; inbox.mkdir(parents=<span class="kw">True</span>,
+      exist_ok=<span class="kw">True</span>) <span class="kw">def</span> <span
+      class="fn">send</span>(self, msg: dict): sort_key = <span
+      class="fn">f</span><span class="str">"{time.time_ns():020d}"</span> mid =
+      uuid.uuid4().hex[:<span class="num">8</span>] tmp = self.inbox / <span
+      class="fn">f</span><span class="str">"{sort_key}-{mid}.tmp"</span> final =
+      self.inbox / <span class="fn">f</span><span
+      class="str">"{sort_key}-{mid}.json"</span> tmp.write_text(json.dumps(msg))
+      os.rename(tmp, final) <span class="com"># atomic</span> <span
+      class="kw">async def</span> <span class="fn">receive</span>(self): <span
+      class="kw">while True</span>: <span class="kw">for</span> p <span
+      class="kw">in</span> sorted(self.inbox.glob(<span
+      class="str">"*.json"</span>)): msg = json.loads(p.read_text()) p.unlink()
+      <span class="kw">yield</span> msg <span class="kw">await</span>
+      asyncio.sleep(<span class="num">0.25</span>)</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Zero-infra (không cần message broker)",
+        "Atomic rename — no partial reads",
+        "FIFO order qua nanosecond sort key",
+        "Inspectable bằng filesystem tools (ls, cat)",
+      ]}
+      cons={[
+        "Poll interval 250ms → latency floor",
+        "Filesystem bottleneck khi nhiều agent",
+        "Không persistence across machine (no remote)",
+        "Cần cleanup stale message nếu reader crash",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://lwn.net/Articles/820462/">LWN — File-based IPC patterns</a>',
+        '<a href="https://www.enterpriseintegrationpatterns.com/patterns/messaging/">Enterprise Integration Patterns — Messaging Mailbox</a>',
+        '<a href="https://redis.io/glossary/message-queue/">Redis — Message queue patterns (comparison)</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t24"}
+    title={"T24. Dual-channel permission sync protocol"}
+    tid={"F.3"}
+    location={"<strong>File:</strong> <code>src/openharness/swarm/permission_sync.py</code> · <strong>Channels:</strong> file (<code>pending/</code> + <code>resolved/</code>) + mailbox"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      json, time <span class="kw">from</span> pathlib <span
+      class="kw">import</span> Path <span class="kw">class</span> <span
+      class="type">PermissionSync</span>: <span class="str">"""Worker writes
+      pending request; Leader resolves by writing resolution."""</span> <span
+      class="kw">def</span> <span class="fn">__init__</span>(self, team_dir:
+      Path, agent_id: str): self.pending_dir = team_dir / <span
+      class="str">"permissions"</span> / <span class="str">"pending"</span>
+      self.resolved_dir = team_dir / <span class="str">"permissions"</span> /
+      <span class="str">"resolved"</span> self.pending_dir.mkdir(parents=<span
+      class="kw">True</span>, exist_ok=<span class="kw">True</span>)
+      self.resolved_dir.mkdir(parents=<span class="kw">True</span>,
+      exist_ok=<span class="kw">True</span>) self.agent_id = agent_id <span
+      class="kw">async def</span> <span class="fn">worker_request</span>(self,
+      tool: str, tool_input: dict, *, timeout=<span class="num">300</span>):
+      <span class="str">"""Called by worker: write pending request; wait for
+      resolution file."""</span> request_id = uuid.uuid4().hex <span
+      class="com"># Fast-path: read-only tools auto-approved without leader
+      involvement</span> <span class="kw">if</span>
+      _is_read_only_heuristic(tool, tool_input): <span class="kw">return</span>
+      PermissionResolution(approved=<span class="kw">True</span>, reason=<span
+      class="str">"read-only"</span>) pending_file = self.pending_dir / <span
+      class="fn">f</span><span class="str">"{request_id}.json"</span>
+      resolved_file = self.resolved_dir / <span class="fn">f</span><span
+      class="str">"{request_id}.json"</span>
+      pending_file.write_text(json.dumps({ <span
+      class="str">"request_id"</span>: request_id, <span
+      class="str">"agent_id"</span>: self.agent_id, <span
+      class="str">"tool"</span>: tool, <span class="str">"tool_input"</span>:
+      tool_input, <span class="str">"ts"</span>: time.time(), })) <span
+      class="com"># Also send notification via mailbox for low-latency
+      wake-up</span> <span class="kw">await</span>
+      self._notify_leader_via_mailbox(request_id) <span class="com"># Poll for
+      resolution</span> deadline = time.time() + timeout <span
+      class="kw">while</span> time.time() &lt; deadline: <span
+      class="kw">if</span> resolved_file.exists(): data =
+      json.loads(resolved_file.read_text()) pending_file.unlink(missing_ok=<span
+      class="kw">True</span>) resolved_file.unlink(missing_ok=<span
+      class="kw">True</span>) <span class="kw">return</span>
+      PermissionResolution(**data) <span class="kw">await</span>
+      asyncio.sleep(<span class="num">0.25</span>) <span
+      class="kw">return</span> PermissionResolution(approved=<span
+      class="kw">False</span>, reason=<span class="str">"timeout"</span>) <span
+      class="kw">def</span> <span class="fn">leader_resolve</span>(self,
+      request_id: str, approved: bool, *, reason=<span class="str">""</span>):
+      <span class="str">"""Called by leader (main UI) when user
+      approves/denies."""</span> resolved_file = self.resolved_dir / <span
+      class="fn">f</span><span class="str">"{request_id}.json"</span> tmp =
+      resolved_file.with_suffix(<span class="str">".tmp"</span>)
+      tmp.write_text(json.dumps({<span class="str">"approved"</span>: approved,
+      <span class="str">"reason"</span>: reason})) os.rename(tmp,
+      resolved_file)</code></pre> <div class="why"><strong>Tại sao quan
+      trọng:</strong> Worker (subprocess) cần approval từ leader (main CLI)
+      nhưng không share memory. Dual-channel: (1) <strong>file</strong> —
+      persistent, auditable, survive crash; (2) <strong>mailbox</strong> —
+      low-latency wake-up signal (không cần poll sát). Read-only heuristic
+      auto-approve → giảm tải leader. Pattern đồng bộ: worker <em>blocks</em>
+      trên poll, leader <em>non-blocking</em> write resolution → clean
+      separation.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">import</span> os, json, time, asyncio, uuid <span
+      class="kw">class</span> <span class="type">PermSync</span>: <span
+      class="kw">def</span> <span class="fn">__init__</span>(self, pending_dir,
+      resolved_dir): self.p = pending_dir; self.r = resolved_dir <span
+      class="kw">async def</span> <span class="fn">worker_wait</span>(self,
+      tool, args, timeout=<span class="num">300</span>): rid = uuid.uuid4().hex
+      (self.p / <span class="fn">f</span><span
+      class="str">"{rid}.json"</span>).write_text(json.dumps({<span
+      class="str">"tool"</span>: tool, <span class="str">"args"</span>: args}))
+      resolved = self.r / <span class="fn">f</span><span
+      class="str">"{rid}.json"</span> deadline = time.time() + timeout <span
+      class="kw">while</span> time.time() &lt; deadline: <span
+      class="kw">if</span> resolved.exists(): data =
+      json.loads(resolved.read_text()) resolved.unlink() <span
+      class="kw">return</span> data[<span class="str">"approved"</span>] <span
+      class="kw">await</span> asyncio.sleep(<span class="num">0.25</span>) <span
+      class="kw">return False</span> <span class="kw">def</span> <span
+      class="fn">leader_resolve</span>(self, rid, approved): tmp = self.r /
+      <span class="fn">f</span><span class="str">"{rid}.tmp"</span>
+      tmp.write_text(json.dumps({<span class="str">"approved"</span>:
+      approved})) os.rename(tmp, self.r / <span class="fn">f</span><span
+      class="str">"{rid}.json"</span>)</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Persistent + auditable — crash-resilient",
+        "Dual channel (file persist + mailbox latency)",
+        "Read-only heuristic giảm leader load",
+        "Atomic rename ở leader side",
+      ]}
+      cons={[
+        "Poll loop 250ms floor — không real-time",
+        "Stale pending file nếu worker crash",
+        'Heuristic "read-only" có thể miss case',
+        "Không có request priority / queue",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.enterpriseintegrationpatterns.com/patterns/messaging/">EIP — Request-Reply pattern</a>',
+        '<a href="https://lwn.net/Articles/820462/">LWN — Filesystem as IPC</a>',
+        '<a href="https://docs.python.org/3/library/os.html#os.rename">Python os.rename — atomic semantics</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t25"}
+    title={"T25. Git worktree isolation per agent"}
+    tid={"F.4"}
+    location={"<strong>File:</strong> <code>src/openharness/swarm/worktree.py</code> · <strong>Lines:</strong> 1–80 · <strong>Slug:</strong> max 64 chars, <code>[a-zA-Z0-9._-]</code>"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      asyncio, re <span class="kw">from</span> pathlib <span
+      class="kw">import</span> Path SLUG_RE = re.compile(<span
+      class="fn">r</span><span class="str">"^[a-zA-Z0-9._-]+$"</span>)
+      MAX_SLUG_LEN = <span class="num">64</span> <span class="kw">def</span>
+      <span class="fn">validate_slug</span>(slug: str) -&gt; str: <span
+      class="str">"""Reject .., absolute paths, and control chars."""</span>
+      <span class="kw">if not</span> slug <span class="kw">or</span> len(slug)
+      &gt; MAX_SLUG_LEN: <span class="kw">raise</span> ValueError(<span
+      class="fn">f</span><span class="str">"slug length must be
+      1..{MAX_SLUG_LEN}"</span>) <span class="kw">if not</span>
+      SLUG_RE.match(slug): <span class="kw">raise</span> ValueError(<span
+      class="fn">f</span><span class="str">"invalid slug: {slug!r}"</span>)
+      <span class="kw">if</span> <span class="str">".."</span> <span
+      class="kw">in</span> slug <span class="kw">or</span>
+      slug.startswith((<span class="str">"/"</span>, <span
+      class="str">"-"</span>)): <span class="kw">raise</span> ValueError(<span
+      class="fn">f</span><span class="str">"slug must not traverse or start with
+      /-: {slug!r}"</span>) <span class="kw">return</span> slug <span
+      class="kw">async def</span> <span
+      class="fn">create_worktree</span>(repo_root: Path, slug: str, *, base_ref:
+      str = <span class="str">"HEAD"</span>) -&gt; Path: <span
+      class="str">"""Create a shallow worktree for subagent isolation."""</span>
+      slug = validate_slug(slug) worktree_path = repo_root / <span
+      class="str">".openharness"</span> / <span class="str">"worktrees"</span> /
+      slug branch = <span class="fn">f</span><span
+      class="str">"openharness/swarm/{slug}"</span> <span class="com"># Reuse
+      existing worktree if slug already exists</span> <span class="kw">if</span>
+      worktree_path.exists(): <span class="kw">return</span> worktree_path
+      worktree_path.parent.mkdir(parents=<span class="kw">True</span>,
+      exist_ok=<span class="kw">True</span>) cmd = [<span
+      class="str">"git"</span>, <span class="str">"-C"</span>, <span
+      class="kw">str</span>(repo_root), <span class="str">"worktree"</span>,
+      <span class="str">"add"</span>, <span class="str">"--quiet"</span>, <span
+      class="str">"-b"</span>, branch, <span
+      class="kw">str</span>(worktree_path), base_ref] proc = <span
+      class="kw">await</span> asyncio.create_subprocess_exec( *cmd,
+      stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, ) _,
+      stderr = <span class="kw">await</span> proc.communicate() <span
+      class="kw">if</span> proc.returncode != <span class="num">0</span>: <span
+      class="kw">raise</span> RuntimeError(<span class="fn">f</span><span
+      class="str">"git worktree add failed: {stderr.decode()}"</span>) <span
+      class="kw">return</span> worktree_path <span class="kw">async def</span>
+      <span class="fn">remove_worktree</span>(repo_root: Path, slug: str, *,
+      force: bool = <span class="kw">False</span>): <span class="str">"""Remove
+      a worktree; orphan branch left as cleanup-later."""</span> slug =
+      validate_slug(slug) worktree_path = repo_root / <span
+      class="str">".openharness"</span> / <span class="str">"worktrees"</span> /
+      slug args = [<span class="str">"git"</span>, <span
+      class="str">"-C"</span>, <span class="kw">str</span>(repo_root), <span
+      class="str">"worktree"</span>, <span class="str">"remove"</span>, <span
+      class="kw">str</span>(worktree_path)] <span class="kw">if</span> force:
+      args.append(<span class="str">"--force"</span>) ...</code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> Hai agent cùng sửa file
+      repo → merge conflict / race condition. Worktree cho phép mỗi agent chạy
+      trên <strong>branch riêng, checkout riêng</strong>, vẫn share
+      <code>.git</code> object database (hiệu quả disk). Sau khi agent xong,
+      merge branch về main. Slug validation ngăn path traversal
+      (<code>..</code>) — quan trọng khi slug đến từ LLM input. Branch prefix
+      <code>openharness/swarm/</code> để dễ cleanup và không va chạm với dev
+      branch.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">import</span> asyncio, re <span class="kw">from</span> pathlib
+      <span class="kw">import</span> Path SLUG_RE = re.compile(<span
+      class="fn">r</span><span class="str">"^[a-zA-Z0-9._-]{1,64}$"</span>)
+      <span class="kw">async def</span> <span
+      class="fn">make_worktree</span>(repo: Path, slug: str, base=<span
+      class="str">"HEAD"</span>) -&gt; Path: <span class="kw">if not</span>
+      SLUG_RE.match(slug) <span class="kw">or</span> <span
+      class="str">".."</span> <span class="kw">in</span> slug: <span
+      class="kw">raise</span> ValueError(<span class="str">"bad slug"</span>) wt
+      = repo / <span class="str">".worktrees"</span> / slug <span
+      class="kw">if</span> wt.exists(): <span class="kw">return</span> wt branch
+      = <span class="fn">f</span><span class="str">"agent/{slug}"</span> proc =
+      <span class="kw">await</span> asyncio.create_subprocess_exec( <span
+      class="str">"git"</span>, <span class="str">"-C"</span>, <span
+      class="kw">str</span>(repo), <span class="str">"worktree"</span>, <span
+      class="str">"add"</span>, <span class="str">"-b"</span>, branch, <span
+      class="kw">str</span>(wt), base, stdout=asyncio.subprocess.DEVNULL,
+      stderr=asyncio.subprocess.PIPE, ) _, err = <span class="kw">await</span>
+      proc.communicate() <span class="kw">if</span> proc.returncode != <span
+      class="num">0</span>: <span class="kw">raise</span>
+      RuntimeError(err.decode()) <span class="kw">return</span> wt</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "True file isolation — mỗi agent có riêng checkout",
+        "Share .git objects → disk efficient",
+        "Mỗi branch experiment độc lập",
+        "Slug validation tránh path traversal",
+      ]}
+      cons={[
+        "Git worktree overhead ~100-500ms mỗi spawn",
+        "Cleanup thủ công khi agent crash → orphan branch",
+        "Không work với submodule + LFS clean",
+        "Disk space nhân lên khi working tree lớn",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://git-scm.com/docs/git-worktree">git-worktree docs</a>',
+        '<a href="https://www.atlassian.com/git/tutorials/git-worktree">Atlassian — Git Worktree Beginner Guide</a>',
+        '<a href="https://shopify.engineering/maintaining-multiple-worktrees-with-git">Shopify Engineering — Multiple worktrees</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t26"}
+    title={"T26. YAML agent definitions + coordinator dispatch"}
+    tid={"F.5"}
+    location={"<strong>File:</strong> <code>src/openharness/coordinator/agent_definitions.py</code> · <strong>Load:</strong> <code>.openharness/agents/*.yaml</code>"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">import</span>
+      yaml <span class="kw">from</span> pathlib <span class="kw">import</span>
+      Path <span class="kw">from</span> pydantic <span class="kw">import</span>
+      BaseModel <span class="kw">from</span> openharness.permissions.modes <span
+      class="kw">import</span> PermissionMode <span class="kw">class</span>
+      <span class="type">AgentDefinition</span>(BaseModel): name: str
+      description: str system_prompt: str tools: list[str] = [] <span
+      class="com"># allowlist (empty = all)</span> disallowed_tools: list[str] =
+      [] <span class="com"># denylist</span> model: str = <span
+      class="str">"claude-sonnet-4-6"</span> effort: str = <span
+      class="str">"medium"</span> <span class="com"># low/medium/high</span>
+      permission_mode: PermissionMode = PermissionMode.DEFAULT max_turns: int |
+      <span class="kw">None</span> = <span class="num">50</span> color: str =
+      <span class="str">"cyan"</span> isolation: str = <span
+      class="str">"none"</span> <span class="com"># "none" | "worktree"</span>
+      <span class="kw">def</span> <span
+      class="fn">load_agent_definitions</span>(cwd: Path) -&gt; dict[str,
+      AgentDefinition]: defs = {} <span class="kw">for</span> location <span
+      class="kw">in</span> [ cwd / <span class="str">".openharness"</span> /
+      <span class="str">"agents"</span>, Path.home() / <span
+      class="str">".openharness"</span> / <span class="str">"agents"</span>, ]:
+      <span class="kw">if not</span> location.is_dir(): <span
+      class="kw">continue</span> <span class="kw">for</span> f <span
+      class="kw">in</span> sorted(location.glob(<span
+      class="str">"*.yaml"</span>)): data = yaml.safe_load(f.read_text()) <span
+      class="kw">for</span> entry <span class="kw">in</span> (data <span
+      class="kw">if</span> isinstance(data, list) <span class="kw">else</span>
+      [data]): defn = AgentDefinition(**entry) defs[defn.name] = defn <span
+      class="kw">return</span> defs <span class="com"># Example agent definition
+      YAML:</span> <span class="com"># name: doc-writer</span> <span
+      class="com"># description: Writes technical documentation</span> <span
+      class="com"># system_prompt: |</span> <span class="com"># You are a doc
+      writer. Focus on clarity, accuracy, and structure.</span> <span
+      class="com"># tools: [Read, Write, Grep, Glob]</span> <span class="com">#
+      permission_mode: plan # cannot mutate</span> <span class="com">#
+      max_turns: 30</span> <span class="com"># isolation: worktree # get own
+      worktree</span> <span class="kw">class</span> <span
+      class="type">Coordinator</span>: <span class="str">"""Central router:
+      decide which agent handles an incoming task."""</span> <span
+      class="kw">def</span> <span class="fn">__init__</span>(self, definitions:
+      dict[str, AgentDefinition]): self.definitions = definitions self.manager =
+      BackgroundTaskManager() <span class="kw">async def</span> <span
+      class="fn">dispatch</span>(self, task_description: str, preferred_agent:
+      str | <span class="kw">None</span> = <span class="kw">None</span>): defn =
+      self.definitions.get(preferred_agent) <span class="kw">or</span>
+      self._pick_agent(task_description) worktree = <span
+      class="kw">await</span> create_worktree(...) <span class="kw">if</span>
+      defn.isolation == <span class="str">"worktree"</span> <span
+      class="kw">else None</span> <span class="kw">return await</span>
+      self.manager.create_agent_task(defn, worktree=worktree)</code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> Declarative agent
+      definition → dễ version control, review, share. Coordinator là central
+      dispatcher: đọc task description, chọn agent phù hợp (hoặc
+      <code>preferred_agent</code> name hint), spawn với config tương ứng.
+      <code>isolation: worktree</code> kích hoạt T25 (git worktree). Permission
+      mode per-agent nghĩa một agent có thể <code>plan</code> (research only)
+      trong khi agent khác <code>full_auto</code> (background CI worker). Rất
+      giống pattern Claude Code subagents.</div> <h4>Code example (generic)</h4>
+      <pre><code><span class="kw">import</span> yaml <span
+      class="kw">from</span> pathlib <span class="kw">import</span> Path <span
+      class="kw">from</span> pydantic <span class="kw">import</span> BaseModel
+      <span class="kw">class</span> <span
+      class="type">AgentDef</span>(BaseModel): name: str; description: str;
+      system_prompt: str tools: list[str] = [] model: str = <span
+      class="str">"claude-sonnet-4-6"</span> max_turns: int = <span
+      class="num">50</span> isolation: str = <span class="str">"none"</span>
+      <span class="kw">def</span> <span class="fn">load_defs</span>(dir: Path)
+      -&gt; <span class="kw">dict</span>[str, AgentDef]: out = {} <span
+      class="kw">for</span> f <span class="kw">in</span> sorted(dir.glob(<span
+      class="str">"*.yaml"</span>)): d = yaml.safe_load(f.read_text()) <span
+      class="kw">for</span> entry <span class="kw">in</span> (d <span
+      class="kw">if</span> isinstance(d, list) <span class="kw">else</span>
+      [d]): defn = AgentDef(**entry) out[defn.name] = defn <span
+      class="kw">return</span> out <span class="kw">class</span> <span
+      class="type">Coordinator</span>: <span class="kw">async def</span> <span
+      class="fn">dispatch</span>(self, task: str, agent_name: str): defn =
+      self.defs[agent_name] wt = <span class="kw">await</span>
+      make_worktree(repo, agent_name) <span class="kw">if</span> defn.isolation
+      == <span class="str">"worktree"</span> <span class="kw">else None</span>
+      <span class="kw">return await</span> self.spawn(defn, wt,
+      task)</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Declarative — YAML git-friendly",
+        "Agents can be shared across team (commit to repo)",
+        "Per-agent tools + mode + model",
+        "Coordinator routing dễ extend",
+      ]}
+      cons={[
+        "Agent selection heuristic chưa rõ — có thể pick sai",
+        "YAML dễ lỗi indent, không có schema warning sớm",
+        "Không có version/compat cho definition",
+        "Agent chain (A → B → C) không first-class",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic — Multi-agent research system</a>',
+        '<a href="https://docs.langchain.com/oss/python/langchain/multi-agent">LangChain — Multi-agent docs</a>',
+        '<a href="https://google.github.io/adk-docs/agents/multi-agents/">Google ADK — Multi-agent systems</a>',
+      ]}
+    />
+  </Technique>
+</Section>

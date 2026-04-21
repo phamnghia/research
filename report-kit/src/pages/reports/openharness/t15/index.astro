@@ -1,0 +1,376 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T15 — Hook lifecycle system (6 events, 4 types, hot reload) | OpenHarness"
+  description="Phân tích sâu hook lifecycle system của OpenHarness: 6 events, 4 hook types (Command/Prompt/HTTP/Agent), HookReloader mtime-based hot reload, và so sánh với Claude Code hooks."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/openharness/" label="← openharness report" />
+      <Hero
+        title="T15 — Hook lifecycle system (6 events, 4 types, hot reload)"
+        subtitle="OpenHarness hook system cho phép inject logic tùy chỉnh vào 6 điểm trong session lifecycle — với 4 loại hook handler và hot reload không cần restart."
+        meta={[
+          { label: 'Nhóm', value: 'D — Extension Ecosystem' },
+          { label: 'File', value: '<code>hooks/events.py</code>, <code>hooks/executor.py</code>' },
+          { label: 'Events', value: '6 (SESSION_START · SESSION_END · PRE/POST_COMPACT · PRE/POST_TOOL_USE)' },
+          { label: 'ID', value: 'D.2' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          Hook system là cơ chế mở rộng nằm ở layer giữa — sau khi agent quyết định làm gì
+          nhưng trước/sau khi action thực sự xảy ra. OpenHarness định nghĩa 6 lifecycle events
+          và 4 loại hook handler, đủ để thực hiện từ auto-formatting đến blocking lệnh nguy hiểm.
+        </p>
+        <WhyImportant>
+          <strong>Punchline từ Claude Code hooks docs:</strong>
+          <em>"Start with auto-formatting on PostToolUse, dangerous command blocking on PreToolUse,
+          and desktop notifications on Stop."</em> Ba use-case này capture 80% lý do người dùng
+          cần hooks — và tất cả đều có trong 6 events của OpenHarness.
+        </WhyImportant>
+        <Callout type="unique">
+          <strong>Điểm khác biệt quan trọng:</strong>
+          <em>"PreToolUse is the only hook that can block actions."</em>
+          Đây là thiết kế có chủ đích — chỉ <Chip variant="red" label="PRE_TOOL_USE" /> mới có khả năng
+          interrupt execution flow. Tất cả hooks khác chỉ observe hoặc notify, không block.
+          OpenHarness giữ nguyên nguyên tắc này từ Claude Code: PostToolUse hooks không được phép
+          block workflow.
+        </Callout>
+        <Callout type="info">
+          <strong>Thực tế sử dụng:</strong>
+          <em>"80% of hooks use PreToolUse/PostToolUse; SessionStart is the next most useful."</em>
+          PRE/POST_COMPACT và SESSION_END phục vụ use-case niche hơn (audit trail, context summary).
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code: hooks/executor.py" themeTag="Anatomy">
+        <Subheading level="h3" text="HookExecutor — dispatch theo event + type" />
+        <p>
+          <code>HookExecutor</code> là entry point chính: nhận event và payload, lọc hooks phù hợp,
+          dispatch từng hook theo type, và dừng sớm nếu có block signal từ PRE_TOOL_USE.
+        </p>
+        <CodeBlock caption="hooks/executor.py — HookExecutor class">
+          <Fragment is:raw>
+class HookExecutor:
+    def __init__(self, hooks: list[Hook]):
+        self._hooks = hooks
+        self._reloader = HookReloader(hooks)
+
+    async def execute(
+        self, event: HookEvent, payload: dict
+    ) -> HookResult:
+        await self._reloader.reload_if_changed()
+        relevant = [h for h in self._hooks if event in h.events]
+        for hook in relevant:
+            result = await self._dispatch(hook, payload)
+            if result.blocked:           # only PRE_TOOL_USE can block
+                return result
+        return HookResult(blocked=False)
+
+    async def _dispatch(self, hook: Hook, payload: dict) -> HookResult:
+        match hook.type:
+            case HookType.COMMAND:
+                return await _run_command(hook, payload)
+            case HookType.PROMPT:
+                return await _run_prompt_hook(hook, payload)
+            case HookType.HTTP:
+                return await _run_http_hook(hook, payload)
+            case HookType.AGENT:
+                return await _run_agent_hook(hook, payload)
+</Fragment>
+        </CodeBlock>
+        <p>
+          Hooks chạy <strong>tuần tự theo thứ tự đăng ký</strong> —
+          <em>"Hooks run sequentially in registration order — first match wins for blocking decisions."</em>
+          Khi một hook trả về <code>blocked=True</code>, vòng lặp dừng ngay lập tức, các hooks
+          phía sau không được gọi.
+        </p>
+
+        <Subheading level="h3" text="HookReloader — hot reload bằng mtime" />
+        <CodeBlock caption="hooks/executor.py — HookReloader class">
+          <Fragment is:raw>
+class HookReloader:
+    def __init__(self, hooks_path: Path):
+        self._path = hooks_path
+        self._mtime: float | None = None
+
+    async def reload_if_changed(self) -> bool:
+        try:
+            mtime = self._path.stat().st_mtime
+        except FileNotFoundError:
+            return False
+        if mtime != self._mtime:
+            self._mtime = mtime
+            return True   # caller re-parses hooks file
+        return False
+</Fragment>
+        </CodeBlock>
+        <p>
+          Cơ chế đơn giản: so sánh <code>st_mtime</code> trước mỗi execute. Nếu file thay đổi,
+          caller re-parse hooks file và nạp lại config. Không cần file watcher daemon hay
+          inotify — chỉ cần stat call mỗi hook execution.
+        </p>
+
+        <Subheading level="h3" text="6 HookEvents — vị trí trong lifecycle" />
+        <Diagram>{`
+Session Lifecycle:
+
+  SESSION_START ──────────────────────────────────────────────┐
+  (agent khởi động, env vars available)                       │
+                                                              │
+  ┌─── PRE_TOOL_USE ◄─── tool call request                   │
+  │    [CÓ THỂ BLOCK — check allowlist, dangerous cmd]        │
+  │                                                           │
+  │         Agent executes tool                               │
+  │                                                           │
+  └─── POST_TOOL_USE ─── tool result                         │
+       [observe only — format, log, notify]                  │
+                                                              │
+  PRE_COMPACT ────────────────────────────────────────────────┤
+  (trước khi context được compacted/summarized)               │
+                                                              │
+  POST_COMPACT ───────────────────────────────────────────────┤
+  (sau compact — useful để log summary stats)                 │
+                                                              │
+  SESSION_END ────────────────────────────────────────────────┘
+  (cleanup, audit trail, final notification)
+`}</Diagram>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T15 (Hook system) tương tác với:
+
+  T14 (Skill system)
+    └─ POST_TOOL_USE hook fires sau khi skill tool được execute
+       Payload chứa tool_name, result, duration
+
+  T16 (Plugin manifest)
+    └─ Plugin đóng góp hooks_file qua manifest
+       load_plugins() → extract hooks_file path → feed vào HookExecutor
+
+  T18 (Permission mode)
+    └─ PRE_TOOL_USE hook có thể block TRƯỚC permission check
+       hoặc SAU — tùy vị trí đăng ký trong pipeline
+       Hook không bypass permission; chúng là layer bổ sung
+
+  T21 (Async approval)
+    └─ Approval response có thể trigger POST hooks
+       Ví dụ: approved tool call → POST_TOOL_USE với approved=True
+`}</Diagram>
+        <Callout type="info">
+          Plugin workflow điển hình: <strong>T16</strong> load plugin manifest
+          → extract <code>hooks_file</code> path → <strong>T15</strong> HookExecutor
+          nhận hook list → <strong>T18</strong> permission check có thể xảy ra
+          trước hoặc sau PRE_TOOL_USE hook tùy config.
+        </Callout>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: PostToolUse hook fails → blocks workflow" />
+        <CodeBlock caption="Vấn đề: hook exit code != 0 blocking workflow">
+          <Fragment is:raw>
+# BUG: PostToolUse hook formatter thoát với error code khi file bị lock
+# → HookExecutor nhận returncode != 0
+# → Workflow bị block mặc dù POST_TOOL_USE không được phép block
+
+# Claude Code docs fix:
+# "End commands with ; exit 0 for PostToolUse hooks
+#  so a hook failure doesn't block Claude's workflow unnecessarily"
+
+# BAD hook command:
+hooks:
+  - events: [POST_TOOL_USE]
+    command: "black {file} && isort {file}"  # fails if file locked
+
+# GOOD hook command:
+hooks:
+  - events: [POST_TOOL_USE]
+    command: "black {file} && isort {file}; exit 0"  # always exits 0
+</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: Hot reload race condition" />
+        <CodeBlock caption="Race condition khi editor lưu hooks file">
+          <Fragment is:raw>
+# Scenario: editor lưu hooks.yaml theo kiểu write-temp-then-rename
+# 1. HookReloader.reload_if_changed() → mtime thay đổi → True
+# 2. Caller bắt đầu re-parse hooks.yaml
+# 3. Editor chưa rename xong → hooks.yaml bị truncated
+# 4. json.loads / yaml.safe_load ném exception
+# 5. HookExecutor falls back về empty hook list
+#    → tất cả hooks bị disabled silently trong 1 execution
+
+# Mitigation: parse với try/except, giữ lại hooks cũ nếu parse fail
+try:
+    new_hooks = parse_hooks_file(path)
+    self._hooks = new_hooks
+except Exception as e:
+    logger.warning(f"Hot reload failed, keeping old hooks: {e}")
+    # _hooks unchanged — degrade gracefully
+</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 3: Prompt hook trong critical path → latency spike" />
+        <CodeBlock caption="Prompt hook (LLM-based) thêm latency mỗi tool call">
+          <Fragment is:raw>
+# Prompt hook = gọi LLM để evaluate hook condition
+# Nếu đặt vào PRE_TOOL_USE → mỗi tool call phải chờ LLM response
+
+hooks:
+  - events: [PRE_TOOL_USE]
+    type: PROMPT
+    prompt: "Is this tool call safe? {tool_name} with args {args}"
+    # → Adds 500ms-2s latency mỗi tool call
+    # → Nested: tool calls bên trong hook cũng trigger hooks
+
+# Pattern tốt hơn: dùng COMMAND hook với simple rule-based check
+# Reserve PROMPT hook cho PostToolUse audit (non-blocking, async)
+hooks:
+  - events: [PRE_TOOL_USE]
+    type: COMMAND
+    command: "check_tool_allowlist.sh {tool_name}; exit $?"
+  - events: [POST_TOOL_USE]
+    type: PROMPT
+    prompt: "Summarize what {tool_name} did: {result}"
+</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Hook events', 'Hook types', 'Hot reload', 'Block capability']}
+          rows={[
+            [
+              '<strong>OpenHarness</strong>',
+              '6 (SESSION_START/END · PRE/POST_COMPACT · PRE/POST_TOOL_USE)',
+              'Command / Prompt / HTTP / Agent',
+              'Yes — mtime polling',
+              'PRE_TOOL_USE only',
+            ],
+            [
+              'Claude Code',
+              '5 (PreToolUse · PostToolUse · Stop · SubagentStop · PreCompact)',
+              'Command only',
+              'No — requires restart',
+              'PreToolUse only',
+            ],
+            [
+              'Aider',
+              'None',
+              'N/A',
+              'N/A',
+              'N/A',
+            ],
+            [
+              'LangGraph',
+              'Before/After node',
+              'Python callable',
+              'Yes — dynamic graph',
+              'Yes — any node',
+            ],
+          ]}
+        />
+        <p>
+          OpenHarness mở rộng Claude Code hook model theo 2 chiều: thêm
+          <strong>HTTP và Agent hook types</strong> (ngoài Command), và thêm
+          <strong>hot reload</strong> — tính năng Claude Code chưa có (phải restart để reload hooks).
+          LangGraph linh hoạt hơn (block ở bất kỳ node nào) nhưng cần viết Python,
+          không dùng được shell script hay HTTP endpoint.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>Minimal hook executor với 6 events, Command type, và hot reload:</p>
+        <CodeBlock caption="hook_executor.py — minimal implementation">
+          <Fragment is:raw>
+import asyncio, subprocess, json
+from enum import Enum
+from dataclasses import dataclass
+from pathlib import Path
+
+class HookEvent(str, Enum):
+    SESSION_START = "SESSION_START"
+    SESSION_END = "SESSION_END"
+    PRE_COMPACT = "PRE_COMPACT"
+    POST_COMPACT = "POST_COMPACT"
+    PRE_TOOL_USE = "PRE_TOOL_USE"
+    POST_TOOL_USE = "POST_TOOL_USE"
+
+@dataclass
+class Hook:
+    events: list[HookEvent]
+    command: str  # shell command for Command type
+    can_block: bool = False  # only PRE_TOOL_USE hooks
+
+@dataclass
+class HookResult:
+    blocked: bool
+    reason: str = ""
+
+async def run_command_hook(hook: Hook, payload: dict) -> HookResult:
+    env_payload = json.dumps(payload)
+    proc = await asyncio.create_subprocess_shell(
+        hook.command,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await asyncio.wait_for(proc.communicate(env_payload.encode()), timeout=30)
+    if proc.returncode != 0 and hook.can_block:
+        return HookResult(blocked=True, reason=stdout.decode())
+    return HookResult(blocked=False)
+</Fragment>
+        </CodeBlock>
+        <Callout type="warn">
+          Nhớ set <code>can_block=True</code> chỉ cho hooks đăng ký với
+          <code>PRE_TOOL_USE</code>. PostToolUse hooks nên luôn trả về
+          <code>blocked=False</code> bất kể exit code — hoặc append <code>; exit 0</code>
+          vào command để đảm bảo.
+        </Callout>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://platform.claude.com/docs/en/agents-and-tools/claude-code/hooks">Anthropic — Claude Code Hooks docs</a> · Punchlines: PreToolUse blocking, ; exit 0 pattern, 80% usage stats, sequential execution order',
+            '<a href="https://muneebsa.medium.com/claude-code-extensions-explained-skills-mcp-hooks-subagents-agent-teams-plugins-9294907e84ff">Medium — Claude Code Extensions Explained</a> · Hook types, lifecycle events, start-with pattern',
+            '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Harness Engineering for Coding Agents</a> · Framing hooks trong harness engineering, blocking vs non-blocking',
+            '<a href="https://github.com/anthropics/anthropic-cookbook/tree/main/hooks">Anthropic Cookbook — Hooks examples</a> · Ví dụ thực tế: auto-format, dangerous command block, notification',
+            '<a href="https://langgraph-docs.readthedocs.io/en/latest/concepts/low_level.html">LangGraph docs — Before/After node hooks</a> · So sánh hook model với LangGraph node lifecycle',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

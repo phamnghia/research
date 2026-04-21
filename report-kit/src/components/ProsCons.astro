@@ -1,0 +1,32 @@
+---
+// ProsCons.astro — block hai cột ưu/nhược điểm
+// Usage: <ProsCons pros={["...", "..."]} cons={["...", "..."]} />
+// Strings có thể chứa HTML inline (code, link).
+interface Props {
+  pros: string[];
+  cons: string[];
+  prosTitle?: string;
+  consTitle?: string;
+}
+
+const {
+  pros,
+  cons,
+  prosTitle = 'Ưu điểm',
+  consTitle = 'Nhược điểm',
+} = Astro.props;
+---
+<div class="proscons">
+  <div class="pros">
+    <h5>{prosTitle}</h5>
+    <ul>
+      {pros.map((item) => <li set:html={item} />)}
+    </ul>
+  </div>
+  <div class="cons">
+    <h5>{consTitle}</h5>
+    <ul>
+      {cons.map((item) => <li set:html={item} />)}
+    </ul>
+  </div>
+</div>

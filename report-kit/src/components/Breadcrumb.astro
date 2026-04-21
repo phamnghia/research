@@ -1,0 +1,10 @@
+---
+// Breadcrumb.astro — link quay lại index báo cáo
+interface Props {
+  href?: string;
+  label?: string;
+}
+
+const { href = '/', label = 'Tất cả báo cáo' } = Astro.props;
+---
+<a href={href} class="breadcrumb">{label}</a>

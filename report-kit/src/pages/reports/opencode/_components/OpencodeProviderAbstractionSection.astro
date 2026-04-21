@@ -1,0 +1,192 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import CodeBlock from "../../../../components/CodeBlock.astro";
+import WhyImportant from "../../../../components/WhyImportant.astro";
+import DeepDiveLink from "../../../../components/DeepDiveLink.astro";
+
+const __code_OpencodeProviderAbstractionSection_1 = `        // Mỗi provider = 1 dynamic import lazy const BUNDLED_PROVIDERS:
+        Record&lt;string, () =&gt; Promise&lt;Loader&gt;&gt; = { anthropic: ()
+        =&gt; import("./loaders/anthropic").then((m) =&gt; m.default), openai:
+        () =&gt; import("./loaders/openai").then((m) =&gt; m.default), google:
+        () =&gt; import("./loaders/google").then((m) =&gt; m.default), bedrock:
+        () =&gt; import("./loaders/bedrock").then((m) =&gt; m.default), mistral:
+        () =&gt; import("./loaders/mistral").then((m) =&gt; m.default), groq: ()
+        =&gt; import("./loaders/groq").then((m) =&gt; m.default), // ... 15+
+        more } export async function loadProvider(id: string):
+        Promise&lt;Loader&gt; { const loader = BUNDLED_PROVIDERS[id] if
+        (!loader) throw new UnknownProviderError(id) return await loader() //
+        import chỉ khi user thật sự dùng }
+      `;
+const __code_OpencodeProviderAbstractionSection_2 = `        const LOADERS = { anthropic: () =&gt; import("@anthropic-ai/sdk"),
+        openai: () =&gt; import("openai"), google: () =&gt;
+        import("@google/generative-ai"), } as const async function
+        getClient(provider: keyof typeof LOADERS) { const mod = await
+        LOADERS[provider]() return mod.default }
+      `;
+const __code_OpencodeProviderAbstractionSection_3 = `        // Anthropic: tool_use phải tách khỏi text content function
+        anthropicTransform(msgs: Message[]): AnthropicMessage[] { return
+        msgs.flatMap((m) =&gt; { if (m.role !== "assistant") return [m as
+        AnthropicMessage] const toolUses = m.content.filter((c) =&gt; c.type ===
+        "tool_use") const nonTool = m.content.filter((c) =&gt; c.type !==
+        "tool_use") // Split nếu có cả hai if (toolUses.length &amp;&amp;
+        nonTool.length) { return [ { role: "assistant", content: nonTool }, {
+        role: "assistant", content: toolUses }, ] } return [m as
+        AnthropicMessage] }) } // Mistral: toolCallId max 9 chars, alphanumeric
+        function mistralTransform(msgs: Message[]) { return msgs.map((m) =&gt;
+        ({ ...m, content: m.content.map((c) =&gt; { if ("toolCallId" in c) {
+        return { ...c, toolCallId: padToolCallId(c.toolCallId) } // truncate +
+        pad } return c }), })) } // Claude sanitize: alphanumeric only trong
+        tool name function sanitizeClaudeToolName(name: string): string { return
+        name.replace(/[^a-zA-Z0-9_-]/g, "_") }
+      `;
+const __code_OpencodeProviderAbstractionSection_4 = `        const TRANSFORMS: Record&lt;Provider, Transform&gt; = { anthropic:
+        splitToolUse, openai: identity, mistral: truncateToolCallIds, google:
+        moveSystemToStart, } function callModel(provider: Provider, msgs: Msg[])
+        { const transform = TRANSFORMS[provider] ?? identity const prepared =
+        transform(msgs) return getClient(provider).chat.completions.create({
+        messages: prepared }) }
+      `;
+const __code_OpencodeProviderAbstractionSection_5 = `        // 25+ regex patterns detect overflow từ nhiều provider const
+        OVERFLOW_PATTERNS: RegExp[] = [ /prompt is too long/i, /exceeds the
+        context window/i, /max.*context.*length/i, /context_length_exceeded/i,
+        /no body.*(400|413)/i, // Bedrock silent truncation
+        /token.*limit.*exceeded/i, // ... 20+ more ] export function
+        isContextOverflow(err: unknown): boolean { const msg =
+        extractErrorMessage(err) return OVERFLOW_PATTERNS.some((r) =&gt;
+        r.test(msg)) } // Retry with server-directed delay export async function
+        withRetry&lt;T&gt;(fn: () =&gt; Promise&lt;T&gt;, maxAttempts = 5):
+        Promise&lt;T&gt; { let attempt = 0 while (true) { try { return await
+        fn() } catch (err) { attempt++ if (isContextOverflow(err)) throw err //
+        không retry overflow if (attempt &gt;= maxAttempts) throw err // Tôn
+        trọng server directive const serverMs = extractRetryAfter(err) //
+        retry-after-ms | retry-after const delayMs = serverMs ?? Math.min(2 **
+        (attempt - 1) * 2000, 30_000) await sleep(delayMs) } } }
+      `;
+const __code_OpencodeProviderAbstractionSection_6 = `        const OVERFLOW = [ /prompt is too long/i, /context.?window/i,
+        /token.?limit/i, ] async function retryable&lt;T&gt;(fn: () =&gt;
+        Promise&lt;T&gt;, max = 5): Promise&lt;T&gt; { for (let i = 0; i &lt;
+        max; i++) { try { return await fn() } catch (e) { const msg = String((e
+        as Error).message ?? e) if (OVERFLOW.some(r =&gt; r.test(msg))) throw
+        new OverflowError(e) // compact, don't retry if (i === max - 1) throw e
+        const serverDelay = (e as any).headers?.["retry-after-ms"] const delay =
+        serverDelay ?? Math.min(2000 * 2 ** i, 30_000) await new Promise(r =&gt;
+        setTimeout(r, +delay)) } } throw new Error("unreachable") }
+      `;
+---
+
+<Section
+  id={"section-d"}
+  title={"D. Provider Abstraction — Multi-model trong 1 code path"}
+>
+  <p class="lead">
+    opencode hỗ trợ 20+ provider (Anthropic, OpenAI, Google, Bedrock, Mistral,
+    Groq, Together, ...). Nhưng thay vì viết lowest-common-denominator, opencode
+    chọn cách "abstract + per-provider quirk layer": có chung format nhưng
+    transform layer xử lý mỗi provider riêng.
+  </p>
+  <Technique
+    id={"t21"}
+    title={"T21. Multi-provider SDK lazy loading"}
+    tid={"D.1"}
+    location={"<strong>File:</strong> <code>provider/provider.ts</code> · <strong>Lines:</strong> 92-117"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeProviderAbstractionSection_1} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Nếu import eager 20 SDK (<code
+        >@anthropic-ai/sdk</code
+      >, <code>openai</code>, <code>@google/generative-ai</code>, ...), startup
+      time cực tệ + bundle size hàng chục MB. Lazy import → chỉ load SDK của
+      provider đang dùng. User pick Anthropic → chỉ Anthropic SDK được load.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeProviderAbstractionSection_2} />
+    <ProsCons
+      pros={[
+        "Startup nhanh — chỉ import cái cần",
+        "Bundle splitting tự nhiên với Bun/esbuild",
+        "Thêm provider mới = thêm 1 dòng trong map",
+      ]}
+      cons={[
+        "First call chịu latency import (~50-200ms)",
+        "Type import eager vẫn cần (để có Loader interface) → phức tạp setup",
+        "Error ở loader chỉ xuất hiện runtime, không catch được lúc build",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text">Vercel AI SDK — provider abstraction reference</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t21/">Phân tích sâu T21 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t22"}
+    title={"T22. Provider-specific message transformation"}
+    tid={"D.2"}
+    location={"<strong>File:</strong> <code>provider/transform.ts</code> · <strong>Lines:</strong> 48-150"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeProviderAbstractionSection_3} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Mỗi provider có quirk riêng: Anthropic
+      cần split tool_use, Mistral giới hạn toolCallId 9 chars, Gemini không thích
+      system role ở giữa conversation, v.v. Centralize quirk vào transform layer →
+      core logic chung; thêm provider = thêm 1 transform function, không touch core.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeProviderAbstractionSection_4} />
+    <ProsCons
+      pros={[
+        "Core logic clean — không ifelse nhiều provider",
+        "Provider quirks documented in one place (transform.ts)",
+        "Test per provider dễ — chỉ cần verify transform output",
+      ]}
+      cons={[
+        "Khi provider thay spec, phải update transform — dễ miss",
+        "Transform có thể đánh mất fidelity (truncate toolCallId → khó trace)",
+        'Debugging request cần thêm step "inspect after transform"',
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://vercel.com/blog/ai-sdk-5">Vercel AI SDK 5 blog — provider abstraction design</a>',
+        '<a href="https://gist.github.com/Haseeb-Qureshi/2213cc0487ea71d62572a645d7582518">Gist — Multi-model harness comparison</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t22/">Phân tích sâu T22 →</DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t23"}
+    title={"T23. Overflow pattern detection & retry với server headers"}
+    tid={"D.3"}
+    location={"<strong>File:</strong> <code>provider/error.ts:8-193</code> + <code>session/retry.ts:17-52</code>"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeProviderAbstractionSection_5} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Không có lỗi overflow chuẩn HTTP — mỗi
+      provider trả message khác nhau. 25+ regex là kinh nghiệm production. Retry phải
+      skip overflow (retry vô ích, trigger compaction thay vì retry). Respect server
+      <code>retry-after-ms</code> → tránh thunder-herd, rate-limit provider hiệu quả.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeProviderAbstractionSection_6} />
+    <ProsCons
+      pros={[
+        "Unified error handling qua 20+ provider — chỉ 1 retry policy",
+        "Respect <code>retry-after</code> → không làm provider bực, tránh ban",
+        "Skip retry overflow → immediately trigger compaction path, không lãng phí",
+      ]}
+      cons={[
+        "Regex list cần maintain — provider đổi message là miss",
+        "Exponential backoff không tính jitter → multiple client thunder-herd nhẹ",
+        "Không distinguish transient (5xx) vs permanent (4xx) một cách tường minh",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://effect.website/docs/error-management/retrying/">Effect — Retrying docs</a>',
+        '<a href="https://medium.com/@komalbaparmar007/llm-tool-calling-in-production-rate-limits-retries-and-the-infinite-loop-failure-mode-you-must-2a1e2a1e84c8">Medium — Rate Limits, Retries in Production</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t23/">Phân tích sâu T23 →</DeepDiveLink>
+  </Technique>
+</Section>

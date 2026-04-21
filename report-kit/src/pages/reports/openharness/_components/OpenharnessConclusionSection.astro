@@ -1,0 +1,85 @@
+---
+import Section from "../../../../components/Section.astro";
+import Callout from "../../../../components/Callout.astro";
+---
+
+<Section
+  id={"conclusion"}
+  title={"Kết luận — So sánh OpenHarness · opencode · Claude Code"}
+>
+  <Fragment is:raw>
+    <p>Sau 30 kỹ thuật, ta thấy rõ <strong>OpenHarness</strong> không chỉ là
+    "Python port của Claude Code". Nó là một <em>superset</em> về khả năng
+    automation, đánh đổi một phần bề mặt CLI elegance để mở rộng thành
+    <strong>agent organization platform</strong> — nơi agent có thể sống trong
+    subprocess độc lập, nghe từ N channel, chạy theo cron, và cô lập trong
+    Docker.</p> <h3>Ba trục so sánh</h3> <div class="comparison-table"> <table>
+    <thead> <tr><th>Khía cạnh</th><th>Claude Code (TS
+    closed-source)</th><th>opencode (sst/anomalyco TS)</th><th>HKUDS/OpenHarness
+    (Python)</th></tr> </thead> <tbody> <tr><td><strong>Ngôn
+    ngữ</strong></td><td>TypeScript + Bun</td><td>TypeScript + Bun +
+    Effect-TS</td><td>Python 3.10+ + asyncio</td></tr>
+    <tr><td><strong>TUI</strong></td><td>React Ink</td><td>React
+    Ink</td><td>Rich/Textual <em>+</em> React Ink (dual)</td></tr>
+    <tr><td><strong>Agent loop</strong></td><td>ReAct async</td><td>ReAct
+    async</td><td>ReAct async, single/parallel branching</td></tr>
+    <tr><td><strong>Compaction</strong></td><td>Auto-compact</td><td>Tail-preserving
+    + template</td><td>Proactive + reactive + PTL retry</td></tr>
+    <tr><td><strong>Sub-agent</strong></td><td>Task tool in-session</td><td>Task
+    tool in-session</td><td><span class="highlight">Subprocess + worktree +
+    mailbox</span></td></tr> <tr><td><strong>Permission</strong></td><td>3-mode
+    + hook</td><td>Wildcard + arity + state</td><td>3-mode + 6-layer + sensitive
+    path</td></tr>
+    <tr><td><strong>Memory</strong></td><td>CLAUDE.md</td><td>CLAUDE.md</td><td>Per-project
+    dir + MEMORY.md + search</td></tr> <tr><td><strong>Hooks</strong></td><td>6
+    events × 2 types</td><td>Hook + Tool Hook</td><td>6 events × 4 types + hot
+    reload</td></tr> <tr><td><strong>Skills</strong></td><td>Markdown +
+    frontmatter</td><td>Prompt + tool filter</td><td>Markdown + frontmatter +
+    plugin</td></tr> <tr><td><strong>MCP</strong></td><td>stdio +
+    HTTP</td><td>stdio + HTTP</td><td>stdio + HTTP + dynamic Pydantic</td></tr>
+    <tr><td><strong>Channels</strong></td><td>CLI only</td><td>CLI
+    only</td><td><span
+    class="highlight">Slack/Feishu/Discord/Telegram/Matrix</span></td></tr>
+    <tr><td><strong>Autopilot</strong></td><td>N/A</td><td>N/A</td><td><span
+    class="highlight">Dashboard + repo automation</span></td></tr>
+    <tr><td><strong>Sandbox</strong></td><td>N/A</td><td>N/A</td><td><span
+    class="highlight">Docker optional</span></td></tr>
+    <tr><td><strong>Cron</strong></td><td>N/A</td><td>N/A</td><td><span
+    class="highlight">Persistent scheduler (30s tick)</span></td></tr>
+    <tr><td><strong>LSP</strong></td><td>N/A</td><td>N/A</td><td><span
+    class="highlight">AST-based built-in</span></td></tr> </tbody> </table>
+    </div> <h3>Khi nào nên chọn OpenHarness</h3>
+  </Fragment>
+  <Callout type="info">
+    <Fragment is:raw>
+      <strong>OpenHarness phù hợp khi:</strong> <ul> <li>Team quen Python, muốn
+      fork/customize sâu (không bị lock vào JS ecosystem)</li> <li>Workflow cần
+      <em>long-running agent</em> (Slack bot, cron triage, CI auto-fix)</li>
+      <li>Muốn multi-agent coordination thật (leader + worker + branch isolation
+      qua worktree)</li> <li>Cần sandbox Docker cho tool execution (compliance /
+      security)</li> <li>Muốn persistent memory có cấu trúc (per-project
+      MEMORY.md tìm được qua CJK tokenizer)</li> </ul> <strong>Không nên chọn
+      khi:</strong> <ul> <li>Chỉ cần pair-programming CLI đơn thuần → opencode
+      hay Claude Code đơn giản hơn</li> <li>Workflow monolithic,
+      1-agent-1-session — swarm + channels thành dead weight</li> <li>Team toàn
+      TS → fork/contribute dễ hơn với opencode</li> </ul>
+    </Fragment>
+  </Callout>
+  <Fragment is:raw>
+    <h3>Bài học harness engineering rút ra</h3> <p>OpenHarness chứng minh rằng
+    <em>scaffolding</em> quan trọng không kém model. Ba nguyên tắc lặp lại trong
+    code:</p> <ol> <li><strong>Atomic write</strong> — mọi state-changing file
+    đều <code>write(.tmp) → rename</code> (mailbox, registry, permission sync).
+    Tránh partial-read race.</li> <li><strong>Layered evaluation</strong> —
+    permission 6 layer, compaction 2 phase (proactive + reactive + PTL retry),
+    prompt 9 section. Mỗi layer có chức năng riêng biệt, dễ reason về.</li>
+    <li><strong>Structured observability</strong> — streaming events với union
+    type + 9-phase progress, JSONL history, hook pre/post → agent debug được qua
+    log, không cần reproduce bằng tay.</li> </ol> <p>Nếu bạn xây harness riêng,
+    5 ý tưởng nên copy từ OpenHarness ngay: <em>(1) per-project memory hash, (2)
+    CJK-aware tokenizer, (3) sensitive path hardcoded block, (4) subprocess +
+    mailbox cho subagent, (5) dual-channel permission sync</em>. Đó là những chi
+    tiết rất dễ bỏ qua nếu chỉ nhìn "agent loop" ở high level, nhưng quyết định
+    liệu harness có chạy được 24/7 trong production hay không.</p>
+  </Fragment>
+</Section>

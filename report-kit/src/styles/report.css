@@ -1,0 +1,174 @@
+/* ==========================================================================
+   report.css — Shared stylesheet cho Research Report Kit
+   ==========================================================================
+   Token system + components: layout, sidebar, technique, proscons, callout,
+   diagram, chip, table. Dark by default, light via prefers-color-scheme.
+   ========================================================================== */
+
+:root {
+  --bg: #0d1117;
+  --bg-elev: #161b22;
+  --bg-code: #0d1117;
+  --border: #30363d;
+  --border-soft: #21262d;
+  --text: #c9d1d9;
+  --text-muted: #8b949e;
+  --text-bright: #f0f6fc;
+  --accent: #58a6ff;
+  --accent-soft: #1f6feb;
+  --green: #3fb950;
+  --red: #f85149;
+  --amber: #d29922;
+  --purple: #bc8cff;
+  --cyan: #79c0ff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --bg-elev: #f6f8fa;
+    --bg-code: #f6f8fa;
+    --border: #d0d7de;
+    --border-soft: #d8dee4;
+    --text: #1f2328;
+    --text-muted: #59636e;
+    --text-bright: #0a0e14;
+    --accent: #0969da;
+    --accent-soft: #218bff;
+    --green: #1a7f37;
+    --red: #d1242f;
+    --amber: #9a6700;
+    --purple: #8250df;
+    --cyan: #0550ae;
+  }
+}
+
+/* Reset & base ------------------------------------------------------------ */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+/* Layout ------------------------------------------------------------------ */
+.layout { display: grid; grid-template-columns: 280px 1fr; max-width: 1400px; margin: 0 auto; }
+
+aside {
+  position: sticky; top: 0; max-height: 100vh; overflow-y: auto;
+  padding: 28px 20px; border-right: 1px solid var(--border);
+  background: var(--bg-elev); font-size: 13px;
+}
+aside h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin: 16px 0 8px; font-weight: 600; }
+aside h3:first-child { margin-top: 0; }
+aside ul { list-style: none; padding: 0; margin: 0 0 12px; }
+aside li { margin: 2px 0; }
+aside a { color: var(--text); text-decoration: none; display: block; padding: 3px 8px; border-radius: 4px; }
+aside a:hover { background: var(--border-soft); color: var(--text-bright); }
+aside a.section { font-weight: 600; color: var(--text-bright); }
+
+main { padding: 48px 56px 120px; max-width: 960px; min-width: 0; }
+
+/* Breadcrumb (link back to index) ---------------------------------------- */
+.breadcrumb {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-muted); margin-bottom: 12px;
+  text-decoration: none;
+}
+.breadcrumb:hover { color: var(--accent); }
+.breadcrumb::before { content: "←"; font-size: 13px; }
+
+/* Hero -------------------------------------------------------------------- */
+header.hero { margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+.hero h1 { margin: 0; font-size: 32px; font-weight: 700; color: var(--text-bright); letter-spacing: -0.4px; }
+.hero .sub { color: var(--text-muted); margin-top: 8px; font-size: 16px; }
+.meta { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; font-size: 13px; color: var(--text-muted); }
+.meta span strong { color: var(--text); font-weight: 600; }
+
+/* Headings ---------------------------------------------------------------- */
+h2 { font-size: 22px; margin: 56px 0 16px; color: var(--text-bright); padding-bottom: 8px; border-bottom: 1px solid var(--border-soft); font-weight: 600; scroll-margin-top: 16px; }
+h2 .theme-tag { font-size: 11px; display: inline-block; padding: 2px 8px; border-radius: 10px; background: var(--accent-soft); color: white; vertical-align: middle; margin-left: 10px; font-weight: 500; }
+h3 { font-size: 18px; color: var(--text-bright); margin: 36px 0 8px; font-weight: 600; }
+h4 { font-size: 14px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin: 18px 0 8px; font-weight: 600; }
+p { margin: 8px 0 12px; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Code -------------------------------------------------------------------- */
+code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 12.5px; background: var(--bg-elev); padding: 2px 5px; border-radius: 3px; border: 1px solid var(--border-soft); color: var(--cyan); }
+pre { background: var(--bg-code); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 10px 0; font-size: 12.5px; line-height: 1.5; }
+pre code { background: transparent; padding: 0; border: none; color: var(--text); font-size: 12.5px; }
+
+/* Syntax highlighting — span thủ công (legacy, vd openharness dùng <pre> tay). CodeBlock dùng Shiki. */
+.kw { color: #ff7b72; }
+.str { color: #a5d6ff; }
+.com { color: #8b949e; font-style: italic; }
+.fn { color: #d2a8ff; }
+.num { color: #79c0ff; }
+.type { color: #ffa657; }
+.tag { color: #7ee787; }
+
+/* Technique card ---------------------------------------------------------- */
+.technique {
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+  padding: 20px 24px; margin: 20px 0; scroll-margin-top: 16px;
+}
+.technique-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 10px; }
+.technique-head h3 { margin: 0; }
+.tid { font-family: ui-monospace, monospace; font-size: 12px; color: var(--text-muted); background: var(--bg); padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); white-space: nowrap; }
+.location { font-family: ui-monospace, monospace; font-size: 12px; color: var(--text-muted); margin: 4px 0 12px; padding: 6px 10px; background: var(--bg); border-left: 2px solid var(--accent); border-radius: 3px; word-break: break-all; }
+.location strong { color: var(--text); }
+.why { color: var(--text); margin: 10px 0 14px; }
+
+/* Pros / Cons two-column -------------------------------------------------- */
+.proscons { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
+.pros, .cons { padding: 12px 14px; border-radius: 6px; font-size: 13.5px; }
+.pros { background: color-mix(in srgb, var(--green) 10%, var(--bg-elev)); border: 1px solid color-mix(in srgb, var(--green) 30%, var(--border)); }
+.cons { background: color-mix(in srgb, var(--red) 8%, var(--bg-elev)); border: 1px solid color-mix(in srgb, var(--red) 25%, var(--border)); }
+.pros h5, .cons h5 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700; }
+.pros h5 { color: var(--green); }
+.cons h5 { color: var(--red); }
+.pros ul, .cons ul { margin: 0; padding-left: 18px; }
+.pros li, .cons li { margin: 4px 0; }
+
+/* References -------------------------------------------------------------- */
+.refs { font-size: 13px; color: var(--text-muted); margin: 12px 0 0; padding-top: 12px; border-top: 1px dashed var(--border-soft); }
+.refs strong { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; color: var(--text-muted); font-weight: 700; }
+.refs ul { margin: 0; padding-left: 18px; }
+.refs li { margin: 3px 0; }
+
+/* Callouts ---------------------------------------------------------------- */
+.callout { padding: 14px 16px; border-radius: 6px; margin: 16px 0; font-size: 14px; }
+.callout.info { background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev)); border-left: 3px solid var(--accent); }
+.callout.warn { background: color-mix(in srgb, var(--amber) 12%, var(--bg-elev)); border-left: 3px solid var(--amber); }
+.callout.unique { background: color-mix(in srgb, var(--purple) 12%, var(--bg-elev)); border-left: 3px solid var(--purple); }
+.callout.success { background: color-mix(in srgb, var(--green) 10%, var(--bg-elev)); border-left: 3px solid var(--green); }
+
+/* Table ------------------------------------------------------------------- */
+.toc-intro { font-size: 12.5px; color: var(--text-muted); margin-bottom: 8px; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+th { color: var(--text-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; }
+
+/* Chip -------------------------------------------------------------------- */
+.chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: var(--bg); border: 1px solid var(--border); color: var(--text-muted); margin-right: 4px; }
+.chip.green { border-color: var(--green); color: var(--green); }
+.chip.amber { border-color: var(--amber); color: var(--amber); }
+.chip.purple { border-color: var(--purple); color: var(--purple); }
+.chip.cyan { border-color: var(--cyan); color: var(--cyan); }
+.chip.red { border-color: var(--red); color: var(--red); }
+.chip.unique { border-color: var(--purple); color: var(--purple); background: color-mix(in srgb, var(--purple) 15%, var(--bg)); font-weight: 600; }
+
+/* Diagram (ASCII art) ----------------------------------------------------- */
+.diagram { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; padding: 20px; margin: 16px 0; font-family: ui-monospace, monospace; font-size: 12.5px; white-space: pre; overflow-x: auto; color: var(--text); line-height: 1.4; }
+
+/* Responsive -------------------------------------------------------------- */
+@media (max-width: 980px) {
+  .layout { grid-template-columns: 1fr; }
+  aside { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--border); }
+  main { padding: 32px 20px 80px; }
+  .proscons { grid-template-columns: 1fr; }
+}

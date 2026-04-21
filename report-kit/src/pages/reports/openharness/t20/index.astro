@@ -1,0 +1,408 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T20 — 6-layer hierarchical permission evaluation + path normalization | OpenHarness"
+  description="Phân tích sâu hệ thống 6-layer permission evaluation của OpenHarness: thứ tự ưu tiên từ sensitive path check đến mode fallback, path normalization chống trailing-slash bypass, và fix cho Adversa CC-643 pipeline bypass."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/openharness/" label="← openharness report" />
+      <Hero
+        title="T20 — 6-layer hierarchical permission evaluation + path normalization"
+        subtitle="OpenHarness đánh giá mọi tool call qua 6 layers theo thứ tự cố định: sensitive path → deny tool → allow tool → path rules → command deny → mode fallback. Mỗi layer có thể short-circuit. Path normalization sinh 2 variants (có/không trailing slash) để chặn bypass kinh điển."
+        meta={[
+          { label: 'Nhóm', value: 'E — Permission &amp; Safety' },
+          { label: 'File', value: '<code>permissions/checker.py:75-169</code>' },
+          { label: 'Layers', value: '6 (ordered, short-circuit)' },
+          { label: 'ID', value: 'E.3' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          Hầu hết agent harness implement permission check như một điều kiện đơn hoặc danh sách
+          flat rules. OpenHarness chọn kiến trúc phân tầng: 6 layers đánh giá tuần tự, mỗi layer
+          chỉ chạy nếu layer trước không đưa ra quyết định. Thứ tự không phải tùy tiện — nó phản
+          ánh mức độ ưu tiên từ "tuyệt đối" (sensitive paths) đến "mặc định theo cấu hình" (mode).
+        </p>
+        <WhyImportant>
+          <strong>Punchline kiến trúc:</strong>
+          <em>"deny rules block built-in tool invocations, not Bash subprocesses — agent can always
+          exec arbitrary shell via bash_tool if Bash itself is allowed."</em>
+          Layer 2-5 chỉ kiểm tra tool call interface — không inspect những gì bên trong Bash
+          command nếu bash_tool đã được allow ở layer 3.
+        </WhyImportant>
+        <Callout type="warn">
+          <strong>Adversa CC-643 — 50-subcommand pipeline bypass:</strong>
+          <em>"Adversa CC-643: splitting a command into 50+ subcommands via shell piping bypassed
+          Claude Code's permission checker — deny rules matched on single commands, not compound
+          pipelines."</em>
+          OpenHarness fix bằng cách check toàn bộ pipeline: mỗi segment của pipe được kiểm tra
+          riêng trước khi cho phép thực thi.
+        </Callout>
+        <Callout type="info">
+          <strong>dontAsk mode bị hiểu nhầm nhiều nhất:</strong>
+          <em>"dontAsk mode is the most misunderstood: it doesn't mean 'allow everything', it means
+          'don't interrupt me — but sensitive paths and deny rules still apply'."</em>
+          Layer 1 (T19) và Layer 2 (deny tool list) vẫn active trong mọi mode — không có cấu hình
+          nào tắt được chúng.
+        </Callout>
+        <Callout type="unique">
+          <strong>Path normalization — trailing slash bypass:</strong>
+          <em>"Path normalization generates two variants: stripped (no trailing slash) and with
+          trailing slash — preventing the classic '/secret/' vs '/secret' bypass."</em>
+          <code>_normalize_path_variants()</code> sinh cả <code>"/secret"</code> lẫn
+          <code>"/secret/"</code> — pattern rules được check với cả hai variant.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code: permissions/checker.py:75-169" themeTag="Anatomy">
+        <Subheading level="h3" text="PermissionChecker.check() — 6-layer pipeline" />
+        <CodeBlock caption="permissions/checker.py:75-130 — main check() method">
+          <Fragment is:raw>{`
+class PermissionChecker:
+    def check(
+        self,
+        tool_name: str,
+        path: str | None,
+        command: str | None,
+        context: PermissionContext,
+    ) -> CheckResult:
+        # Layer 1: sensitive path (unconditional)
+        if path and is_sensitive_path(path):
+            return CheckResult.BLOCK("Sensitive path")
+
+        # Layer 2: deny tool list
+        if tool_name in self._deny_tools:
+            return CheckResult.BLOCK(f"Tool {tool_name!r} is denied")
+
+        # Layer 3: allow tool list (early exit — skip remaining layers)
+        if tool_name in self._allow_tools:
+            return CheckResult.ALLOW()
+
+        # Layer 4: path rules
+        if path:
+            result = self._check_path_rules(path)
+            if result is not None:
+                return result
+
+        # Layer 5: command deny patterns
+        if command:
+            result = self._check_command_deny(command)
+            if result is not None:
+                return result
+
+        # Layer 6: permission mode (fallback)
+        return self._check_mode(tool_name, context.mode)
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          Mỗi layer trả về <code>CheckResult</code> (BLOCK hoặc ALLOW) để short-circuit,
+          hoặc <code>None</code> để fall through đến layer tiếp theo. Layer 3 (allow tool list)
+          là điểm đặc biệt: nếu tool nằm trong allow list, các layers 4-5 bị bỏ qua hoàn toàn
+          — ngay cả khi path rules hay command patterns có thể block nó.
+        </p>
+
+        <Subheading level="h3" text="Path normalization — chặn trailing-slash bypass" />
+        <CodeBlock caption="permissions/checker.py:131-155 — _normalize_path_variants() và _check_path_rules()">
+          <Fragment is:raw>{`
+def _normalize_path_variants(path: str) -> list[str]:
+    """
+    Generate normalized variants to prevent bypass via trailing slash.
+    '/secret/' vs '/secret' both checked.
+    """
+    stripped = path.rstrip("/")
+    return [stripped, stripped + "/"]
+
+def _check_path_rules(self, path: str) -> CheckResult | None:
+    variants = _normalize_path_variants(path)
+    for rule in self._path_rules:
+        for variant in variants:
+            if fnmatch.fnmatch(variant, rule.pattern):
+                if rule.action == "deny":
+                    return CheckResult.BLOCK(f"Path denied by rule: {rule.pattern}")
+                if rule.action == "allow":
+                    return CheckResult.ALLOW()
+    return None  # no rule matched, continue to next layer
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          Trailing-slash bypass là kỹ thuật cũ nhưng vẫn hiệu quả: nếu rule deny
+          <code>"/secret"</code> nhưng agent request <code>"/secret/"</code>, pattern matching
+          đơn giản sẽ miss. <code>_normalize_path_variants()</code> sinh ra cả hai —
+          rule chỉ cần match một trong hai là đủ để block.
+        </p>
+
+        <Subheading level="h3" text="Adversa CC-643 — pipeline bypass và mitigation" />
+        <CodeBlock caption="permissions/checker.py — CC-643 fix: check_full_pipeline()">
+          <Fragment is:raw>{`
+# Adversa CC-643: 50-subcommand bypass
+# Attack: instead of "rm -rf /important", agent uses:
+# "echo x | cmd1 | cmd2 | ... | cmd49 | rm -rf /important"
+# Each subcommand individually matched "allowed" patterns
+# The full pipeline was never checked as a unit
+
+# OpenHarness mitigation: check ALL subcommands in pipeline
+import shlex
+
+def check_full_pipeline(command: str) -> bool:
+    """Check each segment of a piped command."""
+    segments = command.split("|")
+    for seg in segments:
+        tokens = shlex.split(seg.strip(), posix=True)
+        if tokens and _is_dangerous_command(tokens[0]):
+            return False  # block entire pipeline
+    return True
+
+# Khi _check_command_deny() nhận command, nó gọi check_full_pipeline()
+# thay vì chỉ check whole string một lần.
+# "echo x | cat /etc/passwd" → segment 2 fail → toàn pipeline bị block
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T20 (6-layer eval) tương tác với:
+
+  T19 (Sensitive path protection)
+    └─ T19 CHÍNH LÀ Layer 1 của T20
+       is_sensitive_path() được gọi đầu tiên trong check()
+       "T20 is the frame; T19 is the first — and hardest — brick"
+
+  T18 (Permission mode)
+    └─ T18 là Layer 6 (layer cuối) của T20 — fallback sau khi
+       layers 1-5 không đưa ra quyết định
+       FULL_AUTO chỉ áp dụng nếu path không sensitive (layer 1 pass)
+       và tool không bị deny (layer 2 pass)
+
+  T21 (Async approval flow)
+    └─ T21 được kích hoạt sau khi T20.check() trả về kết quả cần approval
+       T20 quyết định WHETHER cần approval
+       T21 quyết định HOW approval được collect
+       Sensitive path block (layer 1) xảy ra TRƯỚC khi T21 UI hiện
+
+  T10 (Bash tool)
+    └─ Bash tool args (command string) được check ở Layer 5
+       check_full_pipeline() phân tách pipe segments
+       Nhưng nếu bash_tool nằm trong allow_tools (layer 3) →
+       layers 4-5 bị skip → command string không được inspect
+       → "allow tool list too broad" là failure mode #2
+
+Layer precedence summary:
+  L1 T19 (unconditional) > L2 deny tool > L3 allow tool (skip L4-L5) >
+  L4 path rules > L5 command deny > L6 T18 mode fallback
+`}</Diagram>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: Adversa CC-643 nếu pipeline check không đầy đủ" />
+        <CodeBlock caption="CC-643 variant: nested subshell bypass">
+          <Fragment is:raw>{`
+# check_full_pipeline() split theo "|" — nhưng Bash có nhiều cách
+# compose commands không dùng pipe:
+
+# Semicolon: "safe_cmd; rm -rf /important"
+# split("|") → ["safe_cmd; rm -rf /important"] — 1 segment, pass check
+# shlex sees: ["safe_cmd;", "rm", "-rf", "/important"]
+# _is_dangerous_command("safe_cmd;") → False
+
+# Subshell: "safe_cmd $(rm -rf /important)"
+# Nested command substitution không bị detect bởi simple split
+
+# Fix: parse với shlex.split() + check từng token,
+# hoặc dùng AST bash parser (bashlex library)
+# Đây là lý do tại sao "deny rules block tool invocations, not Bash subprocesses"
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: Allow tool list quá rộng — bypass layers 4-5" />
+        <CodeBlock caption="Kịch bản: bash_tool trong allow_tools → command không được inspect">
+          <Fragment is:raw>{`
+# Cấu hình: allow_tools = {"bash_tool", "read_file", "glob_tool"}
+# Agent call: bash_tool(command="rm -rf /project/src")
+
+# Layer 1: path=None → skip T19
+# Layer 2: "bash_tool" not in deny_tools → continue
+# Layer 3: "bash_tool" IN allow_tools → ALLOW (short-circuit)
+# Layers 4-5: SKIPPED — never reached
+# Command "rm -rf /project/src" không bao giờ được check
+
+# Nguyên tắc: NEVER put bash_tool in allow_tools
+# Thay vào đó: để bash_tool fall through đến layer 5 (command deny)
+# và define DANGEROUS_CMDS patterns đủ rộng
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 3: Path rules conflict — child rule override parent deny" />
+        <CodeBlock caption="Rule ordering: deny parent nhưng allow child — child match trước">
+          <Fragment is:raw>{`
+# Rules (theo thứ tự iteration):
+# rule 1: pattern="/project/src/*", action="allow"
+# rule 2: pattern="/project/*",     action="deny"
+
+# Request: path="/project/src/secret.ts"
+# _check_path_rules() iterate rules theo thứ tự:
+# - rule 1: fnmatch("/project/src/secret.ts", "/project/src/*") → True
+#   → action="allow" → ALLOW (return ngay)
+# - rule 2: never reached
+
+# Ý định: deny toàn bộ /project/ trừ src/
+# Kết quả: correct IF rule order is [deny /project/*, allow /project/src/*]
+# Nhưng nếu thứ tự ngược lại → allow rule match trước → bypass deny
+
+# Fix: document rõ "first-match wins" và sort rules: specific trước, broad sau
+# Hoặc implement priority field trong rule definition
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Số layers', 'Path normalization', 'Pipeline check', 'Deny bypass qua Bash']}
+          rows={[
+            [
+              '<strong>OpenHarness</strong>',
+              '6 layers (ordered, short-circuit)',
+              'Có — trailing slash variants',
+              'Có — CC-643 fix (<code>split("|")</code>)',
+              'Có (documented: allow list quá rộng)',
+            ],
+            [
+              'Claude Code',
+              'Hierarchy tương tự',
+              'Partial',
+              'Partial',
+              'Có (documented)',
+            ],
+            [
+              'Aider',
+              '1 layer (<code>--yes</code> flag)',
+              'Không',
+              'Không',
+              'N/A',
+            ],
+            [
+              'LangGraph',
+              'Node-level interrupt',
+              'Không',
+              'Không',
+              'N/A',
+            ],
+          ]}
+        />
+        <p>
+          OpenHarness và Claude Code đều có hierarchy nhiều layers, nhưng OpenHarness document
+          rõ thứ tự và fix Adversa CC-643. Aider dùng <code>--yes</code> flag đơn giản —
+          không có hierarchy. LangGraph interrupt ở node level trong graph — không phải
+          tool-call level.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>
+          Minimal 6-layer permission checker — đủ dùng cho agent harness mới, bao gồm
+          path normalization và pipeline check:
+        </p>
+        <CodeBlock caption="permission_checker.py — minimal 6-layer implementation">
+          <Fragment is:raw>{`
+import fnmatch
+
+DANGEROUS_CMDS = {"rm", "dd", "mkfs", "curl", "wget", "nc", "python", "python3"}
+
+def check_permission(
+    tool: str, path: str | None, cmd: str | None,
+    deny_tools: set, allow_tools: set, path_rules: list, mode: str
+) -> str:  # "allow" | "block" | "ask"
+
+    # L1: sensitive paths (từ T19)
+    if path and is_sensitive(path):
+        return "block"
+
+    # L2: explicit deny
+    if tool in deny_tools:
+        return "block"
+
+    # L3: explicit allow (short-circuit — skip L4-L5)
+    if tool in allow_tools:
+        return "allow"
+
+    # L4: path rules (first-match wins, specific rules first)
+    if path:
+        variants = [path.rstrip("/"), path.rstrip("/") + "/"]
+        for rule in path_rules:
+            for v in variants:
+                if fnmatch.fnmatch(v, rule["pattern"]):
+                    return rule["action"]  # "allow" or "block"
+
+    # L5: command deny (check full pipeline)
+    if cmd:
+        for seg in cmd.split("|"):
+            import shlex
+            try:
+                tokens = shlex.split(seg.strip(), posix=True)
+            except ValueError:
+                return "block"  # unparseable → block
+            if tokens and tokens[0] in DANGEROUS_CMDS:
+                return "block"
+
+    # L6: mode fallback (từ T18)
+    if mode == "full_auto":
+        return "allow"
+    if mode == "plan":
+        # block mutations, allow reads
+        WRITE_OPS = {"bash_tool", "write_file", "delete_file"}
+        return "block" if tool in WRITE_OPS else "allow"
+    return "ask"  # DEFAULT: ask user
+
+# Lưu ý triển khai:
+# - L3 allow_tools KHÔNG nên bao gồm bash_tool (bypass L4-L5)
+# - path_rules nên sort: specific (dài hơn) trước broad (ngắn hơn)
+# - L5 split("|") chưa handle semicolon hay subshell — cần bashlex cho full coverage
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://platform.claude.com/docs/en/agents-and-tools/claude-code/security">Anthropic — Claude Code Security model</a> · Permission layering, tool allow/deny, path-based rules trong Claude Code upstream',
+            '<a href="https://adversa.ai/blog/we-hacked-claude-and-found-critical-vulnerabilities/">Adversa AI — We Hacked Claude (CC-643)</a> · Kỹ thuật 50-subcommand pipeline bypass và disclosure timeline',
+            '<a href="https://owasp.org/www-community/attacks/Path_Traversal">OWASP — Path Traversal</a> · Trailing-slash bypass và các path normalization pitfall phổ biến',
+            '<a href="https://docs.python.org/3/library/fnmatch.html">Python docs — fnmatch</a> · Giới hạn của glob matching: ** behavior, trailing slash, case sensitivity',
+            '<a href="https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents">HumanLayer — Harness Engineering for Coding Agents</a> · Multi-layer permission design: rationale và trade-offs',
+            '<a href="https://github.com/nicowillis/bashlex">bashlex — Python Bash parser</a> · Full Bash AST parsing để detect subshell và semicolon bypass trong L5',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

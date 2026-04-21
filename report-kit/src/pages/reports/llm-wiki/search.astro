@@ -1,0 +1,590 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Chip from '../../../components/Chip.astro';
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RefList from '../../../components/RefList.astro';
+import DataTable from '../../../components/DataTable.astro';
+import LinkList from '../../../components/LinkList.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+import ReportImage from '../../../components/ReportImage.astro';
+
+const title = 'Deep Dive: Knowledge Graph & Hybrid Search';
+const description = 'Phân tích chi tiết knowledge graph layer (entity extraction, typed relationships, graph traversal) và hybrid search (BM25 + vector + graph với RRF fusion) cho LLM Wiki scale >200 pages.';
+---
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar
+      intro="Search Deep Dive"
+      groups={[
+        {
+          title: 'Context',
+          items: [
+            { href: '#intro', label: 'Tổng quan', section: true },
+          ],
+        },
+        {
+          title: 'Knowledge Graph',
+          items: [
+            { href: '#t1', label: '1. Entity Extraction' },
+            { href: '#t2', label: '2. Typed Relationships' },
+            { href: '#t3', label: '3. Graph Traversal Queries' },
+          ],
+        },
+        {
+          title: 'Hybrid Search',
+          items: [
+            { href: '#t4', label: '4. BM25 — Keyword Search' },
+            { href: '#t5', label: '5. Vector Search — Semantic' },
+            { href: '#t6', label: '6. RRF Fusion' },
+            { href: '#t7', label: '7. Benchmarks' },
+          ],
+        },
+        {
+          title: 'Scale Path',
+          items: [
+            { href: '#t8', label: '8. Scale Breakpoints' },
+            { href: '#t9', label: '9. Obsidian + Tools' },
+          ],
+        },
+        {
+          title: 'Kết luận',
+          items: [
+            { href: '#wrap', label: 'Tổng kết', section: true },
+          ],
+        },
+      ]}
+    />
+
+    <main>
+      <Breadcrumb href="/reports/llm-wiki/" label="← LLM Wiki Overview" />
+
+      <Hero
+        title={title}
+        subtitle={`Phân tích chi tiết từ báo cáo <a href="/reports/llm-wiki/">Tổng quan LLM Wiki</a> — knowledge graph layer và hybrid search cho wiki scale.`}
+        meta={[
+          { label: 'Báo cáo cha', value: '<a href="/reports/llm-wiki/">← LLM Wiki Overview</a>' },
+          { label: 'Topic', value: 'Knowledge Graph & Hybrid Search' },
+          { label: 'Benchmark', value: '95.2% LongMemEval-S (agentmemory)' },
+          { label: 'Ngày', value: '2026-04-20' },
+        ]}
+      />
+
+      <Section id="intro" title="Tổng quan" themeTag="Intro">
+        <p>
+          Original LLM Wiki dùng <code>index.md</code> như primary navigation — một file catalog
+          listing mọi page. Approach này hoạt động tốt đến ~200 pages, nhưng sau đó index trở
+          nên quá dài để LLM đọc trong một pass.
+        </p>
+        <p>
+          Deep dive này cover hai layers được thêm vào khi wiki grow past 200 pages:
+          <strong>Knowledge Graph</strong> (entity + typed relationships, thay thế flat wikilinks)
+          và <strong>Hybrid Search</strong> (BM25 + vector + graph với RRF fusion, thay thế brute-force
+          index.md reading).
+        </p>
+
+        <ReportImage
+          src="https://datasciencedojo.com/wp-content/uploads/2026/04/Obsidian-Graph-View-for-LLM-Wiki.png"
+          alt="Obsidian graph view showing interconnected entity pages as nodes with wiki-links as edges"
+          caption="Obsidian graph view của LLM Wiki sau 5 papers. Knowledge graph nổi lên từ [[wiki-links]] — transformer architecture linking to attention mechanism, BERT linking to fine-tuning."
+          source="https://datasciencedojo.com/blog/llm-wiki-tutorial/"
+          sourceLabel="Data Science Dojo Tutorial"
+          bordered={true}
+        />
+      </Section>
+
+      <Section id="knowledge-graph" title="Knowledge Graph Layer" themeTag="Graph">
+
+        <Technique id="t1" title="1. Entity Extraction — Structured Knowledge từ Text" tid="1" location="LLM Wiki v2 — Beyond flat pages">
+          <WhyImportant>
+            <strong>Flat pages với wikilinks để phí structure.</strong> Khi LLM ingest một
+            source, nó không chỉ viết prose — nó extract structured entities với types, attributes,
+            relationships. Đây là foundation của knowledge graph.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Entity types" />
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Entity Type', 'Ví dụ', 'Key Attributes']}
+            rows={[
+              ['Concept', 'Attention Mechanism', 'definition, properties, variants'],
+              ['Person', 'Ashish Vaswani', 'role, affiliation, contributions'],
+              ['Project', 'BERT, GPT-3', 'status, owner, tech stack'],
+              ['Library', 'PyTorch, TensorFlow', 'version, language, use case'],
+              ['Decision', 'Use Transformer over RNN', 'made_by, date, rationale, status'],
+              ['Event', 'GPT-4 release', 'date, impact, related entities'],
+            ]}
+          />
+
+          <Subheading level="h4" text="Entity extraction prompt" />
+          <CodeBlock caption="Entity extraction during ingest" lang="markdown" code={`Before writing wiki pages, extract all entities from this source.
+
+For each entity found, list:
+- Name: (exact name, consistent with existing wiki)
+- Type: Concept | Person | Project | Library | Decision | Event
+- Key attributes: (3-5 most important facts)
+- Relationships to other entities: (type: name)
+
+Format:
+\`\`\`
+Entity: Attention Mechanism
+Type: Concept
+Attributes:
+  - Scaled dot-product of Query, Key, Value vectors
+  - Computational complexity: O(n²) in sequence length
+  - Enables direct dependency between any two positions
+Relationships:
+  - part_of: Transformer Architecture
+  - enables: Long-range dependency modeling
+  - variant_of: [none — this IS the base]
+  - used_by: BERT, GPT series
+\`\`\`
+
+Wait for my confirmation before creating pages.`} />
+
+          <Callout type="info">
+            <strong>Entity extraction first, then page creation.</strong> Confirm entity list với
+            user trước khi viết pages. Đây là bước LLM dễ make mistakes nhất (duplicate entities,
+            wrong types). Catch early.
+          </Callout>
+        </Technique>
+
+        <Technique id="t2" title="2. Typed Relationships — Beyond Flat Wikilinks" tid="2" location="LLM Wiki v2 — Typed relationships">
+          <WhyImportant>
+            <strong>"A relates to B" ít hữu ích hơn "A caused B (confidence 0.9, 3 sources)".</strong>
+            Typed relationships cho phép graph traversal queries mà keyword search hoàn toàn bỏ lỡ.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Relationship taxonomy" />
+          <Diagram>{`
+STRUCTURAL:
+  part_of        — "Attention is part_of Transformer"
+  contains       — "Transformer contains Attention, MLP, LayerNorm"
+  variant_of     — "Multi-head Attention is variant_of Attention"
+
+DEPENDENCY:
+  depends_on     — "BERT depends_on Transformer Architecture"
+  uses           — "GPT-3 uses Byte Pair Encoding"
+  requires       — "LoRA requires pre-trained weights"
+
+TEMPORAL:
+  supersedes     — "GPT-4 supersedes GPT-3.5" (with date)
+  evolved_from   — "Llama2 evolved_from Llama1"
+  preceded_by    — "Attention preceded_by seq2seq with RNN"
+
+CAUSAL:
+  caused         — "Scaling laws caused shift to larger models"
+  enables        — "Attention enables long-range dependencies"
+  prevents       — "Gradient clipping prevents training instability"
+
+EPISTEMIC:
+  contradicts    — "GPT-3 paper contradicts Chinchilla on optimal token ratio"
+  supports       — "Scaling laws supports compute-optimal training"
+  challenges     — "MoE architecture challenges standard dense scaling"
+          `}</Diagram>
+
+          <Subheading level="h4" text="Relationship trong entity page" />
+          <CodeBlock caption="wiki/entities/bert.md" lang="markdown" code={`# BERT
+**Type**: Project
+**Confidence**: 0.90
+
+## Relationships
+- **depends_on**: [[transformer-architecture]] — uses encoder-only stack
+- **uses**: [[masked-language-modeling]] — core pre-training objective
+- **uses**: [[next-sentence-prediction]] — secondary pre-training task
+- **evolved_from**: [[elmo]] — BERT replaced ELMo as SOTA on NLP benchmarks
+- **superseded_by**: [[roberta]] — same arch, better training (no NSP)
+- **enables**: [[transfer-learning-nlp]] — fine-tune on downstream tasks
+- **contradicts**: [[gpt-architecture]] — bidirectional vs autoregressive
+- **part_of**: [[pre-training-paradigm]] — foundational to modern LLMs`} />
+
+          <ProsCons
+            pros={[
+              'Graph traversal queries: "what depends on X?" → walk dependency edges',
+              'Contradiction chains: "what contradicts GPT-3?" → instant answers',
+              'Impact analysis: "if we deprecate Redis?" → walk used_by edges downstream',
+              'Timeline reconstruction: evolved_from/supersedes chains → automatic lineage',
+            ]}
+            cons={[
+              'Typed relationships cần đồng thuận trong team/schema về taxonomy',
+              'LLM có thể assign wrong relationship types → cần review',
+              'More verbose pages → slightly slower ingest',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t3" title="3. Graph Traversal Queries" tid="3" location="LLM Wiki v2 — Graph traversal">
+          <WhyImportant>
+            <strong>Graph traversal catches connections keyword search misses.</strong>
+            "What's the impact of upgrading Redis?" không thể được trả lời bằng keyword search trên
+            "Redis" — phải walk "used_by" edges để find tất cả components downstream.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Graph traversal query patterns" />
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Query pattern', 'Traversal', 'Ví dụ']}
+            rows={[
+              ['Impact analysis', 'Walk <code>used_by</code> + <code>depends_on</code> edges outward', '"What breaks if Redis goes down?"'],
+              ['Lineage / provenance', 'Walk <code>evolved_from</code> + <code>preceded_by</code> backwards', '"What came before Transformer?"'],
+              ['Contradiction chain', 'Walk <code>contradicts</code> edges', '"What does the wiki disagree about?"'],
+              ['Dependency graph', 'Walk <code>depends_on</code> recursively', '"What does BERT need to work?"'],
+              ['Discovery', 'Walk <code>enables</code> edges', '"What does attention mechanism enable?"'],
+            ]}
+          />
+
+          <Subheading level="h4" text="Graph query prompt" />
+          <CodeBlock caption="Graph traversal query" lang="markdown" code={`Use graph traversal to answer: "What would be impacted if we deprecated the attention mechanism?"
+
+Start at entity: [[attention-mechanism]]
+Walk outward via edges: used_by, depends_on, enables
+
+For each entity encountered:
+- Note it
+- Walk its outward edges (max depth: 3)
+
+Return a dependency tree showing all impacted entities.
+Format as nested list with relationship type on each edge.`} />
+        </Technique>
+      </Section>
+
+      <Section id="hybrid-search" title="Hybrid Search — Scale >200 Pages" themeTag="Search">
+
+        <Technique id="t4" title="4. BM25 — Keyword Search với Stemming" tid="4" location="LLM Wiki v2 — Search section">
+          <WhyImportant>
+            <strong>BM25 catches exact terms — đặc biệt quan trọng với technical jargon.</strong>
+            "FlashAttention" sẽ không match "flash attention" với naive search, nhưng BM25 với
+            stemming và synonym expansion sẽ catch cả hai. Đây là foundation của hybrid search.
+          </WhyImportant>
+
+          <Subheading level="h4" text="BM25 formula" />
+          <CodeBlock caption="BM25 scoring (Okapi BM25)" lang="python" code={`import math
+from collections import Counter
+
+def bm25_score(query_terms: list, doc: str, corpus: list,
+               k1: float = 1.5, b: float = 0.75) -> float:
+    """
+    BM25: term frequency với length normalization.
+    k1 = term frequency saturation (default 1.5)
+    b  = length normalization (default 0.75)
+    """
+    doc_terms = doc.lower().split()
+    doc_len = len(doc_terms)
+    avg_len = sum(len(d.split()) for d in corpus) / len(corpus)
+    tf = Counter(doc_terms)
+    N = len(corpus)
+
+    score = 0
+    for term in query_terms:
+        # Inverse document frequency
+        n_docs_with_term = sum(1 for d in corpus if term in d.lower())
+        idf = math.log((N - n_docs_with_term + 0.5) / (n_docs_with_term + 0.5) + 1)
+
+        # Term frequency with saturation + length normalization
+        tf_term = tf.get(term, 0)
+        tf_norm = (tf_term * (k1 + 1)) / (tf_term + k1 * (1 - b + b * doc_len / avg_len))
+
+        score += idf * tf_norm
+
+    return score
+
+# Practical: use rank-bm25 or whoosh library`} />
+
+          <Subheading level="h4" text="BM25 cho LLM Wiki" />
+          <CodeBlock caption="Setup BM25 index cho wiki/" lang="python" code={`from rank_bm25 import BM25Okapi
+import glob, os
+
+def build_wiki_bm25_index(wiki_dir: str):
+    pages = []
+    for filepath in glob.glob(f"{wiki_dir}/**/*.md", recursive=True):
+        with open(filepath) as f:
+            content = f.read()
+        pages.append({
+            "path": filepath,
+            "content": content,
+            "tokens": content.lower().split()
+        })
+
+    tokenized_corpus = [p["tokens"] for p in pages]
+    bm25 = BM25Okapi(tokenized_corpus)
+    return bm25, pages
+
+def search_bm25(query: str, bm25, pages, top_k=10):
+    query_tokens = query.lower().split()
+    scores = bm25.get_scores(query_tokens)
+    ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
+    return [(pages[i]["path"], score) for i, score in ranked[:top_k] if score > 0]`} />
+
+          <Callout type="info">
+            <strong>BM25 advantages:</strong> Fast, no GPU needed, handles rare terms well,
+            great cho technical jargon (model names, library names). Không cần embedding model.
+          </Callout>
+        </Technique>
+
+        <Technique id="t5" title="5. Vector Search — Semantic Similarity" tid="5" location="LLM Wiki v2 + general RAG best practices">
+          <WhyImportant>
+            <strong>Vector search catches semantic similarity — khi query dùng khác words với document.</strong>
+            "How does Transformer handle long sequences?" sẽ match "attention mechanism enables
+            direct dependencies between any two positions" dù không share keywords.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Embedding pipeline cho wiki" />
+          <CodeBlock caption="Vector index cho wiki pages" lang="python" code={`from sentence_transformers import SentenceTransformer
+import numpy as np
+import faiss
+
+def build_wiki_vector_index(wiki_dir: str):
+    model = SentenceTransformer('all-mpnet-base-v2')  # 768-dim, good quality/speed
+    pages = []
+
+    for filepath in glob.glob(f"{wiki_dir}/**/*.md", recursive=True):
+        with open(filepath) as f:
+            content = f.read()
+
+        # Chunk by section (H2 headers)
+        chunks = split_by_sections(content, max_tokens=512)
+        for chunk in chunks:
+            pages.append({"path": filepath, "content": chunk})
+
+    contents = [p["content"] for p in pages]
+    embeddings = model.encode(contents, show_progress_bar=True)
+
+    # FAISS index for fast similarity search
+    dim = embeddings.shape[1]
+    index = faiss.IndexFlatIP(dim)  # Inner product (cosine after normalization)
+    faiss.normalize_L2(embeddings)
+    index.add(embeddings)
+
+    return index, pages, model
+
+def search_vector(query: str, index, pages, model, top_k=10):
+    query_emb = model.encode([query])
+    faiss.normalize_L2(query_emb)
+    scores, indices = index.search(query_emb, top_k)
+    return [(pages[i]["path"], float(scores[0][j]))
+            for j, i in enumerate(indices[0]) if scores[0][j] > 0.3]`} />
+
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Model', 'Dims', 'Speed', 'Quality']}
+            rows={[
+              ['<code>all-MiniLM-L6-v2</code>', '384', '⚡ Fast', 'Good (personal wiki)'],
+              ['<code>all-mpnet-base-v2</code>', '768', 'Medium', 'Better (recommended)'],
+              ['<code>text-embedding-3-small</code>', '1536', 'API call', 'Best (OpenAI API)'],
+              ['<code>nomic-embed-text</code>', '768', 'Local', 'Best local alternative'],
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t6" title="6. RRF Fusion — Kết hợp Ba Streams" tid="6" location="LLM Wiki v2 — Hybrid search + RRF paper">
+          <WhyImportant>
+            <strong>RRF (Reciprocal Rank Fusion) robust hơn weighted average.</strong>
+            Không cần tune weights giữa BM25/vector/graph scores (chúng có different scales).
+            RRF chỉ dùng rank positions, không scores — stable và predictable.
+          </WhyImportant>
+
+          <Subheading level="h4" text="RRF formula" />
+          <CodeBlock caption="Reciprocal Rank Fusion" lang="python" code={`from collections import defaultdict
+
+def reciprocal_rank_fusion(result_lists: list[list[str]], k: int = 60) -> list[str]:
+    """
+    RRF: fuse multiple ranked lists.
+    k = smoothing constant (default 60, from original paper)
+
+    Score(doc) = Σ 1 / (k + rank_in_list_i)
+    """
+    scores = defaultdict(float)
+
+    for ranked_list in result_lists:
+        for rank, doc_id in enumerate(ranked_list, start=1):
+            scores[doc_id] += 1 / (k + rank)
+
+    # Sort by fused score descending
+    return sorted(scores, key=scores.get, reverse=True)
+
+# Example usage:
+bm25_results = ["doc_a", "doc_c", "doc_b", ...]      # BM25 ranked
+vector_results = ["doc_b", "doc_a", "doc_d", ...]    # Vector ranked
+graph_results = ["doc_e", "doc_a", "doc_c", ...]     # Graph ranked
+
+fused = reciprocal_rank_fusion([bm25_results, vector_results, graph_results])
+# Returns: ["doc_a", "doc_c", "doc_b", "doc_e", "doc_d", ...]`} />
+
+          <Subheading level="h4" text="Full hybrid search pipeline" />
+          <Diagram>{`
+Query: "What are the tradeoffs of attention vs CNN for sequences?"
+      │
+      ├── BM25 search ──────────▶ [attention.md:2.3, cnn.md:1.8, sequences.md:1.2, ...]
+      │   (exact: "attention", "CNN", "sequence")
+      │
+      ├── Vector search ─────────▶ [attention.md:0.91, rnn-comparison.md:0.87, ...]
+      │   (semantic: long-range deps, inductive bias)
+      │
+      └── Graph traversal ───────▶ [attention.md, cnn.md, rnn.md, transformer.md, ...]
+          (walk: attention contradicts CNN for sequences)
+                │
+                ▼
+         RRF Fusion (k=60)
+                │
+                ▼
+         Final ranked: [attention.md, cnn.md, rnn-comparison.md, ...]
+                │
+                ▼
+         LLM reads top-5 pages → synthesize answer
+          `}</Diagram>
+
+          <ProsCons
+            pros={[
+              'RRF không cần weight tuning — rank-based, scale-invariant',
+              'Each stream catches what others miss (complementary, not redundant)',
+              'Graph stream adds structural reasoning không có trong keyword/semantic',
+              'agentmemory: 95.2% LongMemEval-S với ba streams',
+            ]}
+            cons={[
+              'Three systems to maintain (BM25 index, vector index, graph)',
+              'Graph traversal cost tăng với graph size',
+              'Vector index cần rebuild khi wiki content changes',
+              'Overkill cho wiki < 200 pages',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t7" title="7. Benchmarks — Hybrid vs Index.md vs RAG" tid="7" location="agentmemory benchmarks + general research">
+          <Subheading level="h4" text="LongMemEval-S benchmark" />
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Approach', 'LongMemEval-S', 'Notes']}
+            rows={[
+              ['RAG (vector only)', '~65-70%', 'Baseline, semantic only'],
+              ['BM25 only', '~60-65%', 'Good cho exact terms, poor semantic'],
+              ['BM25 + Vector', '~80-85%', 'Significant improvement'],
+              ['BM25 + Vector + Graph', '<strong>95.2%</strong>', 'agentmemory result (rohitg00)'],
+              ['index.md (LLM reads all)', '~70-75%', 'Good at small scale, degrades'],
+            ]}
+          />
+
+          <Callout type="info">
+            <strong>Context:</strong> LongMemEval-S là benchmark đánh giá khả năng recall và
+            reasoning over long-term memory. 95.2% là SOTA trong open-source memory systems
+            tính đến tháng 4/2026.
+          </Callout>
+        </Technique>
+      </Section>
+
+      <Section id="tools" title="Scale Path & Tooling" themeTag="Tools">
+
+        <Technique id="t8" title="8. Scale Breakpoints — Khi nào cần gì" tid="8" location="LLM Wiki v2 — Implementation spectrum">
+          <Subheading level="h4" text="Scale breakpoints" />
+          <Diagram>{`
+0–50 pages: index.md đủ tốt
+  → LLM đọc toàn bộ index trong 1 pass (<10K tokens)
+  → Không cần gì thêm
+
+50–200 pages: index.md + structured format
+  → Add confidence scores, typed relationships
+  → LLM đọc index + drill into relevant pages
+  → Vẫn không cần search infra
+
+200–500 pages: BM25
+  → index.md quá dài để read in 1 pass
+  → Add BM25 index (whoosh hoặc rank-bm25)
+  → LLM query BM25 → get top-10 → read those pages
+
+500–2000 pages: BM25 + Vector
+  → BM25 misses semantic matches
+  → Add vector index (FAISS + sentence-transformers)
+  → Hybrid search với simple score fusion
+
+2000+ pages: Full hybrid (BM25 + Vector + Graph)
+  → Graph traversal essential cho complex queries
+  → RRF fusion
+  → Consider hosted solution (Weaviate, Qdrant, Pinecone)
+          `}</Diagram>
+        </Technique>
+
+        <Technique id="t9" title="9. Obsidian — Visual Layer cho Knowledge Graph" tid="9" location="Karpathy's workflow + tutorial">
+          <WhyImportant>
+            <strong>Obsidian là "IDE" của LLM Wiki.</strong> Karpathy: "Obsidian is the IDE;
+            the LLM is the programmer; the wiki is the codebase." Graph view của Obsidian render
+            [[wiki-links]] thành visual knowledge graph — không cần external graph database.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Obsidian workflow" />
+          <Diagram>{`
+Setup:
+  1. Install Obsidian (free, local)
+  2. Open folder as vault → select wiki/
+  3. Press Ctrl+G → Graph View
+
+Graph View shows:
+  - Nodes = entity pages
+  - Edges = [[wiki-links]] between pages
+  - Clusters = naturally formed topic groups
+  - Isolated nodes = orphan pages (lint target!)
+
+Useful Obsidian features cho LLM Wiki:
+  - Graph View: visual navigation
+  - Backlinks panel: "what links here?"
+  - Quick switcher: jump between pages
+  - Search: full-text trong vault
+  - Web Clipper plugin: save URLs → raw/ as markdown
+          `}</Diagram>
+
+          <Subheading level="h4" text="Obsidian Web Clipper" />
+          <p>
+            Install <strong>Obsidian Web Clipper</strong> browser extension → converts bất kỳ
+            webpage nào thành markdown và save vào <code>raw/</code>. Bookmarking articles
+            trở thành ingest-ready nhanh như bookmark thông thường.
+          </p>
+
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Tool', 'Role trong LLM Wiki']}
+            rows={[
+              ['Obsidian', 'Read/browse wiki, graph view, backlinks'],
+              ['Claude Code', 'LLM agent: ingest, query, lint'],
+              ['Web Clipper', 'Save web articles → raw/ as markdown'],
+              ['VS Code', 'Alternative editor, better cho large files'],
+              ['Git', 'Version control cho wiki/ (optional nhưng recommended)'],
+            ]}
+          />
+        </Technique>
+      </Section>
+
+      <Section id="wrap" title="Tổng kết" themeTag="Wrap">
+        <p>
+          Knowledge graph và hybrid search không phải bước đầu tiên của LLM Wiki — chúng là
+          bước thứ ba và thứ năm trong scaling path. Bắt đầu với index.md. Add typed relationships
+          khi bạn bắt đầu miss connections. Add BM25 khi index.md too long. Add vectors khi
+          semantic queries fail. Add graph traversal khi structural queries fail.
+        </p>
+        <p>
+          agentmemory's 95.2% trên LongMemEval-S với BM25 + vector + graph là proof rằng approach
+          này works ở production scale. Nhưng hầu hết wikis cá nhân sẽ không cần đến tầng đó.
+        </p>
+
+        <RefList
+          title="Tham khảo"
+          items={[
+            '<a href="https://gist.github.com/rohitg00/2067ab416f7bbe447c1977edaaa681e2">LLM Wiki v2 — rohitg00 (agentmemory)</a>',
+            '<a href="https://github.com/rohitg00/agentmemory">agentmemory repo — BM25+vector+graph implementation</a>',
+            '<a href="https://obsidian.md">Obsidian — local-first markdown editor</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

@@ -1,0 +1,17 @@
+---
+// Section.astro — h2 section với theme tag bên phải
+interface Props {
+  id: string;
+  title: string;
+  themeTag?: string;
+}
+
+const { id, title, themeTag } = Astro.props;
+---
+<section id={id}>
+  <h2>
+    {title}
+    {themeTag && <span class="theme-tag">{themeTag}</span>}
+  </h2>
+  <slot />
+</section>

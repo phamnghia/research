@@ -1,0 +1,652 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Chip from '../../../components/Chip.astro';
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RefList from '../../../components/RefList.astro';
+import SummaryTable from '../../../components/SummaryTable.astro';
+import DataTable from '../../../components/DataTable.astro';
+import LinkList from '../../../components/LinkList.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+import ReportImage from '../../../components/ReportImage.astro';
+
+const title = 'Deep Dive: Implementation & Use Cases';
+const description = 'Hướng dẫn đầy đủ triển khai LLM Wiki: setup 30 phút, prompt templates hoàn chỉnh, 5 use cases thực tế, best practices, common mistakes và ecosystem tools (Obsidian, Claude Code, Web Clipper).';
+---
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar
+      intro="Implementation Guide"
+      groups={[
+        {
+          title: 'Bắt đầu',
+          items: [
+            { href: '#intro', label: 'Tổng quan', section: true },
+            { href: '#t1', label: '1. Setup 30 phút' },
+            { href: '#t2', label: '2. First Ingest' },
+          ],
+        },
+        {
+          title: 'Workflows',
+          items: [
+            { href: '#t3', label: '3. Daily Workflow' },
+            { href: '#t4', label: '4. Research Workflow' },
+            { href: '#t5', label: '5. Team Workflow' },
+          ],
+        },
+        {
+          title: 'Use Cases',
+          items: [
+            { href: '#t6', label: '6. Research Wiki' },
+            { href: '#t7', label: '7. Book Wiki' },
+            { href: '#t8', label: '8. Personal Growth' },
+            { href: '#t9', label: '9. Business Wiki' },
+          ],
+        },
+        {
+          title: 'Best Practices',
+          items: [
+            { href: '#t10', label: '10. Common Mistakes' },
+            { href: '#t11', label: '11. Ecosystem Tools' },
+          ],
+        },
+        {
+          title: 'Kết luận',
+          items: [
+            { href: '#wrap', label: 'Tổng kết', section: true },
+          ],
+        },
+      ]}
+    />
+
+    <main>
+      <Breadcrumb href="/reports/llm-wiki/" label="← LLM Wiki Overview" />
+
+      <Hero
+        title={title}
+        subtitle={`Phân tích chi tiết từ báo cáo <a href="/reports/llm-wiki/">Tổng quan LLM Wiki</a> — hướng dẫn implementation đầy đủ, workflows và 5 use cases thực tế.`}
+        meta={[
+          { label: 'Báo cáo cha', value: '<a href="/reports/llm-wiki/">← LLM Wiki Overview</a>' },
+          { label: 'Topic', value: 'Implementation & Use Cases' },
+          { label: 'Thời gian setup', value: '30 phút' },
+          { label: 'Ngày', value: '2026-04-20' },
+        ]}
+      />
+
+      <Section id="intro" title="Tổng quan" themeTag="Intro">
+        <p>
+          Một trong những điểm hấp dẫn nhất của LLM Wiki: không cần code, không cần server,
+          không cần embedding infrastructure để bắt đầu. Một folder, một text editor, và
+          Claude là tất cả những gì cần thiết để có working wiki trong 30 phút.
+        </p>
+        <p>
+          Deep dive này là hướng dẫn thực hành: từng bước setup, đầy đủ prompt templates,
+          5 use cases với ví dụ cụ thể, và tất cả common mistakes để tránh.
+        </p>
+
+        <ReportImage
+          src="https://datasciencedojo.com/wp-content/uploads/2026/04/LLM-Wiki-by-Andrej-Karpahty.png"
+          alt="LLM Wiki concept illustration: raw documents on left, wiki entity pages in middle, user querying on right"
+          caption="LLM Wiki pattern: raw sources (immutable) → LLM compilation → structured wiki (persistent) → efficient queries."
+          source="https://datasciencedojo.com/blog/llm-wiki-tutorial/"
+          sourceLabel="Data Science Dojo"
+          bordered={true}
+        />
+      </Section>
+
+      <Section id="setup" title="Setup & First Run" themeTag="Setup">
+
+        <Technique id="t1" title="1. Setup 30 phút — Từ Zero đến Working Wiki" tid="1" location="Data Science Dojo Tutorial + MindStudio Guide">
+          <WhyImportant>
+            <strong>Threshold to start là gần như zero.</strong> Không có npm install, không có
+            Docker, không có API keys cần configure. Chỉ cần folder + Claude.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Bước 1: Tạo folder structure" />
+          <CodeBlock caption="Terminal" lang="bash" code={`# Tạo wiki folder
+mkdir -p ~/my-wiki/raw
+mkdir -p ~/my-wiki/wiki
+
+# Hoặc tên cụ thể theo topic
+mkdir -p ~/ai-research-wiki/raw
+mkdir -p ~/ai-research-wiki/wiki`} />
+
+          <Subheading level="h4" text="Bước 2: Tạo CLAUDE.md schema" />
+          <CodeBlock caption="~/my-wiki/CLAUDE.md" lang="markdown">
+            <Fragment is:raw>{`# My Wiki Schema
+
+## Purpose
+[Mô tả mục đích wiki này — vd: "AI research knowledge base" hoặc "Product team knowledge"]
+
+## Directory Structure
+- raw/ — immutable source documents (PDFs, articles, notes). NEVER modify.
+- wiki/ — LLM-generated entity pages. You own this layer.
+- wiki/index.md — catalog of all pages. Update after every ingest.
+- wiki/log.md — chronological operation log. Append-only.
+- CLAUDE.md — this file (schema and workflows).
+
+## Entity Page Format
+\`\`\`markdown
+# [Entity Name]
+**Type**: Concept | Person | Project | Library | Decision | Event
+**Summary**: One sentence (no pronouns — must be standalone).
+**Tags**: #tag1 #tag2
+**Sources**: [[raw/filename.pdf]]
+**Confidence**: 0.XX (N sources, last confirmed YYYY-MM-DD)
+**Last Updated**: YYYY-MM-DD
+
+---
+
+## Overview
+2-3 paragraph explanation.
+
+## Key Properties
+- Specific, verifiable claim 1
+- Specific, verifiable claim 2
+
+## Relationships
+- **depends_on**: [[Entity A]] — why
+- **contradicts**: [[Entity B]] — what they disagree on
+
+## Open Questions
+- What's still unclear?
+\`\`\`
+
+## Workflows
+
+### Ingest
+When I say "ingest [file]":
+1. Read source from raw/
+2. List entities found → wait for my OK before writing
+3. Create/update entity pages
+4. Update wiki/index.md
+5. Append to wiki/log.md: "## [DATE] ingest | [title]"
+
+### Query
+When I ask a question:
+1. Read wiki/index.md → find relevant pages
+2. Read those pages → synthesize with citations
+3. If answer is valuable → offer to file as new wiki page
+
+### Lint (run every ~20 new pages)
+Check: contradictions, orphan pages, stale confidence, missing pages.
+Report first. Fix only with my permission.
+`}</Fragment>
+          </CodeBlock>
+
+          <Subheading level="h4" text="Bước 3: Install Obsidian (optional nhưng recommended)" />
+          <Diagram>{`
+1. Download Obsidian từ obsidian.md (free)
+2. Launch → "Open folder as vault" → chọn wiki/
+3. Press Cmd/Ctrl+G → Graph View
+   (visualize connections giữa entity pages)
+4. Install Web Clipper extension trong Chrome/Firefox
+   (save web articles → raw/ as markdown)
+          `}</Diagram>
+
+          <Subheading level="h4" text="Bước 4: Install Claude Code (nếu muốn terminal)" />
+          <CodeBlock caption="Terminal" lang="bash" code={`# Install Node.js first: nodejs.org
+npm install -g @anthropic-ai/claude-code
+
+# Navigate to wiki folder + launch
+cd ~/my-wiki
+claude`} />
+
+          <Callout type="success">
+            <strong>30 phút breakdown:</strong> Tạo folders (2 min) → Copy CLAUDE.md template
+            (5 min) → Tìm và download 5 PDFs về topic bạn quan tâm (10 min) → Paste ingest
+            prompt vào Claude (5 min) → Open Obsidian, view graph (3 min) → Done!
+          </Callout>
+        </Technique>
+
+        <Technique id="t2" title="2. First Ingest — Khi có sources đầu tiên" tid="2" location="Data Science Dojo Tutorial">
+          <WhyImportant>
+            <strong>First ingest đặt nền móng cho tất cả.</strong> 5 sources đầu tiên về cùng
+            một topic tạo ra dense graph với nhiều connections. 5 sources random thì graph sẽ
+            sparse và ít hữu ích hơn.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Chọn sources đầu tiên — Tips" />
+          <Diagram>{`
+Good starting set (5 sources):
+  ✅ Cùng domain/topic
+  ✅ Xây dựng trên nhau (sequential, not parallel)
+  ✅ Mix: foundational + recent
+  ✅ Ví dụ AI research: Attention (2017) → BERT (2018) → GPT-3 (2020) → Foundation Models (2021) → RLHF (2022)
+
+Bad starting set:
+  ❌ 5 topics hoàn toàn khác nhau
+  ❌ 5 sources trùng lặp (same info)
+  ❌ Mix quá nhiều media types (video transcript + PDF + code + article)
+          `}</Diagram>
+
+          <Subheading level="h4" text="First ingest prompt (Claude.ai)" />
+          <CodeBlock caption="Paste vào Claude.ai với PDFs attached" lang="markdown" code={`You are maintaining my research wiki. I'm attaching [N] sources on [TOPIC].
+
+Please read all sources, then:
+
+1. Identify all key entities across the sources (concepts, people, systems, methods).
+   List them first — I'll confirm before you write pages.
+
+2. For each confirmed entity, create one markdown file using this format:
+   [paste format from CLAUDE.md]
+
+3. Add [[wiki-links]] connecting related concepts between pages.
+
+4. Note any contradictions or disagreements between sources.
+
+5. Create wiki/index.md listing all pages with one-line summaries.
+
+6. Create wiki/log.md with:
+   ## [2026-04-20] ingest | [list of sources]
+   Created: [page list]
+   Flags: [any contradictions found]
+
+After all pages are created, give me a brief summary:
+- Total pages created
+- Key connections discovered
+- Any contradictions found`} />
+
+          <Subheading level="h4" text="First ingest prompt (Claude Code)" />
+          <CodeBlock caption="Trong Claude Code terminal" lang="markdown" code={`I've added 5 papers to my raw/ folder:
+- raw/attention-2017.pdf
+- raw/bert-2018.pdf
+- raw/gpt3-2020.pdf
+- raw/foundation-models-2021.pdf
+- raw/rlhf-2022.pdf
+
+Please ingest all of them following the CLAUDE.md workflow.
+Read each file, create entity pages in wiki/, update index.md, and log.md.`} />
+
+          <ReportImage
+            src="https://datasciencedojo.com/wp-content/uploads/2026/04/Entity-Pages-Created.png"
+            alt="Claude Code output showing entity pages being created during wiki ingest"
+            caption="Claude Code tạo entity pages sau khi ingest 5 papers. Mỗi page là một concept với wiki-links đến related concepts."
+            source="https://datasciencedojo.com/blog/llm-wiki-tutorial/"
+            sourceLabel="Data Science Dojo Tutorial"
+            bordered={true}
+          />
+        </Technique>
+      </Section>
+
+      <Section id="workflows" title="Ongoing Workflows" themeTag="Workflow">
+
+        <Technique id="t3" title="3. Daily Workflow — Thêm sources và query" tid="3" location="Karpathy + MindStudio Guide">
+          <Subheading level="h4" text="Daily routine (5-10 phút/ngày)" />
+          <Diagram>{`
+Sáng (2 min):
+  → Open Claude Code trong wiki/
+  → "What did I add to the wiki this week? Any open questions?"
+  → Get context summary từ log.md
+
+Trong ngày:
+  → Gặp article/paper thú vị → save bằng Web Clipper → tự động vào raw/
+  → Gặp câu hỏi → hỏi wiki trước khi Google
+
+Cuối ngày (5 min):
+  → "Ingest [article tôi vừa đọc]"
+  → "File the insights from today's work as wiki/crystals/[date].md"
+          `}</Diagram>
+
+          <Subheading level="h4" text="Query patterns hàng ngày" />
+          <CodeBlock caption="Daily query examples" lang="markdown" code={`# Trước khi viết bài/report:
+"What do I know about [topic]? Summarize all relevant wiki pages."
+
+# Khi gặp term không quen:
+"Does my wiki have a page on [term]? If yes, what does it say?"
+
+# Khi cần so sánh:
+"Based on my wiki, compare [A] vs [B] on dimensions: [X, Y, Z]"
+
+# Gap finding:
+"What are the biggest gaps in my wiki on [topic]?
+What sources should I read next?"
+
+# Weekly synthesis:
+"Generate a one-page summary of everything I've learned this week
+based on wiki/log.md and recent wiki pages."`} />
+        </Technique>
+
+        <Technique id="t4" title="4. Research Workflow — Deep dive vào topic mới" tid="4" location="Karpathy's described use case">
+          <WhyImportant>
+            <strong>Research wiki là use case Karpathy design cho.</strong> Thay vì đọc 20 papers
+            và forget 80% sau 2 tuần, mỗi paper được compiled vào wiki — knowledge cộng dồn
+            thực sự.
+          </WhyImportant>
+
+          <Subheading level="h4" text="6-week research workflow" />
+          <Diagram>{`
+Week 1: Foundation
+  → Collect 10-15 foundational papers vào raw/
+  → Ingest all → initial wiki (30-40 entity pages)
+  → Identify: what are the 5 core concepts?
+
+Week 2-3: Deep dive
+  → Ingest papers theo từng sub-topic
+  → Query + file insights ("What I found: X contradicts Y")
+  → Graph view trong Obsidian → identify clusters
+
+Week 4: Synthesis
+  → "Synthesize current understanding of [topic] as a structured essay"
+  → File as wiki/synthesis/[topic]-overview.md
+  → Identify remaining gaps
+
+Week 5: Gap filling
+  → Research identified gaps → new sources → ingest
+  → Run lint → fix contradictions
+
+Week 6: Output
+  → "Based on my wiki, write [blog post / paper outline / presentation outline]"
+  → Wiki is ready to cite in your actual output
+          `}</Diagram>
+        </Technique>
+
+        <Technique id="t5" title="5. Team Workflow — Shared Knowledge Base" tid="5" location="LLM Wiki v2 — Multi-agent section">
+          <WhyImportant>
+            <strong>Internal wikis maintained by humans fail because maintenance is drudgery.</strong>
+            LLM Wiki flips this: LLM does maintenance, humans provide direction. For teams,
+            this can replace Confluence/Notion maintenance that nobody actually does.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Team setup" />
+          <CodeBlock caption="Team wiki structure" lang="bash" code={`team-wiki/
+├── CLAUDE.md                # Shared schema (in git, reviewed by team)
+├── raw/
+│   ├── shared/              # Team-curated sources (PRs, RFCs, meeting notes)
+│   └── personal/[name]/     # Individual contributions
+├── wiki/
+│   ├── shared/              # Shared entity pages
+│   │   ├── index.md
+│   │   └── log.md
+│   └── personal/[name]/     # Personal working notes
+└── scripts/
+    └── sync.sh              # Merge personal → shared (manual trigger)`} />
+
+          <Subheading level="h4" text="Governance cho team wiki" />
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['What', 'Who decides', 'How']}
+            rows={[
+              ['Schema updates', 'Tech lead + review', 'PR vào CLAUDE.md'],
+              ['Ingest shared sources', 'Anyone', 'Drop vào raw/shared/'],
+              ['Create shared pages', 'Anyone', 'Ingest → LLM creates'],
+              ['Merge personal → shared', 'Author', 'Manual trigger'],
+              ['Contradiction resolution', 'Domain owner', 'Lint flags → discussion'],
+              ['Archive stale content', 'Tech lead quarterly', 'Lint report → decision'],
+            ]}
+          />
+        </Technique>
+      </Section>
+
+      <Section id="usecases" title="Use Cases — 5 Contexts" themeTag="UseCases">
+
+        <Technique id="t6" title="6. Research Wiki — Papers và Articles" tid="6" location="Karpathy gist — Research use case">
+          <Subheading level="h4" text="Ví dụ: AI Research Wiki" />
+          <Diagram>{`
+Domain: Large Language Models research
+Sources: arXiv papers, blog posts, conference talks
+
+After 3 months:
+  → 150+ entity pages: models, concepts, techniques, people
+  → 500+ cross-references
+  → 20+ synthesis pages (comparisons, timelines)
+  → Wiki can answer: "What is the current SOTA on X?"
+  → Wiki can generate: "What's missing in my research?"
+
+Karpathy's actual result:
+  "~100 articles, ~400,000 words — wiki still navigates efficiently.
+   Faster and more accurate for complex queries than RAG pipeline."
+          `}</Diagram>
+
+          <Callout type="unique">
+            <strong>Tolkien Gateway analogy.</strong> Karpathy: "Think of fan wikis like Tolkien
+            Gateway — thousands of interlinked pages covering characters, places, events, built
+            by a community of volunteers over years. You could build something like that personally
+            as you read, with the LLM doing all the cross-referencing and maintenance."
+          </Callout>
+        </Technique>
+
+        <Technique id="t7" title="7. Book Wiki — Companion Knowledge Base khi đọc" tid="7" location="Karpathy gist — Reading a book use case">
+          <Subheading level="h4" text="Quy trình đọc sách với LLM Wiki" />
+          <Diagram>{`
+Trước khi đọc:
+  → Create book-specific CLAUDE.md với entity types: Character, Place, Theme, Event
+
+Trong khi đọc (sau mỗi chapter):
+  → "Ingest my notes from Chapter [N]: [summary]"
+  → LLM creates/updates character pages, plot threads, themes
+
+Sau khi đọc xong:
+  → Query: "Summarize the arc of character X across all chapters"
+  → Query: "What are the 5 main themes and how they develop?"
+  → Query: "Create a timeline of events"
+
+Result:
+  → Companion wiki richer hơn Wikipedia (personalized insights)
+  → Có thể revisit book sau 1 năm và quiz wiki thay vì reread
+          `}</Diagram>
+
+          <CodeBlock caption="Book-specific CLAUDE.md addition" lang="markdown" code={`## Book-specific Entity Types
+
+Character:
+  - full_name, role (protagonist/antagonist/supporting)
+  - first_appearance (chapter N)
+  - key_relationships: [[other characters]]
+  - arc: development through chapters
+
+Place:
+  - importance, first_mention, events that happened here
+
+Theme:
+  - evidence (list of scenes/quotes)
+  - development_arc
+
+Event:
+  - chapter, participants, consequences, plot_thread`} />
+        </Technique>
+
+        <Technique id="t8" title="8. Personal Growth Wiki — Journaling có cấu trúc" tid="8" location="Karpathy gist — Personal use case">
+          <Subheading level="h4" text="Self-knowledge accumulation" />
+          <Diagram>{`
+Sources:
+  → Daily journal entries (raw/journal/YYYY-MM-DD.md)
+  → Articles về personal development
+  → Podcast/book notes
+  → Therapy session notes (filtered for sensitive info)
+
+Entity types:
+  → Pattern: behavioral patterns noticed
+  → Goal: ongoing goals với progress
+  → Insight: realizations about self
+  → Challenge: recurring difficulties
+
+After 6 months:
+  → "What patterns appear repeatedly in my journal?"
+  → "How has my thinking on [topic] evolved?"
+  → "What were my top 3 growth areas this year?"
+
+Benefits:
+  → LLM không bị overwhelmed bởi one bad day (like human memory)
+  → Synthesis qua nhiều months → patterns bạn không tự thấy
+  → Annual review: "Summarize my year based on wiki"
+          `}</Diagram>
+
+          <Callout type="warn">
+            <strong>Privacy critical cho personal wiki.</strong> Filter sensitive data trước khi
+            ingest. Không để journal entries raw vào wiki chung với công việc.
+            Dùng separate vault cho personal + professional.
+          </Callout>
+        </Technique>
+
+        <Technique id="t9" title="9. Business/Team Wiki — Always Current Internal Docs" tid="9" location="Karpathy gist — Business use case">
+          <Subheading level="h4" text="Vấn đề LLM Wiki giải quyết cho teams" />
+          <Diagram>{`
+Traditional internal wikis fail because:
+  ❌ No one wants to do the maintenance (Confluence graveyards)
+  ❌ Knowledge dies in Slack threads
+  ❌ Onboarding is "read these 50 docs" (painful)
+  ❌ Architecture decisions undocumented
+
+LLM Wiki flips the model:
+  ✅ Slack thread export → raw/ → LLM ingests → wiki page
+  ✅ Meeting transcript → raw/ → LLM ingests → decision + action pages
+  ✅ PR description → raw/ → LLM ingests → system change documented
+  ✅ Customer call → raw/ → LLM ingests → product feedback synthesized
+
+Result:
+  → Wiki là living document thực sự
+  → Onboarding: "Ask the wiki anything about [system]"
+  → Architecture decisions có rationale được preserved
+          `}</Diagram>
+
+          <CodeBlock caption="Meeting ingest example" lang="markdown" code={`# Drop meeting transcript vào raw/meetings/2026-04-20-arch-review.md
+# Then tell Claude:
+
+"Ingest raw/meetings/2026-04-20-arch-review.md
+
+This is a meeting transcript. Extract:
+1. DECISIONS: Any explicit decisions made
+2. ACTION ITEMS: Assigned tasks (owner, deadline)
+3. CONTEXT: Technical context established
+4. OPEN QUESTIONS: Unresolved items
+
+Create:
+- wiki/decisions/2026-04-20-redis-migration.md (if decision made)
+- wiki/people/[owner].md (if new team member mentioned)
+- wiki/projects/[project].md (if project discussed)"`} />
+        </Technique>
+      </Section>
+
+      <Section id="bestpractices" title="Best Practices" themeTag="Best Practices">
+
+        <Technique id="t10" title="10. Common Mistakes — Và Cách Tránh" tid="10" location="Data Science Dojo Tutorial + community experience">
+          <WhyImportant>
+            <strong>Most wikis fail for predictable, preventable reasons.</strong>
+            Biết trước mistakes giúp tránh 90% những vấn đề người dùng mới gặp phải.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Top 6 mistakes" />
+
+          <Callout type="warn">
+            <strong>Mistake 1: Quá nhiều thứ trong 1 page.</strong> Mỗi entity page nên cover
+            ĐÚNG 1 concept. Nếu một page bắt đầu cover 2 ideas → split it. Dense single-concept
+            pages tạo better links và better answers.
+          </Callout>
+
+          <Callout type="warn">
+            <strong>Mistake 2: Không bao giờ chạy lint.</strong> Small errors propagate fast.
+            Một wrong claim → linked bởi 3 pages → organized misinformation. Chạy lint sau
+            mỗi 20 pages mới.
+          </Callout>
+
+          <Callout type="warn">
+            <strong>Mistake 3: Thêm quá nhiều unrelated topics cùng lúc.</strong>
+            5 papers về cùng topic → dense, useful graph.
+            5 papers về 5 topics khác nhau → sparse, less useful.
+            Build depth trước breadth.
+          </Callout>
+
+          <Callout type="warn">
+            <strong>Mistake 4: Không file good answers back vào wiki.</strong>
+            Nếu Claude synthesize một insightful comparison → file it.
+            Nếu bạn discover một connection qua research → file it.
+            Explorations mà không được filed thì lost.
+          </Callout>
+
+          <Callout type="warn">
+            <strong>Mistake 5: Schema drift.</strong>
+            Nếu format của pages drift (mỗi page có structure khác nhau), LLM sẽ
+            inconsistent. Update CLAUDE.md ngay khi bạn change format. Treat schema như
+            production config.
+          </Callout>
+
+          <Callout type="warn">
+            <strong>Mistake 6: One giant wiki cho mọi thứ.</strong>
+            Separate wikis theo domain work tốt hơn. Một wiki cho research, một cho personal,
+            một cho work. Graphs dày hơn và answers chính xác hơn khi wikis focused.
+          </Callout>
+        </Technique>
+
+        <Technique id="t11" title="11. Ecosystem Tools" tid="11" location="MindStudio + community">
+          <Subheading level="h4" text="Tool stack cho LLM Wiki" />
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Tool', 'Role', 'Cost']}
+            rows={[
+              ['<strong>Claude Code</strong>', 'Primary LLM agent — ingest/query/lint', 'Anthropic subscription'],
+              ['<strong>Obsidian</strong>', 'Visual wiki browser, graph view, backlinks', 'Free (local)'],
+              ['<strong>Obsidian Web Clipper</strong>', 'Save web articles → raw/ as markdown', 'Free'],
+              ['<code>rank-bm25</code>', 'BM25 search index (>200 pages)', 'Free (Python package)'],
+              ['<code>sentence-transformers</code>', 'Local vector embeddings', 'Free (local)'],
+              ['FAISS', 'Vector similarity search', 'Free (Meta OSS)'],
+              ['MindStudio', 'Wrap wiki in shareable web UI cho team', 'Paid'],
+              ['Git', 'Version control cho wiki/ + CLAUDE.md', 'Free'],
+            ]}
+          />
+
+          <Subheading level="h4" text="Git integration" />
+          <CodeBlock caption="Git setup cho wiki" lang="bash" code={`cd ~/my-wiki
+git init
+echo "raw/" >> .gitignore  # raw sources thường quá lớn để version control
+git add CLAUDE.md wiki/
+git commit -m "Initial wiki with 5 papers"
+
+# Weekly commit:
+git add wiki/
+git commit -m "Week of $(date +%Y-%m-%d): added N pages on [topic]"
+
+# Benefit: có thể rollback nếu LLM tạo bad content trong lint/bulk ops`} />
+
+          <Callout type="success">
+            <strong>Minimal viable stack:</strong> Chỉ cần Claude + folder. Thêm Obsidian cho
+            visual navigation. Thêm Git nếu muốn version control. Thêm BM25/vector chỉ khi
+            wiki >200 pages.
+          </Callout>
+        </Technique>
+      </Section>
+
+      <Section id="wrap" title="Tổng kết — Bắt đầu ngay hôm nay" themeTag="Wrap">
+        <p>
+          LLM Wiki không yêu cầu bất kỳ background kỹ thuật nào để bắt đầu. Nếu bạn có 30 phút
+          và 5 PDFs về topic bạn đang research, bạn có thể có working wiki hôm nay.
+        </p>
+        <p>
+          Key insight cuối: <strong>momentum quan trọng hơn perfection</strong>. Wiki với 20 pages
+          imperfect mà được maintain weekly sẽ hữu ích hơn nhiều wiki với 200 pages perfect
+          mà không ai dùng. Bắt đầu nhỏ, build habit, scale khi cần.
+        </p>
+
+        <Callout type="success">
+          <strong>Action items:</strong>
+          (1) Tạo folder <code>my-wiki/raw</code> và <code>my-wiki/wiki</code>.
+          (2) Copy CLAUDE.md template từ deep dive Architecture.
+          (3) Collect 5 sources về topic bạn đang research nhất.
+          (4) Paste ingest prompt vào Claude.
+          (5) Open Obsidian để xem graph.
+        </Callout>
+
+        <RefList
+          title="Tham khảo đầy đủ"
+          items={[
+            '<a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">LLM Wiki gist (original) — Andrej Karpathy, April 4, 2026</a>',
+            '<a href="https://datasciencedojo.com/blog/llm-wiki-tutorial/">Step-by-step Tutorial — Data Science Dojo</a>',
+            '<a href="https://www.mindstudio.ai/blog/andrej-karpathy-llm-wiki-knowledge-base-claude-code">LLM Wiki với Claude Code — MindStudio</a>',
+            '<a href="https://gist.github.com/rohitg00/2067ab416f7bbe447c1977edaaa681e2">LLM Wiki v2 — rohitg00 (agentmemory, production extensions)</a>',
+            '<a href="https://obsidian.md">Obsidian — local markdown editor + graph view</a>',
+            '<a href="https://karpathy.ai/zero-to-hero.html">Zero to Hero — Karpathy Neural Networks course</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

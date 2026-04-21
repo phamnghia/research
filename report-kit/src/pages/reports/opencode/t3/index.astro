@@ -1,0 +1,406 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T3 — Deferred tool-call coordination | opencode"
+  description="Phân tích sâu kỹ thuật Deferred coordination của opencode: đồng bộ hóa giữa stream consumer và async tool executors với timeout per-tool."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview', label: 'Tổng quan', section: true },
+        { href: '#anatomy', label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác với T-khác' },
+        { href: '#failure', label: 'Failure modes' },
+        { href: '#compare', label: 'So sánh harness' },
+        { href: '#recipe', label: 'Implementation recipe' },
+        { href: '#refs', label: 'Tham khảo' },
+      ]},
+    ]} />
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+      <Hero
+        title="T3 — Deferred tool-call coordination"
+        subtitle="Mỗi tool call được gán một <code>Deferred&lt;void&gt;</code> — sync point giữa stream consumer và async tool executor. Loop chỉ proceed khi TẤT CẢ deferred resolved, với timeout 250ms mỗi cái."
+        meta={[
+          { label: 'Nhóm', value: 'A — Agent Loop & Streaming' },
+          { label: 'File', value: '<code>session/processor.ts</code>' },
+          { label: 'Lines', value: '134–195, 273–278, 544–582' },
+          { label: 'ID', value: 'A.3' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Overview">
+        <p>
+          Vấn đề cốt lõi của agent streaming: stream events đến tuần tự và nhanh (text delta
+          mỗi vài ms), nhưng tool execution là async và chậm (có thể mất nhiều giây). Stream
+          consumer không thể block — nó phải đọc tiếp event kế tiếp. Nhưng loop không thể
+          proceed đến iteration mới khi tool vẫn đang chạy.
+        </p>
+        <p>
+          opencode giải quyết bằng <strong>Deferred</strong> — một promise-like object được
+          tạo khi stream nhận <code>tool-input-start</code> event, và được resolved khi tool
+          executor hoàn thành. Cleanup phase sau stream drain sẽ <code>await</code> tất cả
+          Deferred trước khi loop tiếp.
+        </p>
+
+        <WhyImportant>
+          <strong>Tại sao quan trọng:</strong> Nếu stream end trước khi tool done, có hai tình huống
+          xấu: (1) loop proceed với incomplete tool results — model thấy output thiếu, (2) tool
+          kết thúc sau khi state đã được reset — kết quả bị lost. Deferred là "bridge" chính xác
+          giữa hai timeline không đồng bộ này.
+        </WhyImportant>
+
+        <Callout type="info">
+          <strong>Deferred vs Promise:</strong> Effect <code>Deferred&lt;void&gt;</code> về mặt
+          khái niệm giống <code>Promise&lt;void&gt;</code> với <code>resolve</code> external.
+          Điểm khác: Deferred integrate với Effect fiber scheduler — có thể interrupt, timeout,
+          và compose với operators khác.
+        </Callout>
+
+        <Callout type="warn">
+          <strong>Timeout 250ms:</strong> Giá trị 250ms là deliberate — đủ để tool "fast" (file read,
+          ls, echo) hoàn thành, nhưng không block quá lâu nếu tool bị stuck. Tool nặng (compile,
+          network request) thường không bị ảnh hưởng vì chúng resolve trước timeout.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Bước 1: Tạo Deferred khi stream nhận tool-input-start" />
+        <p>
+          Trong <code>handleEvent</code> (T2), khi nhận <code>tool-input-start</code>, một entry
+          mới được thêm vào <code>ctx.toolcalls</code> với <code>Deferred</code> chưa resolved:
+        </p>
+        <CodeBlock caption="session/processor.ts — tạo Deferred">
+          <Fragment is:raw>{`
+// Trong handleEvent switch:
+case "tool-input-start": {
+  const part = yield* session.updatePart({
+    status: "pending",
+    input: {}
+  })
+  ctx.toolcalls[value.id] = {
+    done: yield* Deferred.make<void>(),  // ← sync point, chưa resolved
+    partID: part.id,
+    messageID: ...,
+    sessionID: ...
+  }
+  return
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Bước 2: Tool executor resolve Deferred khi done" />
+        <p>
+          Khi tool execution hoàn thành (success hay error), executor lấy Deferred từ
+          <code>ctx.toolcalls</code> và gọi <code>Deferred.succeed</code>:
+        </p>
+        <CodeBlock caption="session/processor.ts — resolve Deferred">
+          <Fragment is:raw>{`
+// Trong tool executor (sau khi tool chạy xong):
+const toolcall = ctx.toolcalls[toolCallId]
+if (toolcall) {
+  yield* Deferred.succeed(toolcall.done, undefined)
+  // Bất kể tool thành công hay thất bại,
+  // Deferred PHẢI được resolve để không block cleanup
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Bước 3: Cleanup phase await tất cả Deferred" />
+        <p>
+          Sau khi stream drain xong, cleanup function iterate qua tất cả entries trong
+          <code>ctx.toolcalls</code> và await mỗi Deferred với timeout:
+        </p>
+        <CodeBlock caption="session/processor.ts:273-278 — cleanup await all">
+          <Fragment is:raw>{`
+// Trong cleanup():
+yield* Effect.forEach(
+  Object.values(ctx.toolcalls),
+  (call) => Deferred.await(call.done).pipe(
+    Effect.timeout("250 millis"),  // per-tool timeout
+    Effect.ignore,                  // ignore timeout error (không throw)
+  ),
+  { concurrency: "unbounded" }      // await all in parallel
+)
+`}</Fragment>
+        </CodeBlock>
+
+        <p>
+          <code>concurrency: "unbounded"</code> nghĩa là tất cả Deferred được await đồng thời —
+          không phải sequential. Điều này quan trọng khi có nhiều tool calls trong một step.
+          Nếu sequential, tổng thời gian chờ sẽ là <code>N * 250ms</code> thay vì <code>250ms</code>.
+        </p>
+
+        <Subheading level="h3" text="ToolCall type definition" />
+        <CodeBlock caption="session/processor.ts:134-195 — ToolCall type">
+          <Fragment is:raw>{`
+type ToolCall = {
+  partID: MessageV2.ToolPart["id"]
+  messageID: MessageV2.ToolPart["messageID"]
+  sessionID: MessageV2.ToolPart["sessionID"]
+  done: Deferred.Deferred<void>  // ← sync point
+}
+
+// ctx là per-stream state:
+const ctx = {
+  toolcalls: {} as Record<string, ToolCall>,
+  // ...
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+Timeline: một iteration với 2 tool calls song song
+
+T2 stream consumer:
+  ──[tool-input-start id=A]──[tool-input-start id=B]──[tool-call A]──[tool-call B]──[finish]──►
+         │                          │                       │              │
+         ▼                          ▼                       ▼              ▼
+    Deferred A               Deferred B             execute A          execute B
+    (unresolved)             (unresolved)            (async)            (async)
+                                                         │                  │
+T4 cleanup (Effect.ensuring — luôn chạy):               │                  │
+  stream drain done                                      │                  │
+         │                                               │                  │
+         ▼                                               │                  │
+  await [Deferred A, Deferred B]  ◄───────── resolve A ─┘  ◄── resolve B ──┘
+  (concurrency: unbounded, timeout 250ms each)
+         │
+         ▼
+  T1: loop tiếp — check exit condition
+  (lastAssistant.finish, hasToolCalls, v.v.)
+
+T6 doom loop check xảy ra TRONG T2 khi nhận tool-call event
+`}</Diagram>
+
+        <p>
+          T3 là connector giữa T2 (stream consumer) và T4 (cleanup). T2 tạo Deferred entries,
+          T4 cleanup awaits chúng. T1 chỉ proceed đến iteration mới sau khi T4 cleanup hoàn thành.
+          Nếu T4 bị interrupt (user cancel), cleanup vẫn chạy nhờ <code>Effect.ensuring</code>
+          — nhưng Deferred sẽ bị abandoned với status "aborted" thay vì "success".
+        </p>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failures">
+        <Subheading level="h3" text="Failure 1: Stream end trước khi tool done" />
+        <p>
+          Nếu không có Deferred coordination, stream kết thúc và loop proceed ngay — tool result
+          bị lost:
+        </p>
+        <CodeBlock caption="Không có coordination — tool result bị mất">
+          <Fragment is:raw>{`
+// WRONG:
+for await (const event of stream) {
+  if (event.type === "tool-call") {
+    executeToolAsync(event)  // fire-and-forget!
+  }
+}
+// Stream done → loop tiếp → model không thấy tool result
+// Tool vẫn đang chạy nhưng không có nơi để lưu kết quả
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 2: Sequential await thay vì parallel" />
+        <p>
+          Nếu await sequential thay vì <code>concurrency: "unbounded"</code>, performance giảm
+          đáng kể khi có nhiều tool calls:
+        </p>
+        <CodeBlock caption="Sequential await — chậm khi nhiều tools">
+          <Fragment is:raw>{`
+// WRONG: sequential
+for (const call of Object.values(ctx.toolcalls)) {
+  await waitForDeferred(call.done, 250)  // chờ từng cái
+}
+// Nếu có 5 tools: chờ 5 * 250ms = 1.25 giây worst case
+
+// CORRECT: parallel
+await Promise.all(
+  Object.values(ctx.toolcalls).map(call =>
+    Promise.race([call.promise, sleep(250)])
+  )
+)
+// Chờ tối đa 250ms dù có bao nhiêu tools
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Failure 3: Không resolve Deferred khi tool error" />
+        <p>
+          Nếu tool executor throw và không resolve Deferred, cleanup phase sẽ block đến timeout:
+        </p>
+        <CodeBlock caption="Tool error không resolve Deferred">
+          <Fragment is:raw>{`
+// WRONG:
+async function executeTool(tc: ToolCall) {
+  const result = await runTool(tc)  // có thể throw!
+  deferred.resolve()                 // không chạy nếu throw trên
+}
+
+// CORRECT: finally block
+async function executeTool(tc: ToolCall) {
+  try {
+    const result = await runTool(tc)
+    // lưu result
+  } finally {
+    deferred.resolve()  // luôn resolve, dù success hay error
+  }
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Tool sync mechanism', 'Parallel tools', 'Per-tool timeout']}
+          rows={[
+            [
+              '<strong>opencode</strong>',
+              '<Chip variant="green">Effect Deferred</Chip>',
+              '<Chip variant="green">Unbounded concurrency</Chip>',
+              '<Chip variant="green">250ms per tool</Chip>',
+            ],
+            [
+              'Claude Code',
+              '<Chip variant="amber">Promise.all() trực tiếp</Chip>',
+              '<Chip variant="green">Có</Chip>',
+              '<Chip variant="red">Không có per-tool timeout</Chip>',
+            ],
+            [
+              'Pydantic AI',
+              '<Chip variant="green">Explicit deferred tool call semantics</Chip>',
+              '<Chip variant="green">Có</Chip>',
+              '<Chip variant="amber">Global timeout</Chip>',
+            ],
+            [
+              'LangChain',
+              '<Chip variant="red">Sequential tool execute</Chip>',
+              '<Chip variant="red">Không</Chip>',
+              '<Chip variant="red">Không</Chip>',
+            ],
+            [
+              'Aider',
+              '<Chip variant="red">Synchronous (blocking)</Chip>',
+              '<Chip variant="red">Không</Chip>',
+              '<Chip variant="red">Không</Chip>',
+            ],
+          ]}
+        />
+
+        <p>
+          Pydantic AI có semantics gần giống nhất với opencode — explicit deferred tool call
+          coordination được document rõ trong API. LangChain và Aider ở cuối phổ: sequential
+          và không có timeout protection.
+        </p>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>
+          Native Promise-based deferred coordination, không cần Effect:
+        </p>
+        <CodeBlock caption="deferred-tool-coordination.ts">
+          <Fragment is:raw>{`
+// Deferred factory using native Promise
+function makeDeferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+// Track in-flight tool calls
+const pendingTools = new Map<string, ReturnType<typeof makeDeferred<void>>>()
+
+// Called when stream receives tool-input-start
+function registerToolCall(id: string) {
+  const deferred = makeDeferred<void>()
+  pendingTools.set(id, deferred)
+  return deferred
+}
+
+// Called when tool executor finishes (success OR error)
+function resolveToolCall(id: string) {
+  const deferred = pendingTools.get(id)
+  if (deferred) {
+    deferred.resolve()
+    pendingTools.delete(id)
+  }
+}
+
+// Called after stream drain — await all with timeout
+async function waitForAllTools(timeoutMs = 250) {
+  const entries = [...pendingTools.values()]
+  if (entries.length === 0) return
+
+  // Parallel await với per-entry timeout
+  await Promise.all(
+    entries.map((d) =>
+      Promise.race([
+        d.promise,
+        new Promise<void>((res) => setTimeout(res, timeoutMs))
+        // timeout resolves (not rejects) — không throw
+      ])
+    )
+  )
+  pendingTools.clear()
+}
+
+// Wiring trong stream consumer:
+async function processStream(stream: AsyncIterable<StreamEvent>) {
+  try {
+    for await (const event of stream) {
+      switch (event.type) {
+        case "tool-input-start":
+          registerToolCall(event.id)
+          break
+        case "tool-call":
+          const deferred = pendingTools.get(event.toolCallId)
+          // Fire async, resolve khi done
+          runTool(event).finally(() => resolveToolCall(event.toolCallId))
+          break
+      }
+    }
+  } finally {
+    // Cleanup — luôn chạy (try/finally)
+    await waitForAllTools(250)
+  }
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          title="Nguồn chính"
+          items={[
+            '<a href="https://effect.website/docs/concurrency/deferred">Effect — Deferred documentation</a> · Deferred semantics và usage patterns',
+            '<a href="https://pydantic.dev/docs/ai/core-concepts/agent/">Pydantic AI — Agent & deferred tool calls</a> · Tương tự opencode pattern',
+            '<a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all">MDN — Promise.all()</a> · Native parallel await',
+            '<a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/race">MDN — Promise.race()</a> · Timeout pattern',
+            '<a href="https://effect.website/docs/error-management/retrying/">Effect — Retrying & error management</a> · Effect error handling',
+            '<a href="https://github.com/anomalyco/opencode">anomalyco/opencode — session/processor.ts</a> · Source tham chiếu: lines 134–195, 273–278',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

@@ -1,0 +1,25 @@
+---
+// ReportLayout.astro — layout tối giản cho một báo cáo
+// Inject shared CSS, set <title>. Page content tự define <div class="layout">.
+import '../styles/report.css';
+
+interface Props {
+  title: string;
+  description?: string;
+  lang?: string;
+}
+
+const { title, description = '', lang = 'vi' } = Astro.props;
+---
+<!DOCTYPE html>
+<html lang={lang}>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title}</title>
+  {description && <meta name="description" content={description} />}
+</head>
+<body>
+  <slot />
+</body>
+</html>

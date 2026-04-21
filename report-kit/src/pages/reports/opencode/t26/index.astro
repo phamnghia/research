@@ -1,0 +1,207 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T26 — Arity-based command normalization | opencode"
+  description="Phân tích sâu kỹ thuật normalize bash command thành 'human-readable' form bằng arity map 450+ entries — giúp suggest wildcard pattern hợp lý cho user khi approve permission."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T26 — Arity-based command normalization"
+        subtitle="ARITY map 450+ entries: <code>npm run → 3</code>, <code>git config → 3</code>, <code>touch → 1</code>. Normalize <code>&quot;npm run build --watch&quot;</code> → <code>&quot;npm run build&quot;</code> để suggest pattern <code>&quot;npm run build *&quot;</code> cho user."
+        meta={[
+          { label: 'Nhóm',  value: 'E — Permission Model' },
+          { label: 'File',  value: '<code>permission/arity.ts</code> · Lines 1–161' },
+          { label: 'ID',    value: 'E.3 / T26' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Permission">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Khi agent run <code>"npm run build --watch --verbose"</code>, permission dialog hiển thị gì? Nếu hiện raw string → user approve pattern quá narrow ("chỉ lần này"), cần approve lại khi flags thay đổi. Nếu hiện <code>"npm run build"</code> → user approve pattern <code>"npm run build *"</code> — bao gồm tất cả variants của cùng build script. ARITY map định nghĩa "bao nhiêu token tạo nên human-readable command name" cho 450+ common tool. Suggestion chính xác = UX tốt + coverage đúng.
+        </WhyImportant>
+
+        <Callout type="info">
+          <strong>UX insight:</strong> User nghĩ theo "command" (npm run build, git commit), không theo shell string đầy đủ. Arity normalization ánh xạ raw shell → user mental model → pattern suggestion phù hợp.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="ARITY map — longest-prefix match" />
+        <CodeBlock caption="permission/arity.ts — ARITY map (excerpt)" lang="typescript"><Fragment is:raw>{`
+// Key = prefix, value = số token của "human command name"
+const ARITY: Record<string, number> = {
+  // Single-token commands (arity = 1: chỉ lấy token đầu)
+  touch: 1,  ls: 1,  cat: 1,  echo: 1,  mkdir: 1,  cp: 1,  mv: 1,  rm: 1,
+
+  // Two-token commands (arity = 2)
+  "npm install": 2,  "npm ci": 2,
+  "git add":     2,  "git status": 2,  "git push": 2,  "git pull": 2,
+  "docker run":  2,  "docker ps": 2,
+
+  // Three-token commands (arity = 3)
+  "npm run":      3,   // "npm run build --watch" → "npm run build"
+  "git config":   3,   // "git config --global user.name" → "git config"
+  "pnpm dlx":     3,
+  "npx create-next-app": 4,
+
+  // ... 450+ total
+}
+
+export function normalizeCommand(raw: string): string {
+  const tokens = tokenize(raw)  // respect quotes
+
+  // Longest prefix match: try 4 tokens, then 3, 2, 1
+  for (let n = 4; n >= 1; n--) {
+    const prefix = tokens.slice(0, n).join(" ")
+    if (ARITY[prefix] !== undefined) {
+      // Take arity-many tokens (excluding flags)
+      const nonFlags = tokens.filter(t => !t.startsWith("-"))
+      return nonFlags.slice(0, ARITY[prefix]).join(" ")
+    }
+  }
+
+  return tokens[0] ?? ""  // fallback: first token only
+}
+
+// Examples:
+// normalizeCommand("npm run build --watch")     → "npm run build"
+// normalizeCommand("git config --global ...")   → "git config"
+// normalizeCommand("ls -la /home")              → "ls"
+// normalizeCommand("docker compose up -d")      → "docker compose"
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="From normalize to pattern suggestion" />
+        <CodeBlock caption="Permission dialog: normalize → suggest pattern" lang="typescript"><Fragment is:raw>{`
+// Khi agent request permission:
+const rawCmd     = "npm run build --watch --verbose"
+const normalized = normalizeCommand(rawCmd)  // → "npm run build"
+
+// Suggest "always" pattern cho user:
+const suggested = normalized + " *"          // → "npm run build *"
+
+// UI shows:
+// ┌─────────────────────────────────────────────┐
+// │ Agent muốn chạy: npm run build --watch ...  │
+// │                                             │
+// │ [once] [always: "npm run build *"] [reject] │
+// └─────────────────────────────────────────────┘
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T18 (Tree-sitter bash parsing):</strong> T18 extract command name từ AST, T26 normalize command name đó. Pipeline: raw bash → tree-sitter → command list → arity normalize → suggest pattern.</li>
+          <li><strong>T25 (Session state):</strong> Pattern đã normalized là input cho <code>alwaysAllow</code> khi user approve "always". Normalized pattern rộng hơn raw string nhưng vẫn hợp lý — "npm run build *" bao gồm tất cả npm run build variants.</li>
+          <li><strong>T24 (Wildcard evaluate):</strong> Pattern được store trong alwaysAllow sẽ được check bởi wildcard evaluate (T24) khi agent chạy command tương tự sau đó.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. ARITY map không đầy đủ" />
+        <p>
+          Tool mới (bun, deno subcommand, new CLI) không có entry → fallback về first token → suggest pattern quá broad (vd "bun *" thay vì "bun run build *"). Cần process để thêm entries khi gap được phát hiện.
+        </p>
+
+        <Subheading level="h3" text="2. Shell tricks bypass normalization" />
+        <p>
+          <code>sudo npm install</code>, <code>env X=1 git status</code>, <code>bash -c 'npm run ...'</code> → normalization trả về "sudo" hoặc "env" thay vì command thật. Cần pre-processing để strip sudo/env/bash -c trước khi normalize.
+        </p>
+
+        <Subheading level="h3" text="3. Alias không được handle" />
+        <p>
+          User có alias <code>g = git</code>, <code>n = npm</code> → ARITY không biết → normalize fail. Shell alias expansion không available trong security-critical permission context.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Command normalization', 'Pattern suggestion']}
+          rows={[
+            ['opencode', 'ARITY map 450+ entries, longest-prefix match', '✅ normalized + wildcard suffix'],
+            ['Claude Code', 'Pattern matching nhưng không arity-aware', '⚠️ raw command'],
+            ['Aider', 'Không normalize — show raw command', '❌'],
+            ['Cline', 'Show raw command', '❌'],
+            ['OpenHarness', 'Không có normalization', '❌'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+// Minimal ARITY-based normalization
+const ARITY: Record<string, number> = {
+  // Add entries as you discover new tools
+  ls: 1,  cat: 1,  mkdir: 1,  rm: 1,  cp: 1,  mv: 1,
+  "npm install": 2,  "npm run": 3,  "npm ci": 2,
+  "git add": 2,  "git commit": 2,  "git push": 2,  "git status": 2,
+  "git config": 3,  "git rebase": 2,
+  "docker run": 2,  "docker compose": 2,
+  "pnpm install": 2,  "pnpm run": 3,
+}
+
+function tokenize(cmd: string): string[] {
+  // Respect quoted strings
+  return cmd.match(/'[^']*'|"[^"]*"|\S+/g)
+    ?.map(t => t.replace(/^['"]|['"]$/g, "")) ?? []
+}
+
+export function normalizeCommand(raw: string): string {
+  const tokens = tokenize(raw)
+  const noFlags = tokens.filter(t => !t.startsWith("-"))
+
+  for (let n = Math.min(4, noFlags.length); n >= 1; n--) {
+    const prefix = noFlags.slice(0, n).join(" ")
+    if (prefix in ARITY) {
+      return noFlags.slice(0, ARITY[prefix]).join(" ")
+    }
+  }
+
+  return noFlags[0] ?? tokens[0] ?? ""
+}
+
+export function suggestPattern(normalized: string): string {
+  return normalized + " *"
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://claudelog.com/faqs/what-is-wildcard-bash-permissions-in-claude-code/">ClaudeLog — Wildcard Bash Permissions in Claude Code</a>',
+            '<a href="https://dev.to/klement_gunndu/lock-down-claude-code-with-5-permission-patterns-4gcn">DEV — 5 Permission Patterns for Claude Code</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

@@ -1,0 +1,36 @@
+---
+// Sidebar.astro — sidebar mục lục cho một báo cáo
+// Nhận groups = [{ title: "...", items: [{ href, label, section? }] }]
+export interface SidebarItem {
+  href: string;
+  label: string;
+  /** true = đậm, được dùng cho header section (intro, conclusion...) */
+  section?: boolean;
+}
+export interface SidebarGroup {
+  title: string;
+  items: SidebarItem[];
+}
+
+interface Props {
+  groups: SidebarGroup[];
+  intro?: string;
+}
+
+const { groups, intro = 'Mục lục' } = Astro.props;
+---
+<aside>
+  <div class="toc-intro">{intro}</div>
+  {groups.map((group) => (
+    <>
+      <h3>{group.title}</h3>
+      <ul>
+        {group.items.map((item) => (
+          <li>
+            <a href={item.href} class={item.section ? 'section' : ''} set:html={item.label} />
+          </li>
+        ))}
+      </ul>
+    </>
+  ))}
+</aside>

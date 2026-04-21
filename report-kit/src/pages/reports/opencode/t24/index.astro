@@ -1,0 +1,211 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T24 — Wildcard last-match-wins permission evaluation | opencode"
+  description="Phân tích sâu cơ chế permission evaluation dùng findLast() — rule cuối cùng match thắng, wildcard cho phép allow broadly + deny specifically, default 'ask' khi không có rule nào match."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T24 — Wildcard last-match-wins permission evaluation"
+        subtitle="<code>rules.findLast(rule =&gt; match(perm, rule.perm) &amp;&amp; match(pattern, rule.pattern))</code> — rule sau override rule trước. Cho phép: <em>allow bash:*</em> rồi <em>deny bash:rm -rf *</em>."
+        meta={[
+          { label: 'Nhóm',  value: 'E — Permission Model' },
+          { label: 'File',  value: '<code>permission/evaluate.ts</code> · Lines 1–15' },
+          { label: 'ID',    value: 'E.1 / T24' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Permission">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Permission system cần vừa "allow broadly" vừa "deny specifically". Nếu first-match-wins: user phải đặt deny trước allow — counter-intuitive. Last-match-wins cho phép viết theo logic tự nhiên: <code>allow: bash:*</code> (mặc định cho phép bash) → <code>deny: bash:rm -rf *</code> (nhưng block destructive). Rule gần cuối file = rule có priority cao nhất — giống nginx, iptables, CSS specificity.
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>Default "ask" là safety net:</strong> Khi không có rule nào match, system default sang <code>"ask"</code> — không phải <code>"deny"</code> cứng nhắc cũng không phải <code>"allow"</code> tiện lợi. User luôn được inform và có quyền quyết định.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="evaluate() — 15 dòng, full permission logic" />
+        <CodeBlock caption="permission/evaluate.ts" lang="typescript"><Fragment is:raw>{`
+import { Wildcard } from "./wildcard"
+
+export function evaluate(
+  rules:      PermissionRule[],
+  permission: string,  // "bash" | "edit" | "write" | "doom_loop" | ...
+  pattern:    string,  // "rm -rf *" | "/tmp/**" | command string
+): "allow" | "deny" | "ask" {
+  // findLast = iterate từ cuối → rule sau win (last-match-wins)
+  const match = rules.findLast(
+    (rule) =>
+      Wildcard.match(permission, rule.permission) &&
+      Wildcard.match(pattern,    rule.pattern)
+  )
+
+  // Default "ask" khi không có rule nào match
+  return match?.action ?? "ask"
+}
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="Wildcard matching — shell-style glob" />
+        <CodeBlock caption="Wildcard.match — * là wildcard" lang="typescript"><Fragment is:raw>{`
+// Wildcard.match("bash:rm -rf /tmp", "bash:rm *") → true
+// Wildcard.match("edit:/src/**", "edit:*")        → true
+// Wildcard.match("doom_loop", "bash:*")           → false
+
+function wildcard(value: string, pattern: string): boolean {
+  // Convert shell glob * → regex .*
+  const re = new RegExp(
+    "^" + pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+                 .replace(/\*/g, ".*") + "$"
+  )
+  return re.test(value)
+}
+`}</Fragment></CodeBlock>
+
+        <Diagram>{`
+rules = [
+  { permission: "bash", pattern: "*",         action: "allow" },  // rule 1
+  { permission: "bash", pattern: "rm -rf *",  action: "deny"  },  // rule 2
+  { permission: "edit", pattern: "/tmp/**",   action: "allow" },  // rule 3
+]
+
+Request: permission="bash", pattern="rm -rf /home"
+    │
+    ▼
+findLast iteration (từ cuối):
+  rule 3: bash != edit → skip
+  rule 2: bash==bash, "rm -rf /home" matches "rm -rf *" → MATCH → return "deny"
+  (rule 1 không được xét vì findLast trả về ngay khi tìm thấy)
+
+Result: "deny"
+
+Request: permission="bash", pattern="ls /home"
+    │
+    ▼
+findLast:
+  rule 2: "ls /home" không match "rm -rf *" → skip
+  rule 1: bash==bash, "ls /home" matches "*" → MATCH → return "allow"
+
+Result: "allow"
+        `}</Diagram>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T18 (Bash tree-sitter):</strong> tree-sitter extract paths từ bash command → paths trở thành <code>pattern</code> argument trong <code>evaluate()</code>. Accuracy của T18 ảnh hưởng trực tiếp đến permission decision.</li>
+          <li><strong>T25 (Session-scoped state):</strong> <code>evaluate()</code> chỉ check static rules từ config. T25 bổ sung check dynamic "alwaysAllow" đã được user approve trong session. Hai layer nối tiếp nhau.</li>
+          <li><strong>T26 (Arity normalization):</strong> Trước khi đưa vào evaluate, command được normalize: <code>"npm run build --watch"</code> → <code>"npm run build"</code> để match đúng pattern user đã set.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. Order-sensitive — dễ sắp xếp sai" />
+        <p>
+          Last-match-wins phụ thuộc thứ tự rules. Nếu user drag-drop rule lên trên trong UI mà không hiểu semantics → behavior thay đổi không mong muốn. Cần UI cảnh báo khi order change affect outcome.
+        </p>
+
+        <Subheading level="h3" text="2. Wildcard không đủ biểu đạt" />
+        <p>
+          <code>*</code> simple không support negation (<code>!rm*</code>), character class (<code>[a-z]</code>), hay regex phức tạp. Pattern như "cho phép mọi git command trừ push --force" không biểu đạt được với wildcard đơn giản.
+        </p>
+
+        <Subheading level="h3" text='3. Không có "deny wins" mode' />
+        <p>
+          Nếu muốn "deny luôn thắng bất kể thứ tự", cần thêm mode riêng. Hiện tại: <code>deny</code> chỉ thắng nếu đứng sau <code>allow</code>. Security-critical deployment cần option này.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Permission model', 'Default action', 'Wildcard']}
+          rows={[
+            ['opencode', 'Wildcard last-match-wins rules', '"ask" (safe default)', '✅ shell glob style'],
+            ['Claude Code', 'allowedTools + deniedTools lists', '"ask" (safe default)', '✅ glob + regex'],
+            ['OpenHarness', 'Sensitive path hardcoded + config allow', '"deny" for hardcoded', '⚠️ basic'],
+            ['Aider', 'Auto-approve flag hoặc manual confirm', 'User-configured', '❌'],
+            ['Cline', 'Always ask (strict) hoặc never ask (open)', '"always ask" by default', '❌'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+interface Rule {
+  permission: string  // "bash" | "edit" | "*"
+  pattern:    string  // "rm *" | "/tmp/**" | "*"
+  action:     "allow" | "deny" | "ask"
+}
+
+function matchWildcard(value: string, pattern: string): boolean {
+  const re = new RegExp(
+    "^" + pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")  // escape regex chars
+      .replace(/\*/g, ".*")                    // * → .*
+    + "$",
+    "i"
+  )
+  return re.test(value)
+}
+
+function evaluate(rules: Rule[], permission: string, pattern: string): "allow" | "deny" | "ask" {
+  const match = [...rules]
+    .reverse()                           // last-match-wins: reverse array then find first
+    .find(r =>
+      matchWildcard(permission, r.permission) &&
+      matchWildcard(pattern,    r.pattern)
+    )
+  return match?.action ?? "ask"           // safe default
+}
+
+// Example rules (YAML config → parse to Rule[]):
+// rules:
+//   - { permission: "bash", pattern: "*",        action: allow }
+//   - { permission: "bash", pattern: "rm *",     action: deny  }
+//   - { permission: "edit", pattern: "/src/**",  action: allow }
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://code.claude.com/docs/en/permissions">Claude Code — Configure permissions</a>',
+            '<a href="https://dev.to/klement_gunndu/lock-down-claude-code-with-5-permission-patterns-4gcn">DEV — Lock Down Claude Code With 5 Permission Patterns</a>',
+            '<a href="https://claudefa.st/blog/guide/development/permission-management">Claude Fast — Safe vs Fast Development Modes (permission patterns)</a>',
+            '<a href="https://opencode.ai/docs/permissions/">OpenCode — Permissions docs</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

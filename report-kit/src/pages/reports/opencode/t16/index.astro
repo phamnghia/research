@@ -1,0 +1,201 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T16 — Zod schema validation với custom error format | opencode"
+  description="Phân tích sâu kỹ thuật dùng Zod để validate tool arguments và trả về error message dạng instruction — giúp model tự sửa args sai mà không cần human intervention."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T16 — Zod schema validation với custom error format"
+        subtitle='Khi model gửi args sai schema, error message phải là <strong>instruction to retry</strong>: <em>"Please rewrite the input with valid arguments. Errors: file_path: Required; limit: expected number"</em> — không phải thông báo lỗi chung chung.'
+        meta={[
+          { label: 'Nhóm',  value: 'C — Tool Design' },
+          { label: 'File',  value: '<code>tool/tool.ts</code> · Lines 86–96' },
+          { label: 'ID',    value: 'C.4 / T16' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Tool Design">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Model thỉnh thoảng gửi tool args sai schema — missing field, wrong type, giá trị out of range. Nếu error message là <code>"Invalid input"</code> hoặc Zod default verbose error, model không biết <em>cụ thể</em> cần sửa gì ở đâu. Message dạng instruction <code>"Please rewrite the input with valid arguments. Errors: file_path: Required; limit: expected number, got string"</code> → model có đủ context để retry đúng ngay lần đầu, không cần vòng lặp hỏi thêm.
+        </WhyImportant>
+
+        <Callout type="info">
+          <strong>Double-duty của Zod schema:</strong> Schema không chỉ validate — nó còn được dùng để generate JSON Schema cho model (qua AI SDK), làm TypeScript type, và làm documentation. Một schema, ba công dụng.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Validation với custom error message" />
+        <CodeBlock caption="tool/tool.ts — validateArgs với custom format" lang="typescript"><Fragment is:raw>{`
+function validateArgs<P extends z.ZodType>(
+  parameters: P,
+  raw: unknown,
+): z.infer<P> {
+  const parsed = parameters.safeParse(raw)
+  if (!parsed.success) {
+    // Format error thành instruction cho model
+    const issues = parsed.error.issues
+      .map((i) => `${i.path.join(".")}: ${i.message}`)
+      .join("; ")
+    throw new ToolArgError(
+      `Please rewrite the input with valid arguments. Errors: ${issues}`,
+    )
+  }
+  return parsed.data
+}
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="Schema definition — explicit descriptions" />
+        <CodeBlock caption="tool/edit.ts — schema với .describe() cho model" lang="typescript"><Fragment is:raw>{`
+const EditArgs = z.object({
+  file_path: z.string()
+    .min(1)
+    .describe("Absolute path to the file to edit"),
+
+  old_string: z.string()
+    .describe("Exact string to find in the file (must match exactly)"),
+
+  new_string: z.string()
+    .describe("String to replace old_string with"),
+
+  // Optional fields với default
+  create_if_missing: z.boolean()
+    .optional()
+    .default(false)
+    .describe("Create file if it does not exist"),
+})
+
+// Error khi model gửi thiếu old_string:
+// "Please rewrite the input with valid arguments.
+//  Errors: old_string: Required"
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="ToolArgError vs generic Error" />
+        <CodeBlock caption="ToolArgError — signal cho agent loop" lang="typescript"><Fragment is:raw>{`
+class ToolArgError extends Error {
+  readonly _tag = "ToolArgError"
+  constructor(message: string) {
+    super(message)
+    this.name = "ToolArgError"
+  }
+}
+
+// Agent loop xử lý ToolArgError khác với runtime error:
+// - ToolArgError: gửi error message về model → model retry với args đúng
+// - RuntimeError: log, notify user, không retry tự động
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T14 (Effect lazy tool init):</strong> Validation xảy ra bên trong <code>execute()</code> — Effect propagate <code>ToolArgError</code> qua error channel, agent loop catch và gửi về model.</li>
+          <li><strong>T1 (ReAct loop):</strong> Khi tool trả về ToolArgError, loop không exit — xem đây là tool result (dạng error), model nhận message và retry args trong bước tiếp theo.</li>
+          <li><strong>T6 (Doom loop):</strong> Nếu model liên tục retry với args sai (không sửa được), doom loop detection sẽ trigger sau 3 lần cùng tool + args → hỏi user.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. Model không sửa được" />
+        <p>
+          Đôi khi model giữ nguyên args và chỉ thêm comment giải thích trong text response — không thật sự sửa args. Đây là failure mode của model, không phải harness. Doom loop detection (T6) giải quyết bằng cách hỏi user.
+        </p>
+
+        <Subheading level="h3" text="2. Zod error quá verbose" />
+        <p>
+          Schema lồng sâu (nested object, discriminated union) tạo ra Zod errors rất dài, có thể chiếm nhiều token. Cần format error thành format ngắn gọn hơn, chỉ giữ field path và message chính.
+        </p>
+        <Callout type="warn">
+          <strong>Fix:</strong> Giới hạn issues chỉ lấy top-5, truncate từng message ở 100 chars. Không cần model biết toàn bộ Zod stacktrace.
+        </Callout>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Tool arg validation', 'Error format cho model']}
+          rows={[
+            ['opencode', 'Zod safeParse + custom ToolArgError message', '"Please rewrite the input with valid arguments. Errors: ..."'],
+            ['Claude Code', 'Zod tương tự', 'Instruction dạng tương tự'],
+            ['Aider', 'Pydantic (Python)', 'Pydantic error default — dài hơn cần thiết'],
+            ['Cline', 'JSON Schema validate + throw', 'Generic error message'],
+            ['OpenHarness', 'Pydantic v2 validation', 'Python validation error, ít instructional hơn'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+import { z } from "zod"
+
+class ToolArgError extends Error {
+  readonly _tag = "ToolArgError" as const
+}
+
+function validateArgs<T extends z.ZodType>(schema: T, raw: unknown): z.infer<T> {
+  const result = schema.safeParse(raw)
+  if (!result.success) {
+    // Lấy top 5 issues, format ngắn gọn
+    const issues = result.error.issues
+      .slice(0, 5)
+      .map(i => {
+        const path = i.path.length ? i.path.join(".") + ": " : ""
+        return path + i.message
+      })
+      .join("; ")
+
+    throw new ToolArgError(
+      `Please rewrite the tool input with valid arguments. Errors: ${issues}`
+    )
+  }
+  return result.data
+}
+
+// Dùng trong tool execute:
+async function execute(rawArgs: unknown) {
+  const args = validateArgs(MyToolSchema, rawArgs)
+  // ... tiếp tục với args đã validated và typed
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://pydantic.dev/docs/ai/core-concepts/agent/">Pydantic AI — Agents (Python equivalent pattern)</a>',
+            '<a href="https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text">Vercel AI SDK — tool validation reference</a>',
+            '<a href="https://zod.dev/">Zod — TypeScript-first schema validation</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

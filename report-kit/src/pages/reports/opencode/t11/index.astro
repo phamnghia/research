@@ -1,0 +1,377 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T11 — Auto compaction continuation | opencode"
+  description="Phân tích cơ chế 3-branch continuation sau khi compaction hoàn tất — inject đúng message để agent loop không bị stall, xử lý cả trường hợp media và mid-task."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T11 — Auto compaction continuation"
+        subtitle="Sau T8 compact xong, agent cần message mới để tiếp tục. T11 quyết định inject gì: replay user message, mô tả media bằng text, hay gửi synthetic <code>continue</code> khi đang mid-task."
+        meta={[
+          { label: 'Nhóm',  value: 'B — Context Management' },
+          { label: 'File',  value: '<code>session/compaction.ts</code>' },
+          { label: 'Lines', value: '372–451' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      {/* ── 1. Overview ── */}
+      <Section id="overview" title="Tổng quan" themeTag="Context">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Sau khi T8 compact xong, messages array
+          đã được thay thế bằng [summary_system, ...tail]. Nhưng T1 agent loop cần
+          một "new user message" để tiếp tục — nếu không inject gì, agent dừng lại
+          chờ input người dùng, dù giữa chừng đang thực hiện task quan trọng.
+        </WhyImportant>
+
+        <p>
+          T11 giải quyết bằng logic 3-branch dựa trên trạng thái trước compaction:
+        </p>
+        <ul>
+          <li>
+            <strong>Branch 1 — Media message:</strong> user turn cuối chứa image/attachment →
+            inject text description thay thế (không replay media thật — có thể đã expire
+            hoặc quá nặng).
+          </li>
+          <li>
+            <strong>Branch 2 — Unanswered user message:</strong> user vừa gửi lệnh nhưng
+            agent chưa reply (đang pre-processing) → replay nguyên văn lệnh đó.
+          </li>
+          <li>
+            <strong>Branch 3 — Mid-task (default):</strong> agent đang giữa chuỗi tool calls →
+            inject synthetic <code>"continue"</code> với metadata <code>compaction_continue: true</code>.
+          </li>
+        </ul>
+
+        <Callout type="unique">
+          <strong>Synthetic message + metadata.</strong> Message synthetic có thể được
+          filter/hide ở UI nhờ <code>metadata.compaction_continue</code>. User không thấy
+          "continue" lạ xuất hiện trong chat — chỉ thấy agent tiếp tục làm việc.
+        </Callout>
+      </Section>
+
+      {/* ── 2. Anatomy ── */}
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Branch detection — xác định trạng thái trước compact" />
+        <CodeBlock caption="session/compaction.ts — branch detection">
+          <Fragment is:raw>{`
+function detectPostCompactionState(
+  messages: Message[]   // messages TRƯỚC khi compact
+): 'media' | 'unanswered' | 'mid-task' {
+  // Tìm last user message
+  const lastUser = [...messages]
+    .reverse()
+    .find(m => m.role === 'user')
+
+  if (!lastUser) return 'mid-task'
+
+  // Branch 1: user message có media
+  if (hasMedia(lastUser)) return 'media'
+
+  // Branch 2: user message chưa được reply
+  // (không có assistant message sau nó)
+  const lastUserIdx = messages.lastIndexOf(lastUser)
+  const hasReply    = messages
+    .slice(lastUserIdx + 1)
+    .some(m => m.role === 'assistant')
+
+  if (!hasReply) return 'unanswered'
+
+  // Default: agent đang mid-task
+  return 'mid-task'
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Branch 1 — Media message: inject text description" />
+        <CodeBlock caption="session/compaction.ts — media branch">
+          <Fragment is:raw>{`
+function buildMediaContinuation(lastUserMsg: Message): Message {
+  // Không replay media thật — mô tả bằng text
+  const description = lastUserMsg.content
+    .filter(block => block.type !== 'image')
+    .map(block => block.text ?? '')
+    .join(' ')
+    .trim()
+
+  return {
+    role:    'user',
+    content: description
+      ? \`[Continuing from compaction] \${description}\`
+      : '[Continuing task — previous message contained media attachments]',
+    metadata: { compaction_continue: true, had_media: true },
+  }
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Branch 2 — Unanswered: replay user message" />
+        <CodeBlock caption="session/compaction.ts — unanswered branch">
+          <Fragment is:raw>{`
+function buildUnansweredContinuation(lastUserMsg: Message): Message {
+  // Replay nguyên văn — không cần synthetic message
+  // metadata vẫn đánh dấu là continuation để UI biết
+  return {
+    ...lastUserMsg,
+    metadata: {
+      ...lastUserMsg.metadata,
+      compaction_continue: true,
+    },
+  }
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Branch 3 — Mid-task: synthetic continue" />
+        <CodeBlock caption="session/compaction.ts — mid-task branch">
+          <Fragment is:raw>{`
+function buildMidTaskContinuation(): Message {
+  return {
+    role:    'user',
+    content: 'continue',
+    metadata: {
+      compaction_continue: true,
+      // UI filter: ẩn message này khỏi chat display
+      // Agent vẫn nhận và xử lý bình thường
+    },
+  }
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Main entry point — kết hợp 3 branches" />
+        <CodeBlock caption="session/compaction.ts — buildContinuation">
+          <Fragment is:raw>{`
+export function buildContinuation(
+  messagesBeforeCompact: Message[]
+): Message {
+  const state = detectPostCompactionState(messagesBeforeCompact)
+
+  switch (state) {
+    case 'media':
+      return buildMediaContinuation(
+        messagesBeforeCompact
+          .filter(m => m.role === 'user')
+          .at(-1)!
+      )
+    case 'unanswered':
+      return buildUnansweredContinuation(
+        messagesBeforeCompact
+          .filter(m => m.role === 'user')
+          .at(-1)!
+      )
+    case 'mid-task':
+    default:
+      return buildMidTaskContinuation()
+  }
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      {/* ── 3. Interaction ── */}
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T8 compact() hoàn tất
+  │
+  ├── returns: [summary_sys, ...tail]  (messages mới)
+  │
+  ▼
+T11 buildContinuation(messagesBeforeCompact)
+  │
+  ├── detectPostCompactionState()
+  │         │
+  │   ┌─────┼──────────────────────┐
+  │   │     │                      │
+  │  media  unanswered          mid-task
+  │   │     │                      │
+  │   ▼     ▼                      ▼
+  │  text  replay              "continue"
+  │  desc  user msg          + metadata
+  │   │     │                      │
+  └───┴─────┴──────────────────────┘
+                  │
+                  ▼
+         T1 Agent loop nhận message mới
+         → tiếp tục xử lý bình thường
+
+UI layer đọc metadata.compaction_continue
+→ ẩn synthetic messages trong chat display
+`}</Diagram>
+
+        <p>
+          T11 là bước cuối cùng của compaction pipeline. Nó nhận messages
+          <em>trước</em> compact (để detect state), nhưng inject message vào session
+          <em>sau</em> compact (messages array đã được T8 thay thế).
+        </p>
+
+        <Callout type="warn">
+          <strong>Quan trọng: snapshot trước compact.</strong> T11 cần
+          <code>messagesBeforeCompact</code> — không phải messages sau compact.
+          T8 phải truyền snapshot này sang T11 trước khi overwrite messages array.
+        </Callout>
+      </Section>
+
+      {/* ── 4. Failure modes ── */}
+      <Section id="failure" title="Failure modes" themeTag="Risk">
+        <Subheading level="h3" text="FM-1: Không inject continuation" />
+        <CodeBlock caption="Anti-pattern — no continuation after compact">
+          <Fragment is:raw>{`
+// ❌ Compact xong nhưng không inject gì
+async function compactAndContinue(session) {
+  const newMessages = await compact(session.messages, ...)
+  session.messages  = newMessages
+  // Không inject continuation → T1 loop không có new user message
+  // → agent stop, chờ user input dù đang mid-task
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="FM-2: Replay media attachment" />
+        <p>
+          Replay media thật thay vì text description:
+        </p>
+        <CodeBlock caption="Anti-pattern — replay media">
+          <Fragment is:raw>{`
+// ❌ Replay nguyên văn kể cả media
+function buildContinuation(lastUserMsg) {
+  return lastUserMsg  // chứa image blocks có thể đã expire
+  // Anthropic media blocks có URL expiry 1 giờ
+  // → 400 error "image URL expired" nếu compact xảy ra sau >1h
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="FM-3: Hiển thị synthetic message cho user" />
+        <p>
+          Nếu UI không filter <code>metadata.compaction_continue</code>,
+          user thấy "continue" xuất hiện trong chat như thể họ đã gõ — confusing UX.
+        </p>
+
+        <ProsCons
+          pros={[
+            '3-branch — xử lý đúng 3 trạng thái khác nhau sau compact',
+            'Media safety — không replay expired media',
+            'Metadata filter — UI có thể ẩn synthetic messages',
+            'Unanswered replay — user không cần gõ lại lệnh',
+          ]}
+          cons={[
+            'Cần snapshot messages trước compact — thêm complexity',
+            'Synthetic "continue" có thể confuse model trong edge cases',
+            'Branch logic dựa trên heuristic — không 100% accurate',
+          ]}
+        />
+      </Section>
+
+      {/* ── 5. Compare ── */}
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Continuation sau compact', 'Media handling?', 'Mid-task aware?']}
+          rows={[
+            ['<strong>opencode</strong>', '3-branch: media/unanswered/mid-task', '<span style="color:var(--chip-green-fg)">Có — text description thay thế</span>', '<span style="color:var(--chip-green-fg)">Có — synthetic "continue"</span>'],
+            ['Claude Code', 'Tương tự (known from Anthropic blog)', '<span style="color:var(--chip-green-fg)">Có</span>', '<span style="color:var(--chip-green-fg)">Có</span>'],
+            ['LangChain', 'Replay last message đơn giản, không phân biệt state', '<span style="color:var(--chip-red-fg)">Không có special handling</span>', '<span style="color:var(--chip-red-fg)">Không</span>'],
+            ['ForgeCode', 'Documented continuation pattern (single branch)', '<span style="color:var(--chip-amber-fg)">Không rõ</span>', '<span style="color:var(--chip-amber-fg)">Partial</span>'],
+          ]}
+        />
+      </Section>
+
+      {/* ── 6. Recipe ── */}
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock caption="compaction.ts — 3-branch continuation recipe">
+          <Fragment is:raw>{`
+// continuation.ts — post-compaction continuation logic
+
+export function buildContinuation(
+  messagesBeforeCompact: Message[]
+): Message {
+  const userMessages = messagesBeforeCompact.filter(m => m.role === 'user')
+  const lastUser     = userMessages.at(-1)
+
+  if (!lastUser) return syntheticContinue()
+
+  // Branch 1: media
+  if (contentHasMedia(lastUser.content)) {
+    const textOnly = extractTextContent(lastUser.content)
+    return {
+      role:    'user',
+      content: textOnly
+        ? \`[Resuming] \${textOnly}\`
+        : '[Resuming — previous message had media attachments]',
+      metadata: { compaction_continue: true, had_media: true },
+    }
+  }
+
+  // Branch 2: unanswered user message
+  const lastUserIdx = messagesBeforeCompact.lastIndexOf(lastUser)
+  const answered    = messagesBeforeCompact
+    .slice(lastUserIdx + 1)
+    .some(m => m.role === 'assistant')
+
+  if (!answered) {
+    return { ...lastUser, metadata: { ...lastUser.metadata, compaction_continue: true } }
+  }
+
+  // Branch 3: mid-task
+  return syntheticContinue()
+}
+
+function syntheticContinue(): Message {
+  return {
+    role:     'user',
+    content:  'continue',
+    metadata: { compaction_continue: true },
+  }
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      {/* ── 7. Refs ── */}
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://docs.forgecode.dev/docs/context-compaction">ForgeCode docs — Context compaction và continuation</a>',
+            '<a href="https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/agent-context-management">Microsoft Agent Framework — Compaction continuation patterns</a>',
+            '<a href="https://www.anthropic.com/blog/claude-agent-best-practices">Anthropic blog — Best practices for Claude agents</a>',
+            '<a href="https://github.com/sst/opencode/blob/main/packages/opencode/src/session/compaction.ts">opencode source — session/compaction.ts (lines 372–451)</a>',
+            '<a href="https://python.langchain.com/docs/modules/memory/types/summary">LangChain — Conversation summary memory (simple continuation)</a>',
+            '<a href="https://docs.anthropic.com/en/docs/build-with-claude/files">Anthropic docs — File/media handling và URL expiry</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

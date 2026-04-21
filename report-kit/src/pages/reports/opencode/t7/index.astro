@@ -1,0 +1,369 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T7 — Overflow detection (cache-aware) | opencode"
+  description="Phân tích sâu kỹ thuật đếm token đúng, bao gồm cache read/write, để phát hiện overflow trước khi gọi model thất bại."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',     label: 'Tổng quan',           section: true },
+        { href: '#anatomy',      label: 'Phân tích code' },
+        { href: '#interaction',  label: 'Tương tác' },
+        { href: '#failure',      label: 'Failure modes' },
+        { href: '#compare',      label: 'So sánh harness' },
+        { href: '#recipe',       label: 'Implementation recipe' },
+        { href: '#refs',         label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T7 — Overflow detection (cache-aware)"
+        subtitle="Đếm token đúng — bao gồm cả <code>cache.read</code> và <code>cache.write</code> — để phát hiện nguy cơ context overflow trước khi API call thất bại."
+        meta={[
+          { label: 'Nhóm',   value: 'B — Context Management' },
+          { label: 'File',   value: '<code>session/overflow.ts</code>' },
+          { label: 'Lines',  value: '1–26' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      {/* ── 1. Overview ── */}
+      <Section id="overview" title="Tổng quan" themeTag="Context">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Với Anthropic models, cache tokens
+          (<code>cache_read_input_tokens</code> và <code>cache_creation_input_tokens</code>)
+          vẫn được tính vào context window. Nếu chỉ đếm <code>input_tokens</code> thuần,
+          agent sẽ bị overflow đột ngột khi cache tokens tích lũy lớn — gây lỗi
+          <code>400 context_length_exceeded</code> giữa chừng.
+        </WhyImportant>
+
+        <p>
+          opencode giải quyết bằng 3 hàm nhỏ gọn trong <code>session/overflow.ts</code>:
+          <code>computeUsable</code> tính số token có thể dùng sau khi trừ buffer output,
+          <code>totalContextTokens</code> cộng tất cả loại token (input + cache.read + cache.write),
+          và <code>shouldCompact</code> quyết định có cần compaction chưa.
+        </p>
+
+        <p>
+          Buffer output mặc định là <strong>20 000 token</strong>
+          (<code>DEFAULT_RESERVED_OUTPUT_TOKENS</code>). Con số này đảm bảo model luôn có
+          đủ không gian để sinh response, không bị cắt giữa câu. Khi
+          <code>totalContextTokens &gt;= usable</code>, T8 (compaction) được kích hoạt.
+        </p>
+
+        <Callout type="unique">
+          <strong>Điểm khác biệt.</strong> Hầu hết harness (Aider, LangChain) chỉ đếm
+          <code>input_tokens</code>. opencode là một trong số ít harness tính đầy đủ
+          cả 3 loại token — khớp với cách Anthropic tính giới hạn context window.
+        </Callout>
+
+        <Callout type="info">
+          <strong>Context window thực tế.</strong> Claude Sonnet 3.5 có context window
+          200 000 token. Nếu cache.write = 80 000 và input = 40 000, tổng là 120 000 —
+          usable còn 80 000 (với 200k model, reserve 20k). Agent cần biết điều này để
+          không bị bất ngờ.
+        </Callout>
+      </Section>
+
+      {/* ── 2. Anatomy ── */}
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Bước 1 — Tính usable tokens" />
+        <p>
+          <code>computeUsable</code> trừ đi reserved buffer khỏi model limit.
+          <code>Math.max(0, ...)</code> xử lý edge case khi model limit nhỏ hơn reserve
+          (ví dụ: model thử nghiệm với context 8k nhưng reserve 20k).
+        </p>
+        <CodeBlock caption="session/overflow.ts — computeUsable">
+          <Fragment is:raw>{`
+export const DEFAULT_RESERVED_OUTPUT_TOKENS = 20_000
+
+export function computeUsable(
+  modelLimit: number,
+  reserved = DEFAULT_RESERVED_OUTPUT_TOKENS
+): number {
+  return Math.max(0, modelLimit - reserved)
+  // Math.max(0, ...) đảm bảo không trả về số âm
+  // khi reserved > modelLimit (edge case với model nhỏ < 20k)
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Bước 2 — Đếm cache-aware tokens" />
+        <p>
+          Điểm khác biệt quan trọng nhất: cộng cả <code>cache?.read</code> và
+          <code>cache?.write</code> vào tổng. Anthropic tính cả hai vào context window.
+          Optional chaining (<code>?.</code>) đảm bảo tương thích với provider không có cache
+          (OpenAI, Groq) — khi đó <code>cache</code> là undefined, fallback về 0.
+        </p>
+        <CodeBlock caption="session/overflow.ts — totalContextTokens">
+          <Fragment is:raw>{`
+export type Usage = {
+  input?: number
+  cache?: { read?: number; write?: number }
+  output?: number
+}
+
+export function totalContextTokens(usage: Usage): number {
+  return (
+    (usage.input  ?? 0) +
+    (usage.cache?.read  ?? 0) +
+    (usage.cache?.write ?? 0)
+    // NOTE: output tokens KHÔNG được tính vào đây —
+    // output không chiếm context window của lần gọi tiếp theo
+  )
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Bước 3 — Quyết định compact" />
+        <p>
+          <code>shouldCompact</code> kết hợp hai hàm trên thành 1 boolean đơn giản.
+          Hàm này được gọi sau mỗi LLM response trong T1 agent loop.
+        </p>
+        <CodeBlock caption="session/overflow.ts — shouldCompact">
+          <Fragment is:raw>{`
+export function shouldCompact(
+  usage: Usage,
+  modelLimit: number,
+  reserved?: number          // optional, default = 20_000
+): boolean {
+  const usable = computeUsable(modelLimit, reserved)
+  const used   = totalContextTokens(usage)
+  return used >= usable
+  // >= (không phải >) để trigger compact sớm hơn 1 token
+  // tránh off-by-one race condition
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Luồng gọi trong agent loop" />
+        <p>
+          Hàm này được gọi ngay sau khi nhận <code>usage</code> từ response streaming,
+          trước khi xử lý tool calls. Nếu <code>shouldCompact</code> trả về <code>true</code>,
+          session sẽ ngắt tool execution và đi vào T8.
+        </p>
+      </Section>
+
+      {/* ── 3. Interaction ── */}
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <p>
+          T7 là <em>sensor</em> — nó không thay đổi gì, chỉ đọc và quyết định. Kết quả của
+          nó kích hoạt hoặc ảnh hưởng đến nhiều kỹ thuật khác trong nhóm B.
+        </p>
+
+        <Diagram>{`
+┌─────────────────────────────────────────────────────────┐
+│                  T1 — Agent Loop                        │
+│                                                         │
+│  LLM response ──→ extract usage ──→ T7.shouldCompact?   │
+│                                            │            │
+│                                    ┌───────┴───────┐    │
+│                                   YES              NO   │
+│                                    │               │    │
+│                                    ▼               ▼    │
+│                               T8 Compaction   continue  │
+│                               (triggers T9,            │
+│                                T12, then T11)           │
+└─────────────────────────────────────────────────────────┘
+
+T7 nhận input từ:
+  ← LLM API usage object (input_tokens, cache_read/write)
+  ← modelLimit từ provider config (T23/T24)
+
+T7 ảnh hưởng đến:
+  → T8: trigger compaction khi shouldCompact = true
+  → T10: cache.write tokens ảnh hưởng đến sizing system prompt
+`}</Diagram>
+
+        <p>
+          Ngoài ra, T7 gián tiếp ảnh hưởng T10 (cache-aware system prompt): khi
+          <code>cache.write</code> tăng đột biến (system prompt thay đổi → cache miss),
+          T7 sẽ báo động sớm hơn, nhắc nhở cần tối ưu T10 để giảm cache churn.
+        </p>
+
+        <Callout type="info">
+          <strong>Timing quan trọng.</strong> T7 chạy <em>sau</em> mỗi LLM call, không phải
+          trước. Điều này có nghĩa session sẽ gọi LLM ít nhất 1 lần trước khi phát hiện
+          overflow — hợp lý vì không thể biết usage thực tế cho đến khi API trả về.
+        </Callout>
+      </Section>
+
+      {/* ── 4. Failure modes ── */}
+      <Section id="failure" title="Failure modes" themeTag="Risk">
+        <Subheading level="h3" text="FM-1: Không đếm cache tokens" />
+        <p>
+          Cách triển khai naïve phổ biến nhất — chỉ dùng <code>input_tokens</code>:
+        </p>
+        <CodeBlock caption="Anti-pattern — thiếu cache tokens">
+          <Fragment is:raw>{`
+// ❌ Naive: bỏ qua cache tokens
+function shouldCompact(usage, modelLimit) {
+  return usage.input_tokens >= modelLimit - 20_000
+  // Khi cache.write = 80k và input = 40k:
+  //   naive thấy 40k < 180k → không compact
+  //   thực tế 120k < 180k → cũng ok lần này
+  //   nhưng lần sau khi input tăng → đột ngột 400 error
+}
+`}</Fragment>
+        </CodeBlock>
+        <p>
+          Hệ quả: agent hoạt động bình thường cho đến khi input_tokens tăng đủ lớn,
+          khi đó API trả về lỗi 400 mà không có cơ hội compact trước.
+        </p>
+
+        <Subheading level="h3" text="FM-2: Reserve buffer quá nhỏ" />
+        <p>
+          Nếu reserve là 4 096 (mặc định của một số harness), với model 200k:
+          usable = 195 904. Session sẽ compact muộn hơn. Khi LLM cần sinh response
+          dài (chain-of-thought), 4k output space không đủ → response bị truncate,
+          gây tool call malformed JSON.
+        </p>
+        <CodeBlock caption="Anti-pattern — reserve quá nhỏ">
+          <Fragment is:raw>{`
+// ❌ Reserve nhỏ — response bị truncate
+const RESERVE = 4_096   // quá thấp cho models dùng CoT dài
+
+// opencode chọn 20_000 — đủ cho hầu hết response dài
+// bao gồm cả cases model sinh XML tool call + explanation
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="FM-3: Không xử lý provider không có cache" />
+        <p>
+          Với OpenAI hoặc Groq, <code>usage.cache</code> là <code>undefined</code>.
+          Nếu không dùng optional chaining, hàm sẽ throw <code>TypeError: Cannot read
+          properties of undefined</code>. opencode dùng <code>usage.cache?.read ?? 0</code>
+          để safe.
+        </p>
+
+        <ProsCons
+          pros={[
+            'Phát hiện overflow sớm — trước khi API lỗi',
+            'Cache-aware — chính xác với Anthropic models',
+            'Optional chaining — tương thích multi-provider',
+            'Reserve 20k — đủ cho output dài (CoT, XML tool calls)',
+          ]}
+          cons={[
+            'Reserve cứng 20k — không dynamic theo model/task',
+            'Chỉ trigger sau LLM call — không predict trước',
+            'Không tính <code>output_tokens</code> của turn trước vào projection',
+          ]}
+        />
+      </Section>
+
+      {/* ── 5. Compare ── */}
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Cách đếm token', 'Cache-aware?', 'Reserve buffer']}
+          rows={[
+            ['<strong>opencode</strong>', '<code>input + cache.read + cache.write</code>', '<span style="color:var(--chip-green-fg)">Có</span>', '20 000 token cứng'],
+            ['Claude Code', 'Tương tự (cùng Anthropic)', '<span style="color:var(--chip-green-fg)">Có</span>', 'Không public chi tiết'],
+            ['Aider', '<code>tiktoken</code> approximate, chỉ input', '<span style="color:var(--chip-red-fg)">Không</span>', '~1 000 token (configurable)'],
+            ['LangChain', '<code>ConversationTokenBufferMemory</code> — chỉ message tokens', '<span style="color:var(--chip-red-fg)">Không</span>', 'max_token_limit tuỳ config'],
+          ]}
+        />
+
+        <Callout type="warn">
+          <strong>Lưu ý Aider.</strong> Aider dùng <code>tiktoken</code> để estimate token
+          count <em>client-side</em> — nhanh hơn nhưng không chính xác 100% với tokenizer
+          thực tế của mỗi model. Với Anthropic models, sai lệch thường 5–10%.
+        </Callout>
+      </Section>
+
+      {/* ── 6. Recipe ── */}
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <p>
+          Triển khai cache-aware overflow detection với per-provider switch:
+        </p>
+        <CodeBlock caption="overflow.ts — implementation recipe">
+          <Fragment is:raw>{`
+// overflow.ts — cache-aware token overflow detection
+
+export const DEFAULT_RESERVED_OUTPUT_TOKENS = 20_000
+
+export type Usage = {
+  input?:  number
+  output?: number
+  cache?: {
+    read?:  number
+    write?: number
+  }
+}
+
+export type Provider = 'anthropic' | 'openai' | 'groq' | 'google'
+
+/** Token nào chiếm context window, theo provider */
+export function totalContextTokens(
+  usage: Usage,
+  provider: Provider = 'anthropic'
+): number {
+  const base = usage.input ?? 0
+
+  // Anthropic: cache tokens chiếm context window
+  if (provider === 'anthropic') {
+    return base
+      + (usage.cache?.read  ?? 0)
+      + (usage.cache?.write ?? 0)
+  }
+
+  // OpenAI/Groq/Google: không có prompt caching
+  // (hoặc caching transparent — không ảnh hưởng limit)
+  return base
+}
+
+export function computeUsable(
+  modelLimit: number,
+  reserved = DEFAULT_RESERVED_OUTPUT_TOKENS
+): number {
+  return Math.max(0, modelLimit - reserved)
+}
+
+export function shouldCompact(
+  usage:      Usage,
+  modelLimit: number,
+  opts?: { reserved?: number; provider?: Provider }
+): boolean {
+  const usable = computeUsable(modelLimit, opts?.reserved)
+  const used   = totalContextTokens(usage, opts?.provider)
+  return used >= usable
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      {/* ── 7. Refs ── */}
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://arxiv.org/abs/2511.22729">arXiv 2511.22729 — Context window management in LLM agents</a>',
+            '<a href="https://www.anthropic.com/news/prompt-caching">Anthropic — Prompt caching: how cache tokens count toward context</a>',
+            '<a href="https://redis.io/blog/context-window-management-for-llm-applications/">Redis blog — Context window management for LLM applications</a>',
+            '<a href="https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching">Anthropic docs — Prompt caching reference</a>',
+            '<a href="https://github.com/sst/opencode/blob/main/packages/opencode/src/session/overflow.ts">opencode source — session/overflow.ts</a>',
+            '<a href="https://platform.openai.com/docs/guides/context-length">OpenAI — Managing context length</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

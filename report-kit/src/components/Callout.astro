@@ -1,0 +1,11 @@
+---
+// Callout.astro — block thông tin nổi bật (info / warn / unique / success)
+interface Props {
+  type?: 'info' | 'warn' | 'unique' | 'success';
+}
+
+const { type = 'info' } = Astro.props;
+---
+<div class={`callout ${type}`}>
+  <slot />
+</div>

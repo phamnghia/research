@@ -1,0 +1,126 @@
+---
+import Section from "../../../../components/Section.astro";
+import Subheading from "../../../../components/Subheading.astro";
+import DataTable from "../../../../components/DataTable.astro";
+import {
+  compareHeaders,
+  compareRows,
+} from "../../../../data/reports/opencode-report";
+---
+
+<Section id={"conclusion"} title={"Kết luận & So sánh với các harness khác"}>
+  <Subheading level="h3" text="Điểm đặc sắc của opencode" />
+  <p>
+    Sau khi đi qua 28 kỹ thuật, có thể rút ra ba đặc điểm khác biệt lớn nhất của
+    opencode so với các coding agent harness phổ biến (Claude Code, Aider,
+    Cursor, Cline, OpenAI Codex CLI):
+  </p>
+  <ol>
+    <li>
+      <strong>Effect-TS làm nền tảng.</strong> Phần lớn harness dùng Promise / async-await
+      trực tiếp. opencode chọn Effect để get: interruption semantics đúng đắn, retry
+      + timeout composable, service injection type-safe, OTel tracing gần như miễn
+      phí. Đây là lựa chọn hiếm trong coding agent ecosystem (chỉ có effect-ai và
+      vài framework dùng).
+    </li>
+    <li>
+      <strong>Permission model là first-class.</strong> Wildcard last-match-wins +
+      arity normalization (450+ entries) + session-state (once/always/reject) + tree-sitter
+      bash parse — tổng thể cho UX control tốt nhất trong các agent hiện tại. Claude
+      Code có hệ permission gần tương tự nhưng không có arity normalization.
+    </li>
+    <li>
+      <strong>Provider abstraction sâu với quirk handling.</strong> Thay vì lowest-common-denominator,
+      opencode có transform layer cho từng provider (Anthropic split tool_use, Mistral
+      truncate toolCallId, ...). Nhờ đó hỗ trợ 20+ provider nhưng vẫn pull được ưu
+      điểm riêng của mỗi provider (cache_control của Anthropic, reasoning của o1,
+      ...).
+    </li>
+  </ol>
+  <Subheading level="h3" text="So sánh ngắn" />
+  <DataTable headers={compareHeaders} rows={compareRows} variant="compare" />
+  <Subheading level="h3" text="Điểm yếu chung" />
+  <p>Một số trade-off và weak spots xuất hiện xuyên suốt design:</p>
+  <ul>
+    <li>
+      <strong>Effect-TS cost onboarding.</strong> Người mới đóng góp cho opencode
+      cần học Effect — barrier cao hơn Promise thuần.
+    </li>
+    <li>
+      <strong>Magic numbers.</strong>
+      <code>20k reserved tokens</code>, <code>25% tail budget</code>,
+      <code>3 iteration doom loop</code>, <code>threshold 0.3 fuzzy</code> — đều là
+      kinh nghiệm, không phải nghiên cứu formal.
+    </li>
+    <li>
+      <strong>Maintenance heavy mappings.</strong> ARITY (450+), OVERFLOW_PATTERNS
+      (25+), BUNDLED_PROVIDERS (20+) đều cần update khi ecosystem thay đổi.
+    </li>
+    <li>
+      <strong>Prompt caching fragility.</strong> Plugin transform có thể vô tình break
+      header → cache miss hàng loạt. Observability cho cache hit rate chưa rõ ràng.
+    </li>
+    <li>
+      <strong>Sub-agent summary bottleneck.</strong> Parent chỉ thấy summary → khi
+      sub-agent lầm lạc, parent khó debug. Cần tooling để expose child trace khi cần.
+    </li>
+  </ul>
+  <Subheading level="h3" text="Khuyến nghị khi tái dùng" />
+  <p>
+    Nếu build harness riêng, các kỹ thuật nên copy đầu tiên (ROI cao, implement
+    không quá phức tạp):
+  </p>
+  <ul>
+    <li>
+      <strong>T15 — Output truncation + file spill</strong>: gần như mandatory,
+      quá dễ overflow nếu không có.
+    </li>
+    <li>
+      <strong>T10 — Cache-aware 2-part system prompt</strong>: nếu dùng
+      Anthropic, -80% chi phí input.
+    </li>
+    <li>
+      <strong
+        >T7, T8 — Context overflow detection + tail-preserve compaction</strong
+      >: session dài sẽ cần.
+    </li>
+    <li>
+      <strong>T16 — Zod validation với user-friendly error</strong>: giảm tool
+      arg error đáng kể.
+    </li>
+    <li>
+      <strong>T25 — Session-scoped permission state (once/always)</strong>: UX
+      chốt lại từ spam → smooth.
+    </li>
+  </ul>
+  <p>
+    Các kỹ thuật nên cẩn trọng khi copy (high complexity, provider-specific,
+    hoặc dễ gây bug khi config sai):
+    <strong>T17 (fuzzy edit — false match rủi ro)</strong>, <strong
+      >T18 (tree-sitter WASM — infra cost)</strong
+    >,
+    <strong>T22 (provider transform — cần test per provider)</strong>, <strong
+      >T26 (arity map — maintenance burden)</strong
+    >.
+  </p>
+  <Subheading level="h3" text="Kết" />
+  <p>
+    opencode là một minh họa tốt về "harness engineering" có tính kỹ lưỡng:
+    không chỉ wrap model call, mà coi mỗi khía cạnh — context, tool, permission,
+    provider — như một module có spec, error mode, và trade-off rõ ràng. Code
+    đọc giống Effect library hơn script gluing lại API. Phần thiết kế đáng tham
+    khảo nhất là cách họ xử lý
+    <em>"agent trong môi trường thật"</em>: bash có thể xóa nhầm, model có thể
+    loop, tool có thể overflow, provider có thể khác nhau về thông điệp lỗi —
+    tất cả đều có kỹ thuật đối phó cụ thể chứ không phải "try-catch và hy vọng".
+  </p>
+  <p>
+    Với người dùng muốn xây dựng agent riêng, opencode là "đồ chơi" tốt để đọc
+    source — mỗi file &lt;500 dòng, service tách rời, comment vừa đủ. Đề xuất
+    đọc theo thứ tự: <code>session/prompt.ts</code> →
+    <code>session/processor.ts</code> → <code>tool/tool.ts</code> → <code
+      >tool/edit.ts</code
+    > →
+    <code>permission/</code> → <code>provider/</code>.
+  </p>
+</Section>

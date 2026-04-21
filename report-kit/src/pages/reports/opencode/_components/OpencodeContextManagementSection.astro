@@ -1,0 +1,369 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import CodeBlock from "../../../../components/CodeBlock.astro";
+import WhyImportant from "../../../../components/WhyImportant.astro";
+import DeepDiveLink from "../../../../components/DeepDiveLink.astro";
+
+const __code_OpencodeContextManagementSection_1 = `        export const DEFAULT_RESERVED_OUTPUT_TOKENS = 20_000 export function
+        computeUsable(modelLimit: number, reserved =
+        DEFAULT_RESERVED_OUTPUT_TOKENS) { return Math.max(0, modelLimit -
+        reserved) } /** * Tổng token context = input + cache.read + cache.write.
+        * Với Anthropic, cache write/read vẫn chiếm chỗ trong context window, *
+        nên phải cộng tất cả để đánh giá overflow chính xác. */ export function
+        totalContextTokens(usage: Usage): number { return (usage.input ?? 0) +
+        (usage.cache?.read ?? 0) + (usage.cache?.write ?? 0) } export function
+        shouldCompact(usage: Usage, modelLimit: number, reserved?: number) {
+        const usable = computeUsable(modelLimit, reserved) const used =
+        totalContextTokens(usage) return used &gt;= usable }
+      `;
+const __code_OpencodeContextManagementSection_2 = `        interface Usage { input: number output: number cache?: { read: number;
+        write: number } } const RESERVED_OUTPUT = 20_000 // luôn chừa cho
+        completion function needsCompaction(usage: Usage, contextWindow:
+        number): boolean { const total = usage.input + (usage.cache?.read ?? 0)
+        + (usage.cache?.write ?? 0) const threshold = contextWindow -
+        RESERVED_OUTPUT return total &gt;= threshold } // Sử dụng sau mỗi lần
+        gọi model if (needsCompaction(lastUsage, model.contextWindow)) { await
+        compactConversation(session) }
+      `;
+const __code_OpencodeContextManagementSection_3 = `        // Budget cho "đuôi" giữ nguyên không compact const tailBudget =
+        Math.min( Math.max(Math.floor(usable * 0.25), 2_000), 8_000, ) // Duyệt
+        từ cuối ngược lên, giữ lại các turn cho tới khi vượt budget const tail:
+        Message[] = [] let tailTokens = 0 for (let i = messages.length - 1; i
+        &gt;= 0; i--) { const turnTokens = countTokens(messages[i]) if
+        (tailTokens + turnTokens &gt; tailBudget &amp;&amp; tail.length &gt;=
+        MIN_TAIL) break tail.unshift(messages[i]) tailTokens += turnTokens } //
+        Compact phần đầu thành summary const head = messages.slice(0,
+        messages.length - tail.length) const summary = await model.complete({
+        system: COMPACTION_PROMPT, messages: head, }) return [ { role: "system",
+        content:
+        \`&lt;prior-conversation-summary&gt;\\n\${summary}\\n&lt;/prior-conversation-summary&gt;\`
+        }, ...tail, ]
+      `;
+const __code_OpencodeContextManagementSection_4 = `        async function compactWithTail(messages: Msg[], usableTokens: number) {
+        const tailBudget = Math.min(Math.max(usableTokens * 0.25, 2000), 8000)
+        let tailTokens = 0 const tail: Msg[] = [] for (let i = messages.length -
+        1; i &gt;= 0; i--) { const t = countTokens(messages[i]) if (tailTokens +
+        t &gt; tailBudget &amp;&amp; tail.length &gt;= 2) break
+        tail.unshift(messages[i]) tailTokens += t } const head =
+        messages.slice(0, messages.length - tail.length) const summary = await
+        summarize(head) // 1 lần gọi LLM cho phần đầu return
+        [systemSummary(summary), ...tail] // ghép lại }
+      `;
+const __code_OpencodeContextManagementSection_5 = `        const PROTECTED_TOOLS = new Set(["skill"]) // skill output đắt → giữ
+        nguyên function pruneToolOutputs(messages: Message[]): Message[] { //
+        Không prune 2 user turn cuối → model cần xem tool output gần nhất để
+        hành động const recentUserTurnIndices =
+        findLastUserTurnIndices(messages, 2) const skipBoundary =
+        recentUserTurnIndices[0] ?? messages.length return messages.map((msg,
+        idx) =&gt; { if (idx &gt;= skipBoundary) return msg if (msg.role !==
+        "tool") return msg if (PROTECTED_TOOLS.has(msg.toolName)) return msg //
+        Thay output bằng placeholder + metadata đánh dấu đã compact return {
+        ...msg, content: \`&lt;tool-output-compacted tool="\${msg.toolName}"
+        /&gt;\`, metadata: { ...msg.metadata, time: { compacted: Date.now() } },
+        } }) }
+      `;
+const __code_OpencodeContextManagementSection_6 = `        const PROTECTED = new Set(["skill", "memory"]) function
+        pruneOldToolOutputs(msgs: Msg[]): Msg[] { const recentBoundary =
+        lastNUserTurns(msgs, 2) // giữ nguyên 2 turn cuối return msgs.map((m, i)
+        =&gt; { if (i &gt;= recentBoundary) return m if (m.role !== "tool" ||
+        PROTECTED.has(m.toolName)) return m return { ...m, content:
+        \`[\${m.toolName} output compacted]\`, metadata: { compactedAt: Date.now()
+        }, } }) }
+      `;
+const __code_OpencodeContextManagementSection_7 = `        // system prompt được split thành [header, rest]: // - header: phần
+        static (identity, rules, tool descriptions) → cache được // - rest: phần
+        dynamic (env block, git status, skills list) → ephemeral function
+        buildSystem(model: Model, ctx: Ctx): [string, string] { const header =
+        renderTemplate(getModelTemplate(model)) // reusable const rest = [
+        buildEnvBlock(ctx), // &lt;env&gt;directory, platform...&lt;/env&gt;
+        buildSkillsList(ctx.skills), buildProjectInstructions(ctx), // AGENTS.md
+        ].join("\\n\\n") return [header, rest] } // Khi gọi API, đặt cache_control
+        vào cuối header const systemBlocks = [ { type: "text", text: header,
+        cache_control: { type: "ephemeral" } }, { type: "text", text: rest }, //
+        không cache ]
+      `;
+const __code_OpencodeContextManagementSection_8 = `        // Anthropic message format await anthropic.messages.create({ model:
+        "claude-sonnet-4", system: [ { type: "text", text: STATIC_SYSTEM_PROMPT,
+        // &gt;~1024 tokens để đủ cache cache_control: { type: "ephemeral" }, //
+        breakpoint }, { type: "text", text: dynamicEnvBlock }, // không cache ],
+        messages, tools: [...TOOLS, { /* last tool */ cache_control: { type:
+        "ephemeral" } }], })
+      `;
+const __code_OpencodeContextManagementSection_9 = `        // Sau khi compact xong, phải "nhắc" model tiếp tục task đang dở async
+        function continueAfterCompaction(session: Session, lastUserMsg: Message)
+        { if (lastUserMsg.hasMedia()) { // Media không thể replay → inject text
+        description return injectSyntheticUser(session,
+        describeMedia(lastUserMsg)) } if (isUserMessage(lastUserMsg) &amp;&amp;
+        !lastUserMsg.answered) { // User message chưa được trả lời → replay
+        nguyên văn return replayMessage(session, lastUserMsg) } // Model đang ở
+        giữa task nhưng không có user message mới → prompt continue return
+        injectSyntheticUser(session, "continue", { metadata: {
+        compaction_continue: true }, }) }
+      `;
+const __code_OpencodeContextManagementSection_10 = `        async function resumeAfterCompaction(session: Session) { const last =
+        session.lastMessage() if (last?.role === "user" &amp;&amp;
+        !last.responded) { // user vừa hỏi, model chưa kịp trả lời → replay
+        await session.sendMessage(last) return } // Model đang làm giữa chừng →
+        bơm "continue" await session.sendSystem({ content: "continue", metadata:
+        { kind: "compaction-continue" }, }) }
+      `;
+const __code_OpencodeContextManagementSection_11 = `        const DEFAULT_COMPACTION_TEMPLATE = \` You are compacting a coding agent
+        conversation. Produce a dense summary with these sections: ## Goal One
+        sentence describing what the user ultimately wants. ## Instructions
+        Bullet list of rules the user gave (tone, constraints, tech choices). ##
+        Discoveries Facts learned about the codebase: file paths, symbols,
+        patterns, gotchas. ## Accomplished What has been done so far (edits,
+        commands, decisions). ## Relevant files List of files with 1-line
+        description each. Be factual. No filler. Max \${MAX_SUMMARY_TOKENS}
+        tokens. \` // Plugin có thể override: const template =
+        plugins.compactionTemplate?.() ?? DEFAULT_COMPACTION_TEMPLATE
+      `;
+const __code_OpencodeContextManagementSection_12 = `        const COMPACTION_TEMPLATE = \` Summarize the conversation above. Use
+        EXACTLY these sections: ### Goal (1 sentence) ### Constraints (bullet
+        list — user's rules/preferences) ### Relevant files (file path + 1 line)
+        ### Done (what actions have been performed) ### Next (what remains)
+        \`.trim() async function compact(history: Msg[]) { return llm.complete({
+        system: COMPACTION_TEMPLATE, messages: history, maxTokens: 2000, }) }
+      `;
+---
+
+<Section
+  id={"section-b"}
+  title={"B. Context Management — Giữ cho cửa sổ ngữ cảnh không cháy"}
+>
+  <p class="lead">
+    Model nào cũng có context window giới hạn. Một session dài vài giờ, hàng
+    trăm tool call, có thể tích lũy hàng trăm ngàn token. opencode chọn cách
+    "phòng ngự chủ động": đếm token proactively, compact khi đạt ngưỡng, và giữ
+    lại những phần quan trọng nhất (turn cuối + công cụ không được phép
+    compact).
+  </p>
+  <Technique
+    id={"t7"}
+    title={"T7. Overflow detection với reserved buffer (cache-aware)"}
+    tid={"B.1"}
+    location={"<strong>File:</strong> <code>session/overflow.ts</code> · <strong>Lines:</strong> 1-26"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeContextManagementSection_1} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Nhiều harness chỉ đếm <code
+        >input_tokens</code
+      > trả về từ API mà quên cached tokens — dẫn tới overflow bất ngờ. opencode đếm
+      cả cache read/write vào context để so với limit, đồng thời chừa sẵn 20k token
+      cho output nên model luôn đủ chỗ sinh câu trả lời tiếp theo.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeContextManagementSection_2} />
+    <ProsCons
+      pros={[
+        'Đếm đúng context thật (bao gồm cache), tránh nhầm lẫn giữa "billing token" và "context token"',
+        "Reserve output buffer giúp model luôn đủ chỗ để trả lời đầy đủ, không bị truncate giữa chừng",
+        "Logic đơn giản, dễ tune per-provider (một số provider cache không chiếm context)",
+      ]}
+      cons={[
+        "Reserve cứng 20k có thể quá ít với các response dài (code generation lớn) hoặc quá nhiều với Q&amp;A ngắn",
+        "Không tính tool schema / system prompt đã nằm trong input, có thể miscount khi các part này thay đổi động",
+        "Khi provider API trả <code>usage</code> không chính xác (Bedrock, một vài gateway), số đếm sẽ lệch",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://arxiv.org/html/2511.22729v1">arXiv — Solving Context Window Overflow in AI Agents</a>',
+        '<a href="https://redis.io/blog/context-window-overflow/">Redis — Context Window Overflow in 2026</a>',
+        '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Anthropic — Prompt caching (cached tokens chiếm context)</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t7/">
+      Phân tích sâu T7: cache-aware counting, reserved buffer, per-provider differences, failure modes
+    </DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t8"}
+    title={"T8. Tail-turn preserving compaction"}
+    tid={"B.2"}
+    location={"<strong>File:</strong> <code>session/compaction.ts</code> · <strong>Lines:</strong> 33-170"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeContextManagementSection_3} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Nếu compact "sạch" toàn bộ, model mất ngữ
+      cảnh các chỉ thị gần nhất (đang đọc file gì, user vừa yêu cầu gì). Giữ lại <em
+        >tail</em
+      > (25% budget, min 2k, max 8k) bảo toàn "ngữ cảnh tức thời" trong khi nén phần
+      lịch sử.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeContextManagementSection_4} />
+    <ProsCons
+      pros={[
+        'Giữ được "short-term memory" — các tool output / chỉ thị gần nhất không bị mất',
+        "Budget tỉ lệ (25%) tự scale theo model size: Opus giữ nhiều hơn Haiku",
+        "MIN_TAIL = 2 đảm bảo user message cuối luôn còn nguyên văn",
+      ]}
+      cons={[
+        'Summary có thể "hallucinate" hoặc bỏ sót chi tiết quan trọng từ đầu cuộc hội thoại',
+        "25% là magic number — workload code-gen nặng có thể cần 40-50%",
+        'Không có cơ chế pin "important messages" (ví dụ câu user định nghĩa yêu cầu gốc)',
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://learn.microsoft.com/en-us/agent-framework/agents/conversations/compaction">Microsoft Learn — Compaction</a>',
+        '<a href="https://www.morphllm.com/compaction-vs-summarization">Morph — Compaction vs Summarization</a>',
+        '<a href="https://factory.ai/news/compressing-context">Factory.ai — Compressing Context</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t8/">
+      Phân tích sâu T8: tail budget algorithm, backward walk, MIN_TAIL, compaction pipeline
+    </DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t9"}
+    title={"T9. Tool output pruning với protected tools"}
+    tid={"B.3"}
+    location={"<strong>File:</strong> <code>session/compaction.ts</code> · <strong>Lines:</strong> 171-219"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeContextManagementSection_5} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Tool output (bash, grep, read file...)
+      thường dài nhất trong conversation. Prune output cũ nhưng giữ tool call + chat
+      message giúp model thấy được "lịch sử hành động" mà không chịu chi phí token
+      của output. Protected tool list tránh xoá skill prompt (thường đóng vai trò
+      instruction runtime).
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeContextManagementSection_6} />
+    <ProsCons
+      pros={[
+        'Giảm context đáng kể (tool output thường lớn nhất) mà vẫn giữ "shape" cuộc hội thoại',
+        'Protected list cho phép đánh dấu các output "đắt giá" không được xoá',
+        "Metadata <code>compactedAt</code> cho phép debug / restore về sau nếu cần",
+      ]}
+      cons={[
+        "Model có thể bối rối khi gặp <code>[tool output compacted]</code> nếu message gần đó tham chiếu kết quả",
+        'Hard-code <code>PROTECTED_TOOLS = ["skill"]</code> không đủ linh hoạt cho workload đa dạng',
+        "Không có cơ chế partial prune (giữ 200 dòng đầu + cuối) — all-or-nothing",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://kargarisaac.medium.com/the-fundamentals-of-context-management-and-compaction-in-llms-171ea31741a2">Medium — Fundamentals of Context Management &amp; Compaction</a>',
+        '<a href="https://blog.jetbrains.com/research/2025/12/efficient-context-management/">JetBrains Research — Smarter Context Management for LLM Agents</a>',
+        '<a href="https://google.github.io/adk-docs/context/compaction/">Google ADK — Context compression</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t9/">
+      Phân tích sâu T9: protected set, boundary detection, partial vs all-or-nothing, plugin config
+    </DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t10"}
+    title={"T10. Cache-aware 2-part system prompt"}
+    tid={"B.4"}
+    location={"<strong>File:</strong> <code>session/system.ts</code> + <code>session/llm.ts:99-160</code>"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeContextManagementSection_7} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Anthropic chỉ cho tối đa 4 cache breakpoints
+      per request, và cache invalid ngay khi 1 byte phía trước thay đổi. Tách static
+      vs dynamic giúp cache hit rate cao (header không đổi → 90% cost reduction).
+      Nhiều harness khác concat toàn bộ system prompt thành 1 string → mỗi message
+      đều invalid cache.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeContextManagementSection_8} />
+    <ProsCons
+      pros={[
+        "Giảm 80-90% cost cho input tokens trong các session dài với Anthropic",
+        "Latency thấp hơn (cache read ~100ms vs generation ~500ms)",
+        "Pattern clean, dễ apply cho các provider khác (OpenAI cũng có prompt caching)",
+      ]}
+      cons={[
+        "Chỉ có hiệu quả khi header đủ dài (&gt; 1024 token với Anthropic); nếu nhỏ hơn, không cache được",
+        "Plugin hook transform có thể vô tình thay đổi header → cache miss → plugin phải cẩn thận",
+        "Không phải provider nào cũng hỗ trợ prompt caching (Gemini, nhiều self-hosted model không)",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Anthropic — Prompt caching (official docs)</a>',
+        '<a href="https://github.com/anthropics/anthropic-cookbook/blob/main/misc/prompt_caching.ipynb">Anthropic cookbook — prompt_caching.ipynb</a>',
+        '<a href="https://www.mindstudio.ai/blog/anthropic-prompt-caching-claude-subscription-limits">MindStudio — What Is Anthropic\'s Prompt Caching</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t10/">
+      Phân tích sâu T10: static/dynamic split, cache breakpoints, plugin rejoin, cost savings
+    </DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t11"}
+    title={"T11. Auto compaction continuation (replay/continue)"}
+    tid={"B.5"}
+    location={"<strong>File:</strong> <code>session/compaction.ts</code> · <strong>Lines:</strong> 372-451"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeContextManagementSection_9} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Compact xong mà không prompt gì thêm →
+      model thấy conversation "đã xong", dừng. Replay user message hoặc inject "continue"
+      synthetic prompt giữ agent tiếp tục được nhiệm vụ. Xử lý media riêng tránh việc
+      resend ảnh/PDF (tốn bandwidth) hoặc fail do media đã expire.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeContextManagementSection_10} />
+    <ProsCons
+      pros={[
+        'Agent không "treo" sau compaction — luôn có prompt kế tiếp',
+        "Metadata <code>compaction_continue</code> cho phép UI hide / phân biệt với user message thật",
+        "Xử lý media riêng đảm bảo không gửi lại file lớn lần nữa",
+      ]}
+      cons={[
+        'Synthetic "continue" prompt đôi khi khiến model lặp lại summary thay vì làm tiếp',
+        "Logic phân nhánh (has media / answered / else) dễ bug khi thêm loại message mới",
+        "Nếu summary thiếu thông tin, model sẽ continue sai hướng",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://forgecode.dev/docs/context-compaction/">ForgeCode — Context Compaction docs</a>',
+        '<a href="https://learn.microsoft.com/en-us/agent-framework/agents/conversations/compaction">Microsoft Agent Framework — Compaction strategies</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t11/">
+      Phân tích sâu T11: 3 nhánh media/replay/continue, synthetic message metadata, edge cases
+    </DeepDiveLink>
+  </Technique>
+  <Technique
+    id={"t12"}
+    title={"T12. Structured compaction template"}
+    tid={"B.6"}
+    location={"<strong>File:</strong> <code>session/compaction.ts</code> · <strong>Lines:</strong> 277-299"}
+  >
+    <CodeBlock caption="Code từ opencode" code={__code_OpencodeContextManagementSection_11} />
+    <WhyImportant>
+      <strong>Tại sao quan trọng:</strong> Summary tự do thường lan man, thiếu cấu
+      trúc → model sau compaction khó find lại thông tin. Template bắt LLM điền 5
+      section cố định (Goal / Instructions / Discoveries / Accomplished / Relevant
+      files) → sau compaction, model vẫn có "mental map" của task. Plugin override
+      cho phép customize per-workflow.
+    </WhyImportant>
+    <CodeBlock caption="Code example (generic)" code={__code_OpencodeContextManagementSection_12} />
+    <ProsCons
+      pros={[
+        "Summary luôn có shape dự đoán được → dễ parse / regenerate",
+        "Template rõ ràng giúp model không quên chi tiết quan trọng (relevant files)",
+        "Plugin override cho phép tuỳ biến cho domain khác (e.g. writing, research)",
+      ]}
+      cons={[
+        "Template cứng có thể không phù hợp với hội thoại non-coding",
+        'Tốn thêm token cho cấu trúc (header "### Goal", ...) so với summary tự do',
+        "Model yếu có thể bỏ sót section hoặc đặt tên sai",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.humanlayer.dev/blog/writing-a-good-claude-md">HumanLayer — Writing a good CLAUDE.md (applicable to summary templates)</a>',
+        '<a href="https://kargarisaac.medium.com/the-fundamentals-of-context-management-and-compaction-in-llms-171ea31741a2">Medium — Fundamentals of Context Management &amp; Compaction</a>',
+      ]}
+    />
+    <DeepDiveLink href="/reports/opencode/t12/">
+      Phân tích sâu T12: 5-section structure, plugin override, template quality, free-form comparison
+    </DeepDiveLink>
+  </Technique>
+</Section>

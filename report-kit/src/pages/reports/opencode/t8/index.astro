@@ -1,0 +1,384 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import ProsCons from '../../../../components/ProsCons.astro';
+import Callout from '../../../../components/Callout.astro';
+import Chip from '../../../../components/Chip.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T8 — Tail-turn preserving compaction | opencode"
+  description="Phân tích sâu chiến lược compaction giữ lại ngữ cảnh gần nhất (25% tail) và tóm tắt phần đầu bằng LLM, tránh mất 'short-term memory' của agent."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T8 — Tail-turn preserving compaction"
+        subtitle="Giữ 25% turn cuối cùng nguyên vẹn, tóm tắt phần còn lại bằng LLM với template 5-section — để agent không mất ngữ cảnh tức thời sau khi compact."
+        meta={[
+          { label: 'Nhóm',  value: 'B — Context Management' },
+          { label: 'File',  value: '<code>session/compaction.ts</code>' },
+          { label: 'Lines', value: '33–170' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      {/* ── 1. Overview ── */}
+      <Section id="overview" title="Tổng quan" themeTag="Context">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Khi context overflow, agent có 2 lựa chọn tệ:
+          (1) compact <em>toàn bộ</em> messages → mất "short-term memory", không biết
+          mình vừa làm gì; (2) không compact → API crash với 400. Tail-preserving
+          compaction là con đường thứ 3: giữ nguyên N turn gần nhất (nơi chứa lệnh
+          vừa nhận, kết quả tool vừa xong) và chỉ tóm tắt phần lịch sử xa hơn.
+        </WhyImportant>
+
+        <p>
+          opencode tính <code>tailBudget = min(max(usable * 0.25, 2000), 8000)</code>
+          — tức là tail chiếm 25% context usable, tối thiểu 2 000 token, tối đa 8 000 token.
+          Giới hạn trên 8 000 ngăn tail ăn quá nhiều không gian khi model có context window lớn.
+        </p>
+
+        <p>
+          Sau khi xác định tail, phần <em>head</em> (tất cả messages trước tail) được gửi cho
+          một LLM call riêng để tóm tắt theo T12 template. Kết quả là một message hệ thống
+          duy nhất chứa summary, theo sau bởi các tail messages. Session tiếp tục từ đây
+          thông qua T11 continuation.
+        </p>
+
+        <Callout type="unique">
+          <strong>25% tail budget.</strong> Con số 25% không phải ngẫu nhiên: đủ để giữ
+          lại 1-2 round-trip tool call + response (thường 1 000–4 000 token), nhưng không
+          quá lớn để ảnh hưởng không gian cho LLM response mới.
+        </Callout>
+
+        <Callout type="info">
+          <strong>MIN_TAIL = 2 turns.</strong> Compaction không xảy ra nếu tail chưa tích
+          lũy đủ 2 turns. Điều này tránh compact quá sớm khi conversation mới bắt đầu
+          và chỉ có 1-2 message.
+        </Callout>
+      </Section>
+
+      {/* ── 2. Anatomy ── */}
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Bước 1 — Tính tail budget" />
+        <p>
+          Budget được clamp vào khoảng [2 000, 8 000] để hoạt động đúng cả với model
+          nhỏ (8k context) lẫn model lớn (200k context).
+        </p>
+        <CodeBlock caption="session/compaction.ts — tail budget">
+          <Fragment is:raw>{`
+const MIN_TAIL_TURNS  = 2
+const TAIL_RATIO      = 0.25
+const MIN_TAIL_TOKENS = 2_000
+const MAX_TAIL_TOKENS = 8_000
+
+function computeTailBudget(usable: number): number {
+  return Math.min(
+    MAX_TAIL_TOKENS,
+    Math.max(MIN_TAIL_TOKENS, Math.floor(usable * TAIL_RATIO))
+  )
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Bước 2 — Backward walk để tìm tail" />
+        <p>
+          Đi ngược từ cuối messages, tích lũy token count vào <code>tail[]</code> cho đến
+          khi vượt <code>tailBudget</code> <em>và</em> đã có ít nhất <code>MIN_TAIL_TURNS</code>
+          turns. Điều kiện <code>&&</code> đảm bảo luôn giữ tối thiểu 2 turns dù budget nhỏ.
+        </p>
+        <CodeBlock caption="session/compaction.ts — backward walk">
+          <Fragment is:raw>{`
+function splitHeadTail(
+  messages:   Message[],
+  tailBudget: number
+): { head: Message[]; tail: Message[] } {
+  const tail: Message[] = []
+  let   accumulated     = 0
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg    = messages[i]
+    const tokens = estimateTokens(msg)   // rough estimate per message
+
+    tail.unshift(msg)
+    accumulated += tokens
+
+    if (accumulated >= tailBudget && tail.length >= MIN_TAIL_TURNS) {
+      // đã đủ tail — phần còn lại là head
+      return {
+        head: messages.slice(0, i),
+        tail,
+      }
+    }
+  }
+
+  // Không đủ messages để compact — trả về nguyên vẹn
+  return { head: [], tail: messages }
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Bước 3 — Gọi LLM compact head" />
+        <p>
+          Head được tóm tắt bằng LLM call riêng với T12 structured template. Output là
+          một string markdown với 5 sections cố định.
+        </p>
+        <CodeBlock caption="session/compaction.ts — LLM summary call">
+          <Fragment is:raw>{`
+async function compactHead(
+  head:    Message[],
+  session: Session
+): Promise<string> {
+  const template = session.plugins.compactionTemplate?.()
+    ?? DEFAULT_COMPACTION_TEMPLATE  // T12
+
+  const response = await session.llm.complete({
+    messages: [
+      ...head,
+      { role: 'user', content: template },
+    ],
+    // Dùng model nhẹ hơn nếu available (tiết kiệm cost)
+    model: session.config.compactionModel ?? session.config.model,
+  })
+
+  return response.content
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="Bước 4 — Ghép summary + tail" />
+        <p>
+          Summary được đặt làm system message đặc biệt với prefix
+          <code>&lt;prior-conversation-summary&gt;</code>, theo sau là các tail messages.
+        </p>
+        <CodeBlock caption="session/compaction.ts — reassemble">
+          <Fragment is:raw>{`
+function reassemble(summary: string, tail: Message[]): Message[] {
+  return [
+    {
+      role:    'system',
+      content: \`<prior-conversation-summary>\n\${summary}\n</prior-conversation-summary>\`,
+    },
+    ...tail,
+  ]
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      {/* ── 3. Interaction ── */}
+      <Section id="interaction" title="Tương tác với các kỹ thuật khác" themeTag="Interaction">
+        <Diagram>{`
+T7 shouldCompact = true
+          │
+          ▼
+    ┌─────────────────────────────────────────────┐
+    │           T8 — Tail-turn Compaction          │
+    │                                             │
+    │  1. T9: prune tool outputs trong head       │
+    │     (trước khi gửi head cho LLM)            │
+    │         │                                   │
+    │         ▼                                   │
+    │  2. tính tail budget (25% usable)           │
+    │         │                                   │
+    │         ▼                                   │
+    │  3. backward walk → split head/tail         │
+    │         │                                   │
+    │         ▼                                   │
+    │  4. T12 template → LLM compact(head)        │
+    │         │                                   │
+    │         ▼                                   │
+    │  5. reassemble: [summary_sys, ...tail]      │
+    │         │                                   │
+    │         ▼                                   │
+    │  6. T11: inject continuation message        │
+    └─────────────────────────────────────────────┘
+          │
+          ▼
+    T1 Agent loop tiếp tục với messages mới
+`}</Diagram>
+
+        <p>
+          T8 đóng vai trò <em>orchestrator</em> của toàn bộ compaction pipeline:
+          nó gọi T9 (tool pruning) trước, dùng T12 (structured template) trong LLM call,
+          và sau đó T11 (continuation) inject message để T1 loop không bị stall.
+        </p>
+
+        <Callout type="warn">
+          <strong>Order matters.</strong> T9 (tool pruning) phải chạy <em>trước</em> khi
+          split head/tail, không phải sau. Nếu prune sau khi split, có thể vô tình prune
+          tool output trong tail — mất ngữ cảnh tức thời.
+        </Callout>
+      </Section>
+
+      {/* ── 4. Failure modes ── */}
+      <Section id="failure" title="Failure modes" themeTag="Risk">
+        <Subheading level="h3" text="FM-1: Compact toàn bộ messages" />
+        <p>
+          Không giữ tail — summary thay thế toàn bộ conversation history:
+        </p>
+        <CodeBlock caption="Anti-pattern — no tail preservation">
+          <Fragment is:raw>{`
+// ❌ Compact all — mất short-term memory
+async function compactAll(messages, session) {
+  const summary = await llm.complete({
+    messages: [...messages, { role: 'user', content: template }]
+  })
+  // Agent không còn biết mình vừa gọi tool nào,
+  // kết quả ra sao → dễ lặp lại hành động đã làm
+  return [{ role: 'system', content: summary }]
+}
+`}</Fragment>
+        </CodeBlock>
+
+        <Subheading level="h3" text="FM-2: Tail quá nhỏ" />
+        <p>
+          Nếu tail chỉ giữ 1 turn, model có thể không thấy lệnh gần nhất của user.
+          Ví dụ: user vừa nói "hãy check file X" → compact → tail chỉ giữ tool result
+          → model không biết tại sao lại có tool result đó.
+        </p>
+
+        <Subheading level="h3" text="FM-3: Không compact kịp thời" />
+        <p>
+          Nếu T7 threshold quá cao (compact quá muộn), API call lần đó thành công
+          nhưng lần tiếp theo fail ngay. Giữa hai call này không có cơ hội compact
+          → crash. opencode tránh điều này bằng <code>&gt;=</code> (không phải <code>&gt;</code>)
+          trong T7.
+        </p>
+
+        <ProsCons
+          pros={[
+            'Giữ short-term memory (tail) — agent biết mình đang làm gì',
+            'LLM summary cho head — không mất thông tin quan trọng',
+            'MIN_TAIL_TURNS = 2 — đảm bảo đủ ngữ cảnh tối thiểu',
+            'Plugin override template — linh hoạt per use-case',
+          ]}
+          cons={[
+            'Thêm 1 LLM call để compact → tăng latency và cost',
+            'Tail budget cứng — không adaptive theo loại conversation',
+            '<code>estimateTokens</code> chỉ là rough estimate, không chính xác 100%',
+          ]}
+        />
+      </Section>
+
+      {/* ── 5. Compare ── */}
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Chiến lược compaction', 'Tail preservation?', 'LLM summary?']}
+          rows={[
+            ['<strong>opencode</strong>', 'Tail 25% + LLM summary cho head', '<span style="color:var(--chip-green-fg)">Có (25%, clamp 2k–8k)</span>', '<span style="color:var(--chip-green-fg)">Có (T12 template)</span>'],
+            ['Claude Code', 'Tail-preserving (tương tự)', '<span style="color:var(--chip-green-fg)">Có</span>', '<span style="color:var(--chip-green-fg)">Có</span>'],
+            ['LangChain', '<code>ConversationSummaryBufferMemory</code> — giữ N token gần nhất', '<span style="color:var(--chip-amber-fg)">Có (token-based, không turn-based)</span>', '<span style="color:var(--chip-green-fg)">Có</span>'],
+            ['Aider', 'Không có auto compaction — user phải /clear thủ công', '<span style="color:var(--chip-red-fg)">Không</span>', '<span style="color:var(--chip-red-fg)">Không</span>'],
+          ]}
+        />
+
+        <Callout type="info">
+          <strong>LangChain khác biệt.</strong> LangChain giữ <em>token budget</em> cuối
+          (không phải <em>turns</em>). Điều này có thể cắt đứt giữa một turn nếu turn đó
+          quá dài, gây ra partial context — thường tệ hơn không có gì.
+        </Callout>
+      </Section>
+
+      {/* ── 6. Recipe ── */}
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock caption="compaction.ts — tail-preserving compaction recipe">
+          <Fragment is:raw>{`
+// compaction.ts — tail-turn preserving compaction
+
+const MIN_TAIL_TURNS  = 2
+const TAIL_RATIO      = 0.25
+const MIN_TAIL_TOKENS = 2_000
+const MAX_TAIL_TOKENS = 8_000
+
+export async function compact(
+  messages:   Message[],
+  modelLimit: number,
+  llm:        LLMClient,
+  template:   string,
+  reserved  = 20_000
+): Promise<Message[]> {
+  const usable     = Math.max(0, modelLimit - reserved)
+  const tailBudget = Math.min(
+    MAX_TAIL_TOKENS,
+    Math.max(MIN_TAIL_TOKENS, Math.floor(usable * TAIL_RATIO))
+  )
+
+  // 1. Backward walk để tìm tail
+  const tail: Message[] = []
+  let   accumulated     = 0
+  let   splitIdx        = 0
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    tail.unshift(messages[i])
+    accumulated += estimateTokens(messages[i])
+
+    if (accumulated >= tailBudget && tail.length >= MIN_TAIL_TURNS) {
+      splitIdx = i
+      break
+    }
+  }
+
+  const head = messages.slice(0, splitIdx)
+  if (head.length === 0) return messages  // nothing to compact
+
+  // 2. LLM compact head
+  const summaryResp = await llm.complete({
+    messages: [...head, { role: 'user', content: template }],
+  })
+  const summary = summaryResp.content
+
+  // 3. Reassemble
+  return [
+    {
+      role:    'system',
+      content: \`<prior-conversation-summary>\n\${summary}\n</prior-conversation-summary>\`,
+    },
+    ...tail,
+  ]
+}
+`}</Fragment>
+        </CodeBlock>
+      </Section>
+
+      {/* ── 7. Refs ── */}
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/context-compression">Microsoft Learn — Context compression in AI agents</a>',
+            '<a href="https://morph.so/blog/compaction-vs-summarization">Morph — Compaction vs summarization: trade-offs</a>',
+            '<a href="https://www.factory.ai/blog/compressing-agent-context">Factory.ai — Compressing agent context</a>',
+            '<a href="https://python.langchain.com/docs/modules/memory/types/summary_buffer">LangChain — ConversationSummaryBufferMemory</a>',
+            '<a href="https://github.com/sst/opencode/blob/main/packages/opencode/src/session/compaction.ts">opencode source — session/compaction.ts</a>',
+            '<a href="https://arxiv.org/abs/2511.22729">arXiv 2511.22729 — Context window management strategies</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

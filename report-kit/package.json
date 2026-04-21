@@ -1,0 +1,18 @@
+{
+  "name": "research-report-kit",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "UI kit + site reusable cho các báo cáo harness-engineering của Nghĩa & Cowork.",
+  "scripts": {
+    "dev": "astro dev --host 127.0.0.1 --port 4321",
+    "start": "astro dev --host 127.0.0.1 --port 4321",
+    "build": "astro build",
+    "preview": "astro preview --host 127.0.0.1 --port 4321",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "astro": "^4.16.18",
+    "shiki": "^3.23.0"
+  }
+}

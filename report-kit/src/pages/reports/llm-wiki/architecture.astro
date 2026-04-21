@@ -1,0 +1,586 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Chip from '../../../components/Chip.astro';
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RefList from '../../../components/RefList.astro';
+import SummaryTable from '../../../components/SummaryTable.astro';
+import DataTable from '../../../components/DataTable.astro';
+import LinkList from '../../../components/LinkList.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+import ReportImage from '../../../components/ReportImage.astro';
+
+const title = 'Deep Dive: Architecture & Operations';
+const description = 'Phân tích chi tiết kiến trúc 3 lớp, ba operations (ingest/query/lint), schema CLAUDE.md, và toàn bộ prompt templates trong LLM Wiki pattern của Andrej Karpathy.';
+---
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar
+      intro="Architecture Deep Dive"
+      groups={[
+        {
+          title: 'Context',
+          items: [
+            { href: '#intro', label: 'Tổng quan', section: true },
+          ],
+        },
+        {
+          title: 'Architecture',
+          items: [
+            { href: '#t1', label: '1. Three Layers' },
+            { href: '#t2', label: '2. Folder Structure' },
+            { href: '#t3', label: '3. CLAUDE.md Schema' },
+          ],
+        },
+        {
+          title: 'Operations',
+          items: [
+            { href: '#t4', label: '4. Ingest — Full Flow' },
+            { href: '#t5', label: '5. Query — Modes' },
+            { href: '#t6', label: '6. Lint — Health Check' },
+          ],
+        },
+        {
+          title: 'Infrastructure',
+          items: [
+            { href: '#t7', label: '7. index.md Design' },
+            { href: '#t8', label: '8. log.md Design' },
+            { href: '#t9', label: '9. Schema Co-evolution' },
+          ],
+        },
+        {
+          title: 'Kết luận',
+          items: [
+            { href: '#wrap', label: 'Tổng kết', section: true },
+          ],
+        },
+      ]}
+    />
+
+    <main>
+      <Breadcrumb href="/reports/llm-wiki/" label="← LLM Wiki Overview" />
+
+      <Hero
+        title={title}
+        subtitle={`Phân tích chi tiết từ báo cáo <a href="/reports/llm-wiki/">Tổng quan LLM Wiki</a> — đào sâu vào kiến trúc 3 lớp, ba operations và schema design.`}
+        meta={[
+          { label: 'Báo cáo cha', value: '<a href="/reports/llm-wiki/">← LLM Wiki Overview</a>' },
+          { label: 'Topic', value: 'Architecture & Operations' },
+          { label: 'Ngày', value: '2026-04-20' },
+        ]}
+      />
+
+      <Section id="intro" title="Tổng quan" themeTag="Intro">
+        <p>
+          Architecture của LLM Wiki trông deceptively simple: 3 lớp, 3 operations, 2 special files.
+          Nhưng sự đơn giản này là có chủ đích. Karpathy thiết kế để bất kỳ ai có folder và
+          Claude account có thể bắt đầu trong 30 phút — không cần server, không cần embeddings,
+          không cần code.
+        </p>
+        <p>
+          Deep dive này đi vào từng quyết định thiết kế: tại sao raw sources phải immutable,
+          tại sao CLAUDE.md là "real product", tại sao index.md đủ tốt đến 200 pages, và
+          ingest/query/lint prompt templates cụ thể.
+        </p>
+
+        <ReportImage
+          src="https://datasciencedojo.com/wp-content/uploads/2026/04/Claude-Code-Prompt.png"
+          alt="Claude Code prompt interface cho LLM Wiki ingest operation"
+          caption="Claude Code là primary interface cho LLM Wiki operations. LLM reads files directly từ filesystem — không cần copy-paste."
+          source="https://datasciencedojo.com/blog/llm-wiki-tutorial/"
+          sourceLabel="Data Science Dojo Tutorial"
+          bordered={true}
+        />
+      </Section>
+
+      <Section id="architecture" title="Architecture — Ba lớp" themeTag="Architecture">
+
+        <Technique id="t1" title="1. Three Layers — Tại sao mỗi lớp tồn tại" tid="1" location="Gist: Architecture section">
+          <WhyImportant>
+            <strong>Mỗi lớp có invariant khác nhau.</strong> Layer 1 (raw) là immutable source of
+            truth. Layer 2 (wiki) là mutable artifact. Layer 3 (schema) là orchestration logic.
+            Trộn lẫn chúng phá vỡ cả ba invariants.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Layer 1: Raw Sources — Immutability là tính năng" />
+          <p>
+            Raw sources <em>không bao giờ được modify</em> bởi LLM. Đây là design decision quan
+            trọng nhất trong toàn bộ kiến trúc. Tại sao?
+          </p>
+          <Diagram>{`
+Nếu LLM sửa raw sources:
+  - Bạn mất source of truth
+  - Không thể "reset" wiki mà giữ lại nguyên liệu gốc
+  - Contradiction giữa wiki và source → không biết bên nào đúng
+
+Immutable raw sources cho phép:
+  - Rebuild wiki từ đầu bất cứ lúc nào (chạy lại ingest)
+  - Trust wiki là derivative, source là authoritative
+  - LLM errors trong wiki không ảnh hưởng sources
+          `}</Diagram>
+
+          <Subheading level="h4" text="Layer 2: Wiki — LLM owns this completely" />
+          <p>
+            Đây là điểm khác biệt với mọi knowledge tool khác: bạn <em>không viết wiki</em>.
+            LLM viết. Bạn chỉ đọc, provide direction, và occasionally curate. Điều này
+            eliminates bookkeeping burden — lý do #1 mọi người abandon wikis.
+          </p>
+
+          <Subheading level="h4" text="Layer 3: CLAUDE.md — Protocol, không phải data" />
+          <p>
+            CLAUDE.md không chứa content — nó chứa <em>protocol</em>. Nó trả lời: "Khi tôi
+            gặp một source mới, tôi phải làm gì? Entity page format là gì? Confidence score
+            được tính như thế nào?" Đây là interface giữa bạn và LLM cross sessions.
+          </p>
+
+          <ProsCons
+            pros={[
+              'Invariant rõ ràng → LLM ít confuse về "tôi được phép sửa file nào"',
+              'Wiki có thể rebuild từ đầu nếu corrupted',
+              'Schema shared → người khác có thể dùng cùng wiki ngay lập tức',
+              'Layers có thể swap độc lập (ví dụ: đổi storage backend cho wiki)',
+            ]}
+            cons={[
+              'Phải maintain discipline không sửa raw sources thủ công',
+              'Schema phải được sync với actual wiki behavior — drift gây inconsistency',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t2" title="2. Folder Structure — Every File Has a Job" tid="2" location="Tutorial + gist">
+          <Subheading level="h4" text="Cấu trúc đầy đủ" />
+          <CodeBlock caption="my-wiki/ — full structure" lang="bash" code={`my-wiki/
+│
+├── CLAUDE.md              ← Schema: conventions + workflows (bạn + LLM co-evolve)
+│
+├── raw/                   ← IMMUTABLE sources (bạn curate, LLM chỉ đọc)
+│   ├── papers/
+│   │   ├── attention-2017.pdf
+│   │   └── gpt3-2020.pdf
+│   ├── articles/
+│   │   └── scaling-laws-explained.md
+│   └── notes/
+│       └── meeting-2026-04-10.md
+│
+└── wiki/                  ← LLM-OWNED content
+    ├── index.md           ← Catalog: tất cả pages + one-line summary
+    ├── log.md             ← Append-only chronological log
+    │
+    ├── entities/          ← Concept/entity pages (1 file = 1 concept)
+    │   ├── attention-mechanism.md
+    │   ├── transformer-architecture.md
+    │   ├── bert.md
+    │   └── gpt-3.md
+    │
+    ├── comparisons/       ← Cross-cutting comparisons
+    │   └── bert-vs-gpt.md
+    │
+    ├── synthesis/         ← High-level synthesized views
+    │   └── timeline-llm-breakthroughs.md
+    │
+    └── _inbox/            ← Raw observations, pending processing
+        └── session-2026-04-11.md`} />
+
+          <Callout type="info">
+            <strong>Inbox pattern:</strong> Dump rough notes vào <code>_inbox/</code>,
+            rồi định kỳ ask Claude: "Look at my inbox folder and suggest where each note
+            should be filed." Không bao giờ để perfect be the enemy of useful.
+          </Callout>
+        </Technique>
+
+        <Technique id="t3" title="3. CLAUDE.md Schema — Full Template" tid="3" location="Gist: Schema section + community extensions">
+          <WhyImportant>
+            <strong>"The schema is the real product."</strong> Karpathy nói điều này một cách
+            rõ ràng. Schema biến LLM từ generic chatbot thành disciplined knowledge worker.
+            Bạn có thể share schema → người khác nhận running start ngay lập tức.
+          </WhyImportant>
+
+          <Subheading level="h4" text="CLAUDE.md template đầy đủ" />
+          <CodeBlock caption="CLAUDE.md — production template" lang="markdown">
+            <Fragment is:raw>{`# Wiki Schema
+
+## Overview
+This is a personal research wiki on [YOUR TOPIC].
+You are the wiki maintainer. I curate sources; you do all the bookkeeping.
+
+## Directory Structure
+- raw/ — immutable source documents. NEVER modify.
+- wiki/ — your domain. Create, update, maintain all files here.
+- wiki/index.md — catalog of all pages (update after every ingest)
+- wiki/log.md — append-only log (update after every operation)
+- CLAUDE.md — this file
+
+## Entity Page Format
+\`\`\`markdown
+# [Entity Name]
+**Type**: Concept | Person | Project | Library | Decision | Event
+**Summary**: One sentence. Must be standalone (no "it" or "this").
+**Tags**: #tag1 #tag2
+**Sources**: [[raw/paper1.pdf]], [[raw/article1.md]]
+**Last Updated**: YYYY-MM-DD
+**Confidence**: 0.85 (2 sources, confirmed 2026-04-10)
+
+---
+
+## Overview
+2-3 paragraph explanation for someone unfamiliar.
+
+## Key Properties / Arguments
+Bullet list of concrete, verifiable claims.
+
+## Relationships
+- **uses**: [[Entity A]] — why/how
+- **depends_on**: [[Entity B]]
+- **contradicts**: [[Entity C]] — what they disagree on
+- **supersedes**: [[Entity D]] (as of 2026-04-10)
+
+## Open Questions
+Things still unclear or needing more sources.
+
+## References
+- [[raw/paper1.pdf]] — specific claim from here
+\`\`\`
+
+## Ingest Workflow
+When I say "ingest [source]":
+1. Read the full source from raw/
+2. List entities you found (confirm with me before writing)
+3. For each entity:
+   a. Check if page exists in wiki/entities/
+   b. If yes: update, mark changed sections, update confidence, log supersessions
+   c. If no: create new page using format above
+4. Update wiki/index.md (add new pages, update summaries of changed pages)
+5. Append to wiki/log.md: \`## [DATE] ingest | SOURCE TITLE\`
+6. Note: one source may touch 10-15 pages — be thorough
+
+## Query Workflow
+When I ask a question:
+1. Read wiki/index.md to find relevant pages
+2. Read those pages (and their linked pages if needed)
+3. Synthesize answer with citations to wiki pages
+4. If answer is valuable: offer to file as new wiki page
+
+## Lint Workflow (run every ~20 new pages)
+Check for:
+- Contradictions between pages → flag both, propose resolution
+- Stale claims (confidence < 0.4) → flag for re-verification
+- Orphan pages (no inbound links) → suggest where to link
+- Concepts mentioned but lacking own page → propose creation
+- Missing cross-references → add them
+Report findings before making changes.
+
+## Conventions
+- Always use [[wiki-links]] for cross-references (Obsidian format)
+- Confidence = (number_of_supporting_sources * 0.3) * (1 - decay_factor)
+- Decay: 0.02 per week since last confirmation
+- When superseding: mark old claim with ~~strikethrough~~ + link to new
+- Contradictions: add ⚠️ badge on both pages + log entry
+`}</Fragment>
+          </CodeBlock>
+
+          <Callout type="warn">
+            <strong>Schema drift là anti-pattern.</strong> Nếu bạn thay đổi format nhưng không
+            update CLAUDE.md, LLM sẽ mix formats. Treat CLAUDE.md như production config — version
+            control nó cùng với wiki.
+          </Callout>
+        </Technique>
+      </Section>
+
+      <Section id="operations" title="Operations — Chi tiết từng bước" themeTag="Operations">
+
+        <Technique id="t4" title="4. Ingest — Full Flow với Prompt Templates" tid="4" location="Gist + Data Science Dojo Tutorial">
+          <WhyImportant>
+            <strong>Ingest là operation tốn nhất và quan trọng nhất.</strong> Một ingest tốt
+            touch 10-15 pages, maintain cross-references, flag contradictions. Một ingest kém
+            chỉ tạo summary page mới mà không integrate với existing knowledge.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Minimal ingest prompt (for Claude.ai)" />
+          <CodeBlock caption="Paste vào Claude với PDFs attached" lang="markdown" code={`You are maintaining my research wiki. I'm uploading [N] sources on [TOPIC].
+
+For each source:
+1. Identify all key entities (concepts, people, systems, papers)
+2. Create one markdown entity page per concept in wiki/ format (see template)
+3. Add [[wiki-links]] connecting related concepts
+4. Note any contradictions between sources
+5. Create wiki/index.md listing all pages with one-line summaries
+6. Create wiki/log.md with ingest entry
+
+Use this entity page format:
+[paste format from CLAUDE.md]
+
+After writing all pages, give me a brief summary of what was created/updated.`} />
+
+          <Subheading level="h4" text="Update ingest prompt (existing wiki)" />
+          <CodeBlock caption="Khi wiki đã có content" lang="markdown" code={`Ingest this new source into my existing wiki.
+
+First, read wiki/index.md to see what pages already exist.
+Then read the source.
+
+For each entity in the source:
+- If page exists: UPDATE it (note changes, update confidence, log supersessions)
+- If page doesn't exist: CREATE it
+
+Important: this source may contradict existing claims.
+If you find contradictions, flag them with ⚠️ on both pages.
+
+After ingesting, update index.md and append to log.md.`} />
+
+          <Subheading level="h4" text="Flow diagram" />
+          <Diagram>{`
+DROP source vào raw/
+      │
+      ▼
+Tell LLM: "ingest [filename]"
+      │
+      ▼
+LLM reads source + index.md
+      │
+      ├─ Identify entities
+      │       │
+      │       ├─ Entity exists? → UPDATE page, note changes
+      │       └─ Entity new?   → CREATE page
+      │
+      ├─ Find contradictions → ⚠️ flag both pages
+      ├─ Add cross-references (wiki-links)
+      ├─ Update index.md
+      └─ Append log.md entry
+
+Result: wiki gets richer, not just longer
+          `}</Diagram>
+
+          <ProsCons
+            pros={[
+              'Ingest từng source một → bạn đọc summary, guide emphasis',
+              'Batch ingest nhiều sources → faster nhưng ít control hơn',
+              'LLM flags contradictions ngay lập tức — không cần remember',
+              '"Good answers filed back as pages" — explorations compound như sources',
+            ]}
+            cons={[
+              'LLM có thể create duplicate pages với slightly different names',
+              'Confidence scoring không hoàn hảo — cần occasional review',
+              'Ingest lớn (>10K word source) có thể cần chunking',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t5" title="5. Query — Các modes và output formats" tid="5" location="Gist: Query section">
+          <WhyImportant>
+            <strong>Query không chỉ là "hỏi và nhận answer".</strong> LLM Wiki query có thể
+            produce nhiều output formats, và quan trọng hơn — good answers nên được <em>filed
+            back vào wiki</em>, không chỉ tồn tại trong chat history.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Query modes" />
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Mode', 'Prompt', 'Output']}
+            rows={[
+              ['Direct Q&A', '"What do I know about attention mechanisms?"', 'Markdown answer với citations'],
+              ['Synthesis', '"Compare BERT vs GPT based on my wiki"', 'Comparison table → file as wiki page'],
+              ['Gap finding', '"What am I missing about scaling laws?"', 'List of gaps → suggest sources'],
+              ['Slide deck', '"Create slides summarizing my transformer research"', 'Marp markdown → export PDF'],
+              ['Chart/visualization', '"Chart the timeline of LLM breakthroughs in my wiki"', 'matplotlib code'],
+            ]}
+          />
+
+          <Subheading level="h4" text="File-back pattern" />
+          <CodeBlock caption="File good answers back" lang="markdown" code={`# After receiving a good synthesis answer:
+"This comparison is valuable. Please file it as wiki/comparisons/bert-vs-gpt.md
+and add it to index.md with summary: 'Comparison of bidirectional vs autoregressive
+pre-training: BERT vs GPT architectures'"
+
+# After a research session:
+"File the key insights from this session as wiki/synthesis/session-2026-04-20.md"`} />
+
+          <Callout type="unique">
+            <strong>Knowledge from explorations compounds like ingested sources.</strong>
+            Mỗi research session có thể generate wiki pages. Sau 20 sessions, bạn có rich
+            synthesis layer không có trong bất kỳ source nào.
+          </Callout>
+        </Technique>
+
+        <Technique id="t6" title="6. Lint — Wiki Health Check" tid="6" location="Gist + v2 extensions">
+          <WhyImportant>
+            <strong>Lint là operation mà hầu hết mọi người bỏ qua — và đó là lý do wikis rot.</strong>
+            Errors nhỏ propagate: một wrong claim trên một page → linked bởi 3 pages khác →
+            bạn có organized misinformation. Chạy lint sau mỗi ~20 pages mới.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Lint prompt template" />
+          <CodeBlock caption="Lint prompt" lang="markdown" code={`Run a health check on my wiki.
+
+Read wiki/index.md and check all pages for:
+1. CONTRADICTIONS: Claims on different pages that disagree
+   → Flag both pages, propose which is more likely correct and why
+2. STALE CLAIMS: Claims with confidence < 0.4 or last confirmed > 60 days ago
+   → Mark for re-verification, suggest what source to look for
+3. ORPHAN PAGES: Pages with no inbound [[wiki-links]]
+   → Suggest where they should be linked from
+4. MISSING PAGES: Concepts mentioned in passing but lacking own page
+   → Propose page titles and stubs
+5. BROKEN LINKS: [[wiki-links]] pointing to non-existent pages
+   → Fix or flag
+
+Report findings as a list. DON'T make changes yet.
+After I review, I'll say "apply fixes" for each category.`} />
+
+          <Subheading level="h4" text="Lint cadence" />
+          <Diagram>{`
+Every ~20 new pages   →  Run full lint
+After major ingest    →  Run contradiction check only
+Monthly               →  Run confidence decay check
+Quarterly             →  Review CLAUDE.md schema, update if needed
+          `}</Diagram>
+
+          <Callout type="warn">
+            <strong>Common mistake:</strong> Never running lint. A wiki that never gets
+            health-checked gradually accumulates silent errors that are harder to fix later.
+          </Callout>
+        </Technique>
+      </Section>
+
+      <Section id="infrastructure" title="Infrastructure Files" themeTag="Impl">
+
+        <Technique id="t7" title="7. index.md — Catalog Design" tid="7" location="Gist: Indexing section">
+          <Subheading level="h4" text="index.md format chuẩn" />
+          <CodeBlock caption="wiki/index.md" lang="markdown" code={`# Wiki Index — [Your Topic]
+Last updated: 2026-04-20 | Pages: 47 | Sources: 12
+
+## Entities
+
+### Architectures
+| Page | Summary | Sources | Confidence |
+|------|---------|---------|------------|
+| [[transformer-architecture]] | Encoder-decoder with self-attention (Vaswani 2017) | 4 | 0.95 |
+| [[bert]] | Bidirectional masked LM pre-training | 3 | 0.90 |
+| [[gpt-3]] | Autoregressive LM with few-shot emergence | 2 | 0.85 |
+
+### Concepts
+| Page | Summary | Sources | Confidence |
+|------|---------|---------|------------|
+| [[attention-mechanism]] | Scaled dot-product attention over sequence | 5 | 0.98 |
+| [[scaling-laws]] | Chinchilla: compute-optimal token/param ratio | 3 | 0.88 |
+
+## Comparisons
+- [[bert-vs-gpt]] — Bidirectional vs autoregressive pre-training tradeoffs
+- [[rlhf-vs-dpo]] — Reward model vs direct preference tradeoffs
+
+## Synthesis
+- [[timeline-llm-breakthroughs]] — Chronological view of key developments
+- [[open-questions]] — Unresolved questions and gaps
+
+## ⚠️ Flagged Issues
+- [[scaling-laws]]: Contradiction with [[chinchilla-paper]] on token ratio
+- [[bert]]: Confidence 0.35 (last confirmed 2026-01-10, needs refresh)`} />
+
+          <Callout type="info">
+            <strong>Scale của index.md approach:</strong> Karpathy's claim: works well đến
+            ~100 sources, ~hundreds of pages mà không cần embedding infrastructure. LLM đọc
+            index → find relevant pages → drill in. Đây là "surprisingly effective at moderate scale."
+          </Callout>
+        </Technique>
+
+        <Technique id="t8" title="8. log.md — Audit Trail" tid="8" location="Gist: Logging section">
+          <Subheading level="h4" text="log.md format với unix parseability" />
+          <CodeBlock caption="wiki/log.md" lang="markdown" code={`## [2026-04-20] ingest | Attention Is All You Need (Vaswani et al. 2017)
+Created: transformer-architecture.md, attention-mechanism.md, positional-encoding.md
+Updated: index.md (+3 entries, updated architecture section)
+Flags: None
+
+## [2026-04-20] ingest | BERT: Pre-training Deep Bidirectional Transformers (2018)
+Created: bert.md, masked-language-modeling.md, next-sentence-prediction.md
+Updated: transformer-architecture.md (added BERT as derivative)
+Flags: ⚠️ BERT contradicts GPT-* on directionality claim → flagged in both pages
+
+## [2026-04-20] query | "How does multi-head attention differ from single-head?"
+Filed as: wiki/comparisons/attention-single-vs-multi.md
+Index updated: Yes
+
+## [2026-04-20] lint | routine health check (47 pages, 12 sources)
+Issues: 2 orphans linked, 1 contradiction flagged, 0 broken links
+Actions: Applied all fixes
+`} />
+
+          <CodeBlock caption="Unix parsing tips" lang="bash" code={`# Last 5 entries
+grep "^## \\[" log.md | tail -5
+
+# All ingests
+grep "^## .*ingest" log.md
+
+# All flagged issues
+grep "Flags: ⚠️" log.md -A1
+
+# Count operations by type
+grep "^## \\[" log.md | grep -o "ingest\\|query\\|lint" | sort | uniq -c`} />
+        </Technique>
+
+        <Technique id="t9" title="9. Schema Co-evolution — CLAUDE.md Lifecycle" tid="9" location="Gist + v2 section">
+          <WhyImportant>
+            <strong>Schema không bao giờ "xong".</strong> Lần đầu viết schema sẽ rough.
+            Sau vài dozen sources và vài lint passes, schema reflect cách domain thực sự work.
+            Đây là iterative process.
+          </WhyImportant>
+
+          <Subheading level="h4" text="Schema evolution lifecycle" />
+          <Diagram>{`
+Week 1: Copy default template → customize cho domain
+  ↓
+Week 2-4: Ingest first dozen sources → discover edge cases
+  ↓
+Month 1: First lint pass → schema gaps become visible
+  ↓ (update CLAUDE.md)
+Month 2+: Schema stabilizes → mostly just add new entity types
+  ↓
+Stable schema: transferable to others in same domain
+          `}</Diagram>
+
+          <Subheading level="h4" text="Signs schema needs update" />
+          <Diagram>{`
+• LLM creates pages in inconsistent formats → add format constraint to schema
+• Duplicate pages with different names → add naming convention
+• LLM unsure whether to create vs update → add decision rule
+• Confidence scores not being applied → add calculation formula
+• Cross-references missing → add explicit instruction "always add Related Notes"
+          `}</Diagram>
+
+          <Callout type="success">
+            <strong>Schema là transferable asset.</strong> Share schema với người khác working
+            on same domain → họ có running start. Karpathy: "The schema is the most important file.
+            It encodes the intelligence you and the LLM developed together about your domain."
+          </Callout>
+        </Technique>
+      </Section>
+
+      <Section id="wrap" title="Tổng kết" themeTag="Wrap">
+        <p>
+          Architecture của LLM Wiki đơn giản đến mức có thể viết trên một tờ giấy: 3 folders,
+          2 special files, 3 operations, 1 schema file. Nhưng đằng sau sự đơn giản đó là những
+          design decisions rất careful: immutable sources, LLM-owned wiki, co-evolved schema.
+        </p>
+        <p>
+          Bắt đầu với Tầng 1 Minimal Viable. Chạy 5 ingests. Chạy 1 lint. Đọc CLAUDE.md lại
+          và update. Lặp lại. Schema tốt hơn sau mỗi cycle.
+        </p>
+
+        <RefList
+          title="Tham khảo"
+          items={[
+            '<a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">LLM Wiki gist — Andrej Karpathy</a>',
+            '<a href="https://datasciencedojo.com/blog/llm-wiki-tutorial/">Step-by-step Tutorial — Data Science Dojo</a>',
+            '<a href="https://www.mindstudio.ai/blog/andrej-karpathy-llm-wiki-knowledge-base-claude-code">LLM Wiki với Claude Code — MindStudio</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

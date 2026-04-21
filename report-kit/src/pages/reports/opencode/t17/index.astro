@@ -1,0 +1,282 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T17 — Fuzzy edit matching 3-tier | opencode"
+  description="Phân tích sâu kỹ thuật 3-tier fuzzy matching cho edit tool: SimpleReplacer → LineTrimmedReplacer → BlockAnchorReplacer (Levenshtein) — giảm đáng kể tỉ lệ edit fail khi model copy code không hoàn toàn chính xác."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T17 — Fuzzy edit matching 3-tier"
+        subtitle="<strong>SimpleReplacer → LineTrimmedReplacer → BlockAnchorReplacer.</strong> Khi model copy indentation sai hoặc nhớ code gần đúng — thay vì fail, opencode thử từng tier loose hơn cho đến khi match hoặc hết option."
+        meta={[
+          { label: 'Nhóm',  value: 'C — Tool Design' },
+          { label: 'File',  value: '<code>tool/edit.ts</code> · Lines 182–350' },
+          { label: 'ID',    value: 'C.5 / T17' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Tool Design">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Edit tool fail là nguyên nhân phổ biến nhất gây agent stuck. Model đọc file xong, copy <code>old_string</code> vào args nhưng: (1) thêm/bớt leading whitespace, (2) nhớ sai 1-2 ký tự giữa block dài, (3) copy block tương tự nhưng không phải block đúng. Exact match fail → agent phải đọc lại file, thử lại → tốn context + thời gian. 3-tier matching giải quyết từng class lỗi này theo thứ tự strict → loose, chỉ dùng fuzzy khi strict đã fail.
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>Adaptive threshold:</strong> Khi chỉ có 1 candidate, threshold = 0.0 (chấp nhận mọi match). Khi có nhiều candidate, threshold = 0.3 — tránh chọn sai block khi code có nhiều đoạn giống nhau (vd multiple function với cùng structure).
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="3-tier cascade" />
+        <Diagram>{`
+applyEdit(content, oldStr, newStr)
+    │
+    ├─► Tier 1: SimpleReplacer
+    │     exact string match (indexOf)
+    │     → fast, no ambiguity
+    │     → fails if any char different
+    │
+    ├─► Tier 2: LineTrimmedReplacer
+    │     trim() each line before matching
+    │     → catches indentation errors (2 spaces vs 4 spaces vs tab)
+    │     → fails if content chars different
+    │
+    └─► Tier 3: BlockAnchorReplacer
+          match first + last line as anchors
+          fuzzy Levenshtein on middle lines
+          threshold: 0.0 (single) / 0.3 (multiple candidates)
+          → catches "model remembers block approximately"
+          → throw NoMatchError if all tiers fail
+        `}</Diagram>
+
+        <CodeBlock caption="tool/edit.ts — 3-tier cascade" lang="typescript"><Fragment is:raw>{`
+const REPLACERS = [
+  SimpleReplacer,       // Tier 1: exact
+  LineTrimmedReplacer,  // Tier 2: trim whitespace per line
+  BlockAnchorReplacer,  // Tier 3: anchor + Levenshtein
+] as const
+
+export async function applyEdit(
+  content: string,
+  oldStr: string,
+  newStr: string,
+) {
+  for (const Replacer of REPLACERS) {
+    const match = Replacer.findMatch(content, oldStr)
+    if (match) {
+      return Replacer.replace(content, match, newStr)
+    }
+  }
+  throw new NoMatchError(
+    "old_string not found in file. Re-read the file and try again with exact content."
+  )
+}
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="BlockAnchorReplacer — Levenshtein trên middle lines" />
+        <CodeBlock caption="BlockAnchorReplacer — chi tiết implementation" lang="typescript"><Fragment is:raw>{`
+class BlockAnchorReplacer {
+  static findMatch(content: string, oldStr: string) {
+    const oldLines = oldStr.split("\n")
+    // Chỉ áp dụng cho block >= 3 dòng
+    if (oldLines.length < 3) return null
+
+    const first = oldLines[0].trim()
+    const last  = oldLines[oldLines.length - 1].trim()
+
+    // Tìm tất cả cặp (first, last) trong content
+    const candidates = findAllAnchorPairs(content, first, last)
+
+    // Score mỗi candidate bằng Levenshtein ratio
+    const scored = candidates.map((c) => ({
+      ...c,
+      score: levenshteinRatio(oldStr, content.slice(c.start, c.end)),
+    }))
+    scored.sort((a, b) => b.score - a.score)
+
+    // Adaptive threshold: 0.0 khi 1 candidate, 0.3 khi nhiều
+    const threshold = scored.length > 1 ? 0.3 : 0.0
+
+    return scored[0]?.score >= threshold ? scored[0] : null
+  }
+}
+
+// levenshteinRatio = 1.0 - (editDistance / maxLen)
+// 1.0 = perfect match, 0.0 = hoàn toàn khác
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="Generic implementation" />
+        <CodeBlock caption="Simplified 3-tier implementation" lang="typescript"><Fragment is:raw>{`
+function replaceFlex(content: string, oldStr: string, newStr: string): string {
+  const replacers = [exactMatch, trimmedMatch, anchorMatch]
+
+  for (const r of replacers) {
+    const m = r.find(content, oldStr)
+    if (m) return content.slice(0, m.start) + newStr + content.slice(m.end)
+  }
+
+  throw new Error(
+    "No match found after 3-tier search. Re-read the file and retry with exact content."
+  )
+}
+
+function anchorMatch(content: string, oldStr: string) {
+  const lines = oldStr.split("\n")
+  if (lines.length < 3) return null
+
+  const first = lines[0].trim()
+  const last  = lines[lines.length - 1].trim()
+
+  // Find all positions where first and last line anchor match
+  const candidates = findAnchorPairs(content, first, last)
+
+  // Score by Levenshtein, return best above threshold
+  return bestMatch(candidates, oldStr, content, candidates.length > 1 ? 0.3 : 0.0)
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T16 (Zod validation):</strong> Validation xảy ra trước fuzzy matching — nếu args thiếu <code>old_string</code> hoặc <code>new_string</code>, fail sớm với instruction error trước khi thử match.</li>
+          <li><strong>T18 (Bash tree-sitter):</strong> Edit tool là tool khác bash — khi model cần edit file, nó dùng edit tool (không dùng bash+sed). tree-sitter parsing áp dụng riêng cho bash tool.</li>
+          <li><strong>T6 (Doom loop):</strong> Nếu model liên tục gửi cùng old_string sai và edit cứ fail, doom loop detection trigger — hỏi user can thiệp.</li>
+          <li><strong>T1 (ReAct loop):</strong> Khi edit fail (NoMatchError), loop tiếp tục — model nhận error message, đọc lại file, thử lại với old_string chính xác hơn.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. False positive match" />
+        <p>
+          Threshold 0.3 với multiple candidates có thể chọn sai block nếu code base có nhiều đoạn giống nhau (boilerplate, repetitive patterns). Model edit đúng về syntax nhưng sai file/function.
+        </p>
+        <Callout type="warn">
+          <strong>Phòng tránh:</strong> Tool description nên dạy model cung cấp <em>đủ context</em> trong <code>old_string</code> — không chỉ 2-3 dòng mà cả surrounding context để anchor match mạnh hơn.
+        </Callout>
+
+        <Subheading level="h3" text="2. Levenshtein O(n×m) với file lớn" />
+        <p>
+          File &gt;5000 dòng với nhiều anchor candidates → nhiều Levenshtein call → latency cao. Cần index hoặc limit số candidates trước khi score.
+        </p>
+
+        <Subheading level="h3" text="3. Model học cách 'lười'" />
+        <p>
+          Khi biết fuzzy matching tồn tại, model có thể gửi old_string ngày càng imprecise, dựa vào tier 3 để match. Dẫn đến tăng risk edit sai âm thầm.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Edit matching strategy', 'Tiers']}
+          rows={[
+            ['opencode', 'Exact → LineTrimmed → BlockAnchor+Levenshtein', '3'],
+            ['Claude Code', 'Tương tự (có fuzzy matching)', '2–3'],
+            ['Aider', 'Exact match + unified diff fallback', '2'],
+            ['Cline', 'Exact match only, fail if not found', '1'],
+            ['OpenHarness', 'Exact match + regex fallback', '2'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+// Levenshtein distance (simple implementation)
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => i === 0 ? j : j === 0 ? i : 0)
+  )
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
+    }
+  }
+  return dp[m][n]
+}
+
+function levenshteinRatio(a: string, b: string): number {
+  const dist = levenshtein(a, b)
+  return 1 - dist / Math.max(a.length, b.length, 1)
+}
+
+// 3-tier applyEdit
+export function applyEdit(content: string, old: string, next: string): string {
+  // Tier 1: exact
+  const idx1 = content.indexOf(old)
+  if (idx1 !== -1) return content.slice(0, idx1) + next + content.slice(idx1 + old.length)
+
+  // Tier 2: line-trimmed
+  const trimmedContent = content.split("\n").map(l => l.trim()).join("\n")
+  const trimmedOld     = old.split("\n").map(l => l.trim()).join("\n")
+  const idx2 = trimmedContent.indexOf(trimmedOld)
+  if (idx2 !== -1) {
+    // Map back to original content positions
+    const start = mapTrimmedIndex(content, idx2)
+    const end   = mapTrimmedIndex(content, idx2 + trimmedOld.length)
+    return content.slice(0, start) + next + content.slice(end)
+  }
+
+  // Tier 3: block anchor + Levenshtein
+  const oldLines = old.split("\n")
+  if (oldLines.length >= 3) {
+    const first = oldLines[0].trim()
+    const last  = oldLines[oldLines.length - 1].trim()
+    const candidates = findAnchorPairs(content, first, last)
+    const scored = candidates
+      .map(c => ({ ...c, score: levenshteinRatio(old, content.slice(c.start, c.end)) }))
+      .sort((a, b) => b.score - a.score)
+    const threshold = scored.length > 1 ? 0.3 : 0.0
+    const best = scored[0]
+    if (best && best.score >= threshold) {
+      return content.slice(0, best.start) + next + content.slice(best.end)
+    }
+  }
+
+  throw new Error("old_string not found. Re-read the file and retry.")
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://www.datacamp.com/tutorial/fuzzy-string-python">DataCamp — Fuzzy String Matching in Python</a>',
+            '<a href="https://medium.com/@r.manov/the-two-algorithms-every-developer-uses-wrong-a-visual-guide-to-fuzzy-string-matching-5d97961bb465">Medium — Visual Guide to Fuzzy String Matching</a>',
+            '<a href="https://medium.com/data-science-collective/deep-dive-into-string-similarity-from-edit-distance-to-fuzzy-matching-theory-and-practice-in-68e214c0cb1d">Medium — Deep Dive into String Similarity</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

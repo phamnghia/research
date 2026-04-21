@@ -1,0 +1,10 @@
+---
+// Chip.astro — tag nhỏ inline
+interface Props {
+  variant?: 'default' | 'green' | 'amber' | 'purple' | 'cyan' | 'red' | 'unique';
+}
+
+const { variant = 'default' } = Astro.props;
+const cls = variant === 'default' ? 'chip' : `chip ${variant}`;
+---
+<span class={cls}><slot /></span>

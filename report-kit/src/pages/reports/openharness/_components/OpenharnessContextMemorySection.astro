@@ -1,0 +1,357 @@
+---
+import Section from "../../../../components/Section.astro";
+import Technique from "../../../../components/Technique.astro";
+import ProsCons from "../../../../components/ProsCons.astro";
+import RefList from "../../../../components/RefList.astro";
+import Callout from "../../../../components/Callout.astro";
+---
+
+<Section id={"section-b"} title={"B. Context & Memory"} themeTag={"4 kỹ thuật"}>
+  <Fragment is:raw>
+    <p>OpenHarness tách context thành 3 lớp: (1) <strong>system prompt</strong>
+    — assemble động mỗi turn từ 9 section; (2) <strong>CLAUDE.md</strong> —
+    rules local theo project, cascade từ cwd lên root; (3) <strong>persistent
+    memory</strong> — file-based note per-project, được search theo query hiện
+    tại. Điểm khác opencode: OpenHarness có <em>long-term memory store</em>
+    riêng (<code>MEMORY.md</code>) trong khi opencode chỉ dựa
+    AGENTS.md/CLAUDE.md.</p>
+  </Fragment>
+  <Technique
+    id={"t6"}
+    title={"T6. Multi-layer system prompt assembly (9 sections)"}
+    tid={"B.1"}
+    location={"<strong>File:</strong> <code>src/openharness/prompts/context.py</code> · <strong>Hàm:</strong> <code>build_system_prompt()</code> · <strong>Lines:</strong> 74–158"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">def</span> <span
+      class="fn">build_system_prompt</span>(ctx: PromptContext) -&gt; str:
+      sections: list[str] = [] <span class="com"># 1. Base role — persona +
+      operating principles</span> sections.append(BASE_PROMPT) <span
+      class="com"># 2. Environment — cwd, platform, python, git branch,
+      model</span> sections.append(_build_env_section(ctx)) <span class="com">#
+      3. Effort + reasoning passes (thinking mode hint)</span> <span
+      class="kw">if</span> ctx.effort:
+      sections.append(_build_effort_section(ctx.effort, ctx.passes)) <span
+      class="com"># 4. Skills — discovered skills injected như
+      "tools-of-tools"</span> <span class="kw">if</span> ctx.skills:
+      sections.append(_build_skills_section(ctx.skills)) <span class="com"># 5.
+      Delegation — khi có subagents</span> <span class="kw">if</span>
+      ctx.subagent_definitions:
+      sections.append(_build_delegation_section(ctx.subagent_definitions)) <span
+      class="com"># 6. CLAUDE.md — cascading from cwd to root</span> <span
+      class="kw">if</span> ctx.claudemd_content: sections.append(<span
+      class="fn">f</span><span class="str">"# Local project rules
+      (CLAUDE.md)\n{ctx.claudemd_content}"</span>) <span class="com"># 7. Local
+      rules (.claude/rules/*.md)</span> <span class="kw">if</span>
+      ctx.local_rules: sections.append(_build_local_rules(ctx.local_rules))
+      <span class="com"># 8. Issue/PR context (khi chạy trong GitHub
+      autopilot)</span> <span class="kw">if</span> ctx.issue_or_pr:
+      sections.append(_build_issue_section(ctx.issue_or_pr)) <span class="com">#
+      9. Relevant memories (top-k from memory search)</span> <span
+      class="kw">if</span> ctx.relevant_memories:
+      sections.append(_build_memories_section(ctx.relevant_memories)) <span
+      class="kw">return</span> <span
+      class="str">"\n\n---\n\n"</span>.join(sections)</code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> Prompt không phải static
+      — <strong>rebuild atomic mỗi turn</strong>. Khi user chuyển sang file
+      khác, <code>ctx.claudemd_content</code> đổi → prompt đổi. Khi memory
+      search hit mới → memories section khác. Cache-aware: các section ổn định
+      (1-5) ở đầu, section dễ thay đổi (6-9) ở cuối → Anthropic prefix caching
+      vẫn hit cho phần đầu, chỉ invalidate phần cuối.</div> <h4>Code example
+      (generic)</h4> <pre><code><span class="fn">@dataclass</span> <span
+      class="kw">class</span> <span class="type">PromptContext</span>: cwd:
+      Path; model: str; effort: str | <span class="kw">None</span>
+      claudemd_content: str | <span class="kw">None</span> subagent_definitions:
+      list[AgentDef] relevant_memories: list[MemoryHeader] <span
+      class="kw">def</span> <span class="fn">build_system_prompt</span>(ctx:
+      PromptContext) -&gt; str: parts = [ BASE_ROLE, <span class="com"># 1.
+      stable</span> build_env(ctx), <span class="com"># 2. stable per
+      session</span> build_effort(ctx.effort), <span class="com"># 3. stable per
+      mode</span> build_subagents(ctx.subagent_definitions), <span class="com">#
+      4. stable</span> build_claudemd(ctx.claudemd_content), <span class="com">#
+      5. changes when cwd changes</span> build_memories(ctx.relevant_memories),
+      <span class="com"># 6. changes every turn</span> ] <span
+      class="kw">return</span> <span class="str">"\n\n---\n\n"</span>.join(p
+      <span class="kw">for</span> p <span class="kw">in</span> parts <span
+      class="kw">if</span> p)</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Modular — mỗi section có thể test độc lập",
+        "Cache-aware ordering (stable đầu, dynamic cuối)",
+        "Điều kiện rõ ràng — skip section khi không có data",
+        "Delimiter <code>---</code> giúp LLM parse section boundaries",
+      ]}
+      cons={[
+        "9 section → system prompt có thể rất dài (10k+ token)",
+        "Rebuild mỗi turn → prompt caching fragile nếu cache key không stable",
+        "Không có token budget per section — dễ dominate bởi CLAUDE.md lớn",
+        "Thứ tự section hard-code, khó customize",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://agents.md/">agents.md — official format</a>',
+        '<a href="https://www.humanlayer.dev/blog/writing-a-good-claude-md">HumanLayer — Writing a good CLAUDE.md</a>',
+        '<a href="https://www.augmentcode.com/guides/how-to-build-agents-md">Augment Code — How to Build Your AGENTS.md (2026)</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t7"}
+    title={"T7. CLAUDE.md cascading discovery upward"}
+    tid={"B.2"}
+    location={"<strong>File:</strong> <code>src/openharness/prompts/claudemd.py</code> · <strong>Hàm:</strong> <code>discover_claudemd()</code> · <strong>Lines:</strong> 8–48 · <strong>Truncate:</strong> 12000 chars/file"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">def</span> <span
+      class="fn">discover_claudemd</span>(cwd: Path, *, max_chars: int = <span
+      class="num">12000</span>) -&gt; str: collected: list[tuple[Path, str]] =
+      [] seen: set[Path] = set() <span class="com"># Walk upward from cwd to
+      filesystem root</span> current = cwd.resolve() <span class="kw">while
+      True</span>: <span class="kw">for</span> candidate <span
+      class="kw">in</span> ( current / <span class="str">"CLAUDE.md"</span>,
+      current / <span class="str">".claude"</span> / <span
+      class="str">"CLAUDE.md"</span>, ): <span class="kw">if</span>
+      candidate.exists() <span class="kw">and</span> candidate <span
+      class="kw">not in</span> seen: seen.add(candidate) content =
+      candidate.read_text(encoding=<span class="str">"utf-8"</span>,
+      errors=<span class="str">"replace"</span>) <span class="kw">if</span>
+      len(content) &gt; max_chars: content = content[:max_chars] + <span
+      class="fn">f</span><span class="str">"\n\n... [truncated at {max_chars}
+      chars]"</span> collected.append((candidate, content)) <span class="com">#
+      Also collect .claude/rules/*.md at each level</span> rules_dir = current /
+      <span class="str">".claude"</span> / <span class="str">"rules"</span>
+      <span class="kw">if</span> rules_dir.is_dir(): <span class="kw">for</span>
+      rule <span class="kw">in</span> sorted(rules_dir.glob(<span
+      class="str">"*.md"</span>)): <span class="kw">if</span> rule <span
+      class="kw">not in</span> seen: seen.add(rule) collected.append((rule,
+      rule.read_text(...))) <span class="kw">if</span> current.parent ==
+      current: <span class="kw">break</span> <span class="com"># reached
+      root</span> current = current.parent <span class="com"># Reverse so
+      root-level rules come first, leaf rules last (last wins)</span>
+      collected.reverse() <span class="kw">return</span> <span
+      class="str">"\n\n"</span>.join(<span class="fn">f</span><span
+      class="str">"## {p.relative_to(cwd) if ...}\n\n{c}"</span> <span
+      class="kw">for</span> p, c <span class="kw">in</span>
+      collected)</code></pre> <div class="why"><strong>Tại sao quan
+      trọng:</strong> Monorepo có CLAUDE.md ở root (rules chung) + sub-package
+      level (rules chuyên biệt). Walk upward + dedup by path đảm bảo
+      <strong>không bỏ sót</strong> và <strong>không trùng lặp</strong>. Reverse
+      cuối cùng để leaf rules (gần cwd) override root rules — pattern "last
+      wins" giống .gitignore. Truncate 12k chars/file tránh một file rules khổng
+      lồ nuốt cả prompt budget.</div> <h4>Code example (generic)</h4>
+      <pre><code><span class="kw">def</span> <span
+      class="fn">find_up</span>(cwd: Path, filenames: list[str]) -&gt;
+      list[Path]: <span class="str">"""Walk upward from cwd to root, collecting
+      matching files."""</span> found, seen = [], <span class="kw">set</span>()
+      current = cwd.resolve() <span class="kw">while True</span>: <span
+      class="kw">for</span> name <span class="kw">in</span> filenames: p =
+      current / name <span class="kw">if</span> p.exists() <span
+      class="kw">and</span> p <span class="kw">not in</span> seen: seen.add(p);
+      found.append(p) <span class="kw">if</span> current.parent == current:
+      <span class="kw">break</span> current = current.parent <span
+      class="kw">return</span> found <span class="kw">def</span> <span
+      class="fn">assemble_rules</span>(cwd: Path) -&gt; str: files =
+      find_up(cwd, [<span class="str">"CLAUDE.md"</span>, <span
+      class="str">".claude/CLAUDE.md"</span>, <span
+      class="str">"AGENTS.md"</span>]) <span class="com"># Root-first so leaf
+      overrides (last-wins)</span> files.reverse() <span
+      class="kw">return</span> <span
+      class="str">"\n\n"</span>.join(f.read_text()[:<span
+      class="num">12000</span>] <span class="kw">for</span> f <span
+      class="kw">in</span> files)</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Monorepo-friendly — rule theo sub-package",
+        "Dedup by path — CLAUDE.md + .claude/CLAUDE.md không trùng",
+        "Truncate per file → predictable size",
+        "Last-wins giống .gitignore — mental model quen thuộc",
+      ]}
+      cons={[
+        "Walk đến root có thể đọc file ngoài dự án (home dir)",
+        "Không merge semantic — chỉ concat",
+        "Truncate cắt giữa câu, có thể corrupt markdown",
+        "Không tôn trọng .gitignore cho rules dir",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://www.humanlayer.dev/blog/writing-a-good-claude-md">HumanLayer — Writing a good CLAUDE.md</a>',
+        '<a href="https://medium.com/data-science-collective/the-complete-guide-to-ai-agent-memory-files-claude-md-agents-md-and-beyond-49ea0df5c5a9">Complete Guide to AI Agent Memory Files</a>',
+        '<a href="https://agents.md/">agents.md — format spec</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t8"}
+    title={"T8. Per-project memory isolation với SHA1 hash"}
+    tid={"B.3"}
+    location={"<strong>File:</strong> <code>src/openharness/memory/paths.py</code> · <strong>Hàm:</strong> <code>get_project_memory_dir()</code> · <strong>Lines:</strong> 11–22"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">from</span>
+      hashlib <span class="kw">import</span> sha1 <span class="kw">from</span>
+      pathlib <span class="kw">import</span> Path <span class="kw">from</span>
+      openharness.config.paths <span class="kw">import</span> get_data_dir <span
+      class="kw">def</span> <span class="fn">get_project_memory_dir</span>(cwd:
+      str | Path) -&gt; Path: <span class="str">"""Return the persistent memory
+      directory for a project."""</span> path = Path(cwd).resolve() digest =
+      sha1(str(path).encode(<span
+      class="str">"utf-8"</span>)).hexdigest()[:<span class="num">12</span>]
+      memory_dir = get_data_dir() / <span class="str">"memory"</span> / <span
+      class="fn">f</span><span class="str">"{path.name}-{digest}"</span>
+      memory_dir.mkdir(parents=<span class="kw">True</span>, exist_ok=<span
+      class="kw">True</span>) <span class="kw">return</span> memory_dir <span
+      class="kw">def</span> <span class="fn">get_memory_entrypoint</span>(cwd:
+      str | Path) -&gt; Path: <span class="str">"""Return the project memory
+      entrypoint file."""</span> <span class="kw">return</span>
+      get_project_memory_dir(cwd) / <span class="str">"MEMORY.md"</span> <span
+      class="com"># Result:
+      ~/.openharness/memory/{project-name}-{sha1[:12]}/</span> <span
+      class="com"># ├── MEMORY.md ← entrypoint (index)</span> <span
+      class="com"># ├── architecture.md ← topic memory</span> <span
+      class="com"># ├── api-design.md</span> <span class="com"># └──
+      ...</span></code></pre> <div class="why"><strong>Tại sao quan
+      trọng:</strong> Hai project cùng tên (vd hai clone repo <code>app</code>)
+      ở path khác nhau sẽ không trộn memory. SHA1 của absolute path → unique
+      nhưng vẫn readable vì tên dir chứa cả <code>path.name</code>. File-based
+      (không DB) → portable, user có thể backup/copy/inspect bằng tay. MEMORY.md
+      là index file — các topic khác link vào từ đó (giống Obsidian
+      vault).</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">from</span> hashlib <span class="kw">import</span> sha1 <span
+      class="kw">from</span> pathlib <span class="kw">import</span> Path <span
+      class="kw">def</span> <span class="fn">project_memory_dir</span>(cwd:
+      Path, data_root: Path) -&gt; Path: <span class="str">"""Stable,
+      collision-resistant dir per project path."""</span> abs_path =
+      cwd.resolve() digest = sha1(str(abs_path).encode()).hexdigest()[:<span
+      class="num">12</span>] d = data_root / <span class="str">"memory"</span> /
+      <span class="fn">f</span><span
+      class="str">"{abs_path.name}-{digest}"</span> d.mkdir(parents=<span
+      class="kw">True</span>, exist_ok=<span class="kw">True</span>) <span
+      class="kw">return</span> d <span class="com"># Usage</span> mem_dir =
+      project_memory_dir(Path.cwd(), Path.home() / <span
+      class="str">".myagent"</span>) <span class="com"># →
+      ~/.myagent/memory/app-a3f8b7c1d2e5/</span></code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Zero collision giữa các project cùng tên",
+        "Readable — dir có chứa tên project",
+        "File-based → backup/version trivial",
+        "Lazy mkdir — không tạo until needed",
+      ]}
+      cons={[
+        'Đổi path dự án (mv /a → /b) → memory "mất" vì hash đổi',
+        'SHA1 không cần crypto-strength ở đây nhưng chọn để đơn giản — dev mới có thể nghĩ "ai tấn công?"',
+        "12 chars digest có thể collide (1 trong ~10^14) trên hệ rất lớn",
+        "Dir tên project có thể lộ info nhạy cảm",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://docs.python.org/3/library/hashlib.html">Python hashlib docs</a>',
+        '<a href="https://medium.com/data-science-collective/the-complete-guide-to-ai-agent-memory-files-claude-md-agents-md-and-beyond-49ea0df5c5a9">Complete Guide to AI Agent Memory Files</a>',
+        '<a href="https://github.com/mem0ai/mem0">Mem0 — Personalized memory for AI</a>',
+      ]}
+    />
+  </Technique>
+  <Technique
+    id={"t9"}
+    title={"T9. Token-based memory search với CJK support"}
+    tid={"B.4"}
+    location={"<strong>File:</strong> <code>src/openharness/memory/search.py</code> · <strong>Hàm:</strong> <code>find_relevant_memories()</code> · <strong>Lines:</strong> 12–49"}
+  >
+    <Fragment is:raw>
+      <h4>Code từ OpenHarness</h4> <pre><code><span class="kw">def</span> <span
+      class="fn">find_relevant_memories</span>(query: str, cwd, *,
+      max_results=<span class="num">5</span>) -&gt; list[MemoryHeader]: tokens =
+      _tokenize(query) <span class="kw">if not</span> tokens: <span
+      class="kw">return</span> [] scored: list[tuple[float, MemoryHeader]] = []
+      <span class="kw">for</span> header <span class="kw">in</span>
+      scan_memory_files(cwd, max_files=<span class="num">100</span>): meta =
+      <span class="fn">f</span><span class="str">"{header.title}
+      {header.description}"</span>.lower() body = header.body_preview.lower()
+      <span class="com"># Metadata matches weighted 2x; body matches 1x.</span>
+      meta_hits = <span class="kw">sum</span>(<span class="num">1</span> <span
+      class="kw">for</span> t <span class="kw">in</span> tokens <span
+      class="kw">if</span> t <span class="kw">in</span> meta) body_hits = <span
+      class="kw">sum</span>(<span class="num">1</span> <span
+      class="kw">for</span> t <span class="kw">in</span> tokens <span
+      class="kw">if</span> t <span class="kw">in</span> body) score = meta_hits
+      * <span class="num">2.0</span> + body_hits <span class="kw">if</span>
+      score &gt; <span class="num">0</span>: scored.append((score, header))
+      <span class="com"># Rank by score desc, then recency desc
+      (tie-break)</span> scored.sort(key=<span class="kw">lambda</span> item:
+      (-item[<span class="num">0</span>], -item[<span
+      class="num">1</span>].modified_at)) <span class="kw">return</span> [header
+      <span class="kw">for</span> _, header <span class="kw">in</span>
+      scored[:max_results]] <span class="kw">def</span> <span
+      class="fn">_tokenize</span>(text: str) -&gt; set[str]: <span
+      class="str">"""Extract search tokens, handling ASCII + Han
+      ideographs."""</span> <span class="com"># ASCII word tokens (3+ chars) —
+      filter out stopwords like "the"</span> ascii_tokens = {t <span
+      class="kw">for</span> t <span class="kw">in</span> re.findall(<span
+      class="fn">r</span><span class="str">"[A-Za-z0-9_]+"</span>, text.lower())
+      <span class="kw">if</span> len(t) &gt;= <span class="num">3</span>} <span
+      class="com"># Han ideographs (each character carries independent
+      meaning)</span> han_chars = <span class="kw">set</span>(re.findall(<span
+      class="fn">r</span><span
+      class="str">"[\u4e00-\u9fff\u3400-\u4dbf]"</span>, text)) <span
+      class="kw">return</span> ascii_tokens | han_chars</code></pre> <div
+      class="why"><strong>Tại sao quan trọng:</strong> Không phải embedding,
+      không phải BM25 full — chỉ token overlap scoring. Đủ tốt cho repo &lt;100
+      memory file, zero infra (không cần vector DB). Weighted 2x cho frontmatter
+      (title/description) buộc memory phải có metadata tốt. CJK-aware: mỗi Han
+      ideograph là 1 token độc lập (Tiếng Trung không dùng space để tách từ) —
+      quan trọng vì HKUDS là lab HongKong, memory có thể mixed
+      Chinese/English.</div> <h4>Code example (generic)</h4> <pre><code><span
+      class="kw">import</span> re <span class="kw">def</span> <span
+      class="fn">tokenize</span>(text: str) -&gt; <span
+      class="kw">set</span>[str]: ascii_tok = {t <span class="kw">for</span> t
+      <span class="kw">in</span> re.findall(<span class="fn">r</span><span
+      class="str">"\w+"</span>, text.lower()) <span class="kw">if</span> len(t)
+      &gt;= <span class="num">3</span>} han_tok = <span
+      class="kw">set</span>(re.findall(<span class="fn">r</span><span
+      class="str">"[\u4e00-\u9fff]"</span>, text)) <span
+      class="kw">return</span> ascii_tok | han_tok <span class="kw">def</span>
+      <span class="fn">rank_memories</span>(query: str, memories, k=<span
+      class="num">5</span>): q_tokens = tokenize(query) scored = [] <span
+      class="kw">for</span> m <span class="kw">in</span> memories: meta_hits =
+      <span class="kw">sum</span>(<span class="num">1</span> <span
+      class="kw">for</span> t <span class="kw">in</span> q_tokens <span
+      class="kw">if</span> t <span class="kw">in</span> m.meta.lower())
+      body_hits = <span class="kw">sum</span>(<span class="num">1</span> <span
+      class="kw">for</span> t <span class="kw">in</span> q_tokens <span
+      class="kw">if</span> t <span class="kw">in</span> m.body.lower()) score =
+      meta_hits * <span class="num">2.0</span> + body_hits <span
+      class="kw">if</span> score: scored.append((score, m.modified_at, m))
+      scored.sort(key=<span class="kw">lambda</span> t: (-t[<span
+      class="num">0</span>], -t[<span class="num">1</span>])) <span
+      class="kw">return</span> [m <span class="kw">for</span> _, _, m <span
+      class="kw">in</span> scored[:k]]</code></pre>
+    </Fragment>
+    <ProsCons
+      pros={[
+        "Zero infra (không cần embedding service)",
+        "CJK-aware — Tiếng Trung/Nhật/Hàn work out-of-box",
+        "Metadata weighting thưởng memory có annotation tốt",
+        "Recency tie-break — memory mới ưu tiên",
+      ]}
+      cons={[
+        "Không hiểu semantic (synonym, translation)",
+        "Max 100 files scanned — scale kém",
+        "Stopword filter đơn giản (chỉ length ≥3)",
+        "Vietnamese không tokenize đúng nếu có dấu",
+      ]}
+    />
+    <RefList
+      items={[
+        '<a href="https://python.langchain.com/docs/modules/memory/types/entity_summary_memory">LangChain — Memory with entities</a>',
+        '<a href="https://github.com/mem0ai/mem0">Mem0 — Personalized memory store</a>',
+        '<a href="https://docs.python.org/3/library/re.html">Python re — Unicode escape \\u4e00 etc.</a>',
+      ]}
+    />
+  </Technique>
+</Section>

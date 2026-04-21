@@ -1,0 +1,257 @@
+---
+import ReportLayout from '../../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../../components/Sidebar.astro';
+import Hero from '../../../../components/Hero.astro';
+import Breadcrumb from '../../../../components/Breadcrumb.astro';
+import Section from '../../../../components/Section.astro';
+import Subheading from '../../../../components/Subheading.astro';
+import Callout from '../../../../components/Callout.astro';
+import Diagram from '../../../../components/Diagram.astro';
+import CodeBlock from '../../../../components/CodeBlock.astro';
+import RefList from '../../../../components/RefList.astro';
+import DataTable from '../../../../components/DataTable.astro';
+import WhyImportant from '../../../../components/WhyImportant.astro';
+---
+<ReportLayout
+  title="T23 — Overflow pattern detection & retry với server headers | opencode"
+  description="Phân tích sâu kỹ thuật dùng 25+ regex pattern để detect context overflow từ mọi provider, retry với exponential backoff tôn trọng retry-after header — skip retry khi overflow để trigger compaction."
+>
+  <div class="layout">
+    <Sidebar groups={[
+      { title: 'Nội dung', items: [
+        { href: '#overview',    label: 'Tổng quan',           section: true },
+        { href: '#anatomy',     label: 'Phân tích code' },
+        { href: '#interaction', label: 'Tương tác' },
+        { href: '#failure',     label: 'Failure modes' },
+        { href: '#compare',     label: 'So sánh harness' },
+        { href: '#recipe',      label: 'Implementation recipe' },
+        { href: '#refs',        label: 'Tham khảo' },
+      ]},
+    ]} />
+
+    <main>
+      <Breadcrumb href="/reports/opencode/" label="← opencode report" />
+
+      <Hero
+        title="T23 — Overflow pattern detection & retry với server headers"
+        subtitle="25+ regex pattern detect <code>ContextOverflowError</code> qua mọi provider. Retry: tôn trọng <code>retry-after-ms</code> header. Skip retry khi overflow — trigger compaction thay vì waste calls."
+        meta={[
+          { label: 'Nhóm',   value: 'D — Provider Abstraction' },
+          { label: 'Files',  value: '<code>provider/error.ts:8–193</code> + <code>session/retry.ts:17–52</code>' },
+          { label: 'ID',     value: 'D.3 / T23' },
+          { label: 'Status', value: '<span style="color:var(--chip-green-fg)">Stable</span>' },
+        ]}
+      />
+
+      <Section id="overview" title="Tổng quan" themeTag="Provider">
+        <WhyImportant>
+          <strong>Tại sao quan trọng.</strong> Không có HTTP status code chuẩn cho "context too long" — mỗi provider trả khác nhau: Anthropic <code>400 "prompt is too long"</code>, OpenAI <code>400 "max_tokens_exceeded"</code>, Bedrock <code>413 no body</code>, Gemini <code>400 "context_length_exceeded"</code>. Nếu không phân biệt overflow vs transient error → retry overflow = waste token + tiền + thời gian. opencode dùng 25+ regex để classify lỗi, sau đó: overflow → skip retry, trigger compaction; transient → retry với exponential backoff; rate limit → respect server retry-after.
+        </WhyImportant>
+
+        <Callout type="unique">
+          <strong>Server-directed retry:</strong> Khi provider trả <code>retry-after-ms</code> hoặc <code>retry-after</code> header, opencode tôn trọng giá trị đó thay vì dùng backoff tự tính. Điều này tránh thunder-herd và giảm nguy cơ bị ban IP.
+        </Callout>
+      </Section>
+
+      <Section id="anatomy" title="Phân tích code chi tiết" themeTag="Anatomy">
+        <Subheading level="h3" text="Overflow pattern list — kinh nghiệm production" />
+        <CodeBlock caption="provider/error.ts — OVERFLOW_PATTERNS" lang="typescript"><Fragment is:raw>{`
+// 25+ pattern từ thực tế production với nhiều provider
+const OVERFLOW_PATTERNS: RegExp[] = [
+  /prompt is too long/i,
+  /exceeds the context window/i,
+  /max.*context.*length/i,
+  /context_length_exceeded/i,
+  /token.*limit.*exceeded/i,
+  /maximum context length/i,
+  /input.*too long/i,
+  /reduce your prompt/i,
+  /no body.*(400|413)/i,        // Bedrock silent truncation → no body
+  /request entity too large/i,  // HTTP 413
+  // ... 15+ more từ Groq, Together, Ollama, Mistral...
+]
+
+export function isContextOverflow(err: unknown): boolean {
+  const msg = extractErrorMessage(err)
+  return OVERFLOW_PATTERNS.some((r) => r.test(msg))
+}
+
+function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === "string") return err
+  // Extract từ response body nếu là HTTP error
+  if ((err as any)?.body) return JSON.stringify((err as any).body)
+  return String(err)
+}
+`}</Fragment></CodeBlock>
+
+        <Subheading level="h3" text="Retry logic — server-directed + exponential backoff" />
+        <CodeBlock caption="session/retry.ts — withRetry" lang="typescript"><Fragment is:raw>{`
+export async function withRetry<T>(
+  fn:          () => Promise<T>,
+  maxAttempts  = 5,
+): Promise<T> {
+  let attempt = 0
+
+  while (true) {
+    try {
+      return await fn()
+    } catch (err) {
+      attempt++
+
+      // 1. Context overflow: KHÔNG retry — trigger compaction thay vì waste calls
+      if (isContextOverflow(err)) throw new ContextOverflowError(err)
+
+      // 2. Max attempts reached
+      if (attempt >= maxAttempts) throw err
+
+      // 3. Server-directed delay: tôn trọng retry-after header
+      const serverMs = extractRetryAfter(err)
+
+      // 4. Exponential backoff fallback: 2^(attempt-1) * 2000ms, cap 30s
+      const delayMs = serverMs ?? Math.min(2 ** (attempt - 1) * 2000, 30_000)
+
+      await sleep(delayMs)
+    }
+  }
+}
+
+function extractRetryAfter(err: unknown): number | null {
+  const headers = (err as any)?.response?.headers
+  if (!headers) return null
+
+  const ms  = headers.get("retry-after-ms")
+  if (ms) return Number(ms)
+
+  const sec = headers.get("retry-after")
+  if (sec) return Number(sec) * 1000
+
+  return null
+}
+`}</Fragment></CodeBlock>
+
+        <Diagram>{`
+API call throws error
+        │
+        ▼
+isContextOverflow(err)?
+        │
+   ┌────┴────┐
+  YES       NO
+   │         │
+   ▼         ▼
+throw      attempt < maxAttempts?
+ContextOverflowError    │
+   │           ┌────────┴────────┐
+   ▼          YES               NO
+trigger       │                  │
+compaction   ▼                  ▼
+(T8)   extractRetryAfter(err)  throw err
+             │
+        ┌────┴─────┐
+      server      fallback
+      header    exponential backoff
+        │       2^(n-1) * 2000ms
+        │       cap: 30s
+        └────┬───┘
+             ▼
+           sleep → retry
+        `}</Diagram>
+      </Section>
+
+      <Section id="interaction" title="Tương tác với kỹ thuật khác" themeTag="Interaction">
+        <ul>
+          <li><strong>T7 (Overflow detection proactive):</strong> T7 detect overflow <em>trước</em> khi gọi API (đếm token). T23 xử lý overflow <em>sau</em> khi API đã reject. Hai lớp bổ sung nhau — T7 phòng ngừa, T23 xử lý fallback.</li>
+          <li><strong>T8 (Tail-turn compaction):</strong> Khi T23 throw <code>ContextOverflowError</code>, agent loop bắt lỗi này và trigger compaction (T8) thay vì fail toàn bộ session.</li>
+          <li><strong>T4 (Interruption-safe cleanup):</strong> Retry loop bên trong <code>Effect.retry(...)</code> — Effect giữ semantics đúng khi interrupt xảy ra giữa retry cycle (không để request treo).</li>
+        </ul>
+      </Section>
+
+      <Section id="failure" title="Failure modes" themeTag="Failure">
+        <Subheading level="h3" text="1. Regex miss khi provider đổi message" />
+        <p>
+          Provider update error message → regex không match → overflow được xử lý như transient error → retry → waste 5 attempts trước khi fail. Cần monitor miss rate và update patterns.
+        </p>
+
+        <Subheading level="h3" text="2. Exponential backoff không có jitter" />
+        <p>
+          Multiple client cùng nhận rate limit error → cùng sleep theo formula → cùng retry tại cùng thời điểm → thunder-herd nhẹ. Thêm random jitter (±20%) để stagger.
+        </p>
+        <Callout type="warn">
+          <strong>Best practice:</strong> <code>delay = base * (1 + Math.random() * 0.2)</code> — jitter 20% enough to stagger clients hiệu quả.
+        </Callout>
+
+        <Subheading level="h3" text="3. Không phân biệt 4xx vs 5xx" />
+        <p>
+          4xx (bad request) thường không nên retry; 5xx (server error) nên retry. Hiện tại retry logic không phân biệt rõ — chỉ dừng ở overflow. Cần thêm <code>isRetryable(err)</code> check.
+        </p>
+      </Section>
+
+      <Section id="compare" title="So sánh với các harness khác" themeTag="Compare">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Harness', 'Overflow detection', 'Retry policy', 'Server-directed']}
+          rows={[
+            ['opencode', '25+ regex, unified across providers', 'Exponential, skip on overflow', '✅ retry-after-ms'],
+            ['litellm (Aider)', 'Built-in per-provider', 'Exponential + jitter', '✅'],
+            ['Claude Code', 'SDK-level detection', 'Retry with backoff', '✅'],
+            ['Cline', 'Basic error check', 'Simple retry', '❌'],
+            ['OpenHarness', 'SDK-level (Anthropic)', 'Basic retry', '⚠️'],
+          ]}
+        />
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <CodeBlock lang="typescript"><Fragment is:raw>{`
+const OVERFLOW = [
+  /prompt is too long/i,
+  /context.?window/i,
+  /token.?limit/i,
+  /context_length_exceeded/i,
+  /request entity too large/i,
+]
+
+class ContextOverflowError extends Error {
+  constructor(public readonly cause: unknown) {
+    super("Context window exceeded")
+  }
+}
+
+async function retryable<T>(fn: () => Promise<T>, max = 5): Promise<T> {
+  for (let i = 0; i < max; i++) {
+    try {
+      return await fn()
+    } catch (e) {
+      const msg = String((e as Error).message ?? e)
+
+      // Overflow: không retry
+      if (OVERFLOW.some(r => r.test(msg))) throw new ContextOverflowError(e)
+
+      if (i === max - 1) throw e
+
+      // Server-directed delay
+      const serverMs = (e as any).headers?.["retry-after-ms"]
+      const base     = serverMs ?? Math.min(2000 * 2 ** i, 30_000)
+      // Add jitter ±20%
+      const delay    = base * (0.8 + Math.random() * 0.4)
+      await new Promise(r => setTimeout(r, delay))
+    }
+  }
+  throw new Error("unreachable")
+}
+`}</Fragment></CodeBlock>
+      </Section>
+
+      <Section id="refs" title="Tham khảo" themeTag="Refs">
+        <RefList
+          items={[
+            '<a href="https://effect.website/docs/error-management/retrying/">Effect — Retrying docs</a>',
+            '<a href="https://medium.com/@komalbaparmar007/llm-tool-calling-in-production-rate-limits-retries-and-the-infinite-loop-failure-mode-you-must-2a1e2a1e84c8">Medium — Rate Limits, Retries &amp; Infinite Loop in Production</a>',
+            '<a href="https://redis.io/blog/context-window-overflow/">Redis — Context Window Overflow in 2026</a>',
+          ]}
+        />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>
