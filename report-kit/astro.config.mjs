@@ -1,4 +1,5 @@
 import { defineConfig } from 'astro/config';
+import { sseDemoMockPlugin } from './vite-plugins/sse-demo-mock.ts';
 
 // https://astro.build/config
 export default defineConfig({
@@ -15,6 +16,7 @@ export default defineConfig({
   },
   // Đặt cache dir ra ngoài mount để tránh EPERM khi Vite re-optimize deps
   vite: {
+    plugins: [sseDemoMockPlugin()],
     cacheDir: '/tmp/vite-cache-report-kit',
     server: {
       watch: {

@@ -1,0 +1,49 @@
+---
+import LiveSseDemo from '../../../components/LiveSseDemo.astro';
+---
+
+  <section class="component-group" id="group-livedata">
+    <header class="component-group__header">
+      <h2>Live data</h2>
+      <p>
+        Demo SSE mock (<code>/api/demo-sse</code>) khi chạy dev. Production tĩnh cần API thật hoặc adapter.
+      </p>
+    </header>
+
+  <section class="showcase-section" id="livedata-sse">
+    <h3>SSE demo (mock)</h3>
+    <p>
+      Plugin Vite phục vụ stream tại <code>/api/demo-sse</code>. Dùng <code>EventSource</code> + log + Chart.js line
+      cập nhật theo từng sự kiện.
+    </p>
+    <div class="example-render example-render--flush">
+      <LiveSseDemo />
+    </div>
+    <pre class="example-code"><code>{`import LiveSseDemo from '../../components/LiveSseDemo.astro';
+
+<LiveSseDemo />
+<!-- tuỳ chọn: streamUrl="/api/demo-sse" maxPoints={40} -->`}</code></pre>
+  </section>
+
+  <section class="showcase-section showcase-section--plan" id="livedata-plan">
+    <h3>Kế hoạch cơ chế (roadmap)</h3>
+    <ul class="livedata-plan-list">
+      <li>
+        <strong>Điều kiện:</strong> site hiện là Astro static; stream thật cần endpoint thời gian thực (SSE/WebSocket) hoặc island
+        <code>client:load</code>/<code>client:visible</code> + API có CORS.
+      </li>
+      <li>
+        <strong>Contract đề xuất:</strong> một interface <code>LiveDataSource</code> (pull: <code>fetch</code>+json;
+        push: <code>EventSource</code> hoặc WS) + URL từ <code>import.meta.env.PUBLIC_*</code> để không hardcode secrets.
+      </li>
+      <li>
+        <strong>Thành phần dự kiến</strong> (sau khi có spec): <code>LogPanel</code>, <code>MetricStrip</code>, <code>TraceWaterfall</code> —
+        mỗi cái nhận <code>source</code> + <code>pollInterval?</code> + fallback static snapshot khi offline.
+      </li>
+      <li>
+        <strong>Không ship</strong> trước khi chọn được nguồn dữ liệu (internal API, edge function, hay iframe tới dashboard ngoài).
+      </li>
+    </ul>
+  </section>
+
+  </section>

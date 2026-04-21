@@ -1,0 +1,55 @@
+---
+/**
+ * Chart.js — bar / line / doughnut / radar / polarArea.
+ * Config gửi xuống client qua JSON (tránh dedupe script Astro + đảm bảo serialize).
+ */
+export interface ChartJsDataset {
+  label: string;
+  data: number[];
+  backgroundColor?: string | string[];
+  borderColor?: string | string[];
+  fill?: boolean;
+}
+
+interface Props {
+  id: string;
+  type: 'bar' | 'line' | 'doughnut' | 'radar' | 'polarArea';
+  labels: string[];
+  datasets: ChartJsDataset[];
+  title?: string;
+  height?: number;
+}
+
+const { id, type, labels, datasets, title, height = 260 } = Astro.props;
+
+const chartConfigJson = JSON.stringify({
+  chartId: id,
+  chartType: type,
+  chartLabels: labels,
+  chartDatasets: datasets,
+});
+---
+
+<div class="chart-js-block" data-chart-cfg={chartConfigJson}>
+  {title && <p class="chart-js-block__title">{title}</p>}
+  <div class="chart-js-block__canvas" style={`height:${height}px`}>
+    <canvas id={id}></canvas>
+  </div>
+</div>
+
+<script>
+  import { bootChartJsBlocks } from '../lib/chartJsBlockBoot.ts';
+  bootChartJsBlocks();
+</script>
+
+<style>
+  .chart-js-block__title {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .chart-js-block__canvas {
+    position: relative;
+    width: 100%;
+  }
+</style>

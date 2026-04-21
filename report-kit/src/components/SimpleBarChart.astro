@@ -1,0 +1,128 @@
+---
+/**
+ * SimpleBarChart — biểu đồ cột ngang SVG/CSS, không dependency.
+ */
+type Variant = 'default' | 'green' | 'amber' | 'purple' | 'cyan' | 'red';
+
+interface BarItem {
+  label: string;
+  value: number;
+  variant?: Variant;
+}
+
+interface Props {
+  items: BarItem[];
+  title?: string;
+  /** Đơn vị hiển thị sau số (vd "ms", "%") */
+  unit?: string;
+  /** Giá trị max để scale; mặc định = max(items) */
+  max?: number;
+}
+
+const { items, title, unit = '', max: maxProp } = Astro.props;
+
+const nums = items.map((i) => i.value).filter((n) => Number.isFinite(n));
+const dataMax = nums.length ? Math.max(...nums) : 0;
+const max = maxProp !== undefined && maxProp > 0 ? maxProp : dataMax || 1;
+---
+
+<figure class="simple-bar-chart">
+  {title && <h4 class="simple-bar-chart__title">{title}</h4>}
+  <ul class="simple-bar-chart__list">
+    {items.map((row) => {
+      const pct = max > 0 ? Math.min(100, (row.value / max) * 100) : 0;
+      const v = row.variant ?? 'default';
+      return (
+        <li class="simple-bar-chart__row">
+          <span class="simple-bar-chart__label">{row.label}</span>
+          <span class="simple-bar-chart__track">
+            <span
+              class={`simple-bar-chart__fill simple-bar-chart__fill--${v}`}
+              style={`width: ${pct}%;`}
+            />
+          </span>
+          <span class="simple-bar-chart__value">
+            {row.value}{unit ? ` ${unit}` : ''}
+          </span>
+        </li>
+      );
+    })}
+  </ul>
+</figure>
+
+<style>
+  .simple-bar-chart {
+    margin: 0;
+    max-width: 100%;
+  }
+  .simple-bar-chart__title {
+    margin: 0 0 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+  }
+  .simple-bar-chart__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .simple-bar-chart__row {
+    display: grid;
+    grid-template-columns: minmax(80px, 1fr) minmax(120px, 3fr) auto;
+    gap: 10px 12px;
+    align-items: center;
+    font-size: 13px;
+  }
+  .simple-bar-chart__label {
+    color: var(--text-muted);
+    line-height: 1.3;
+  }
+  .simple-bar-chart__track {
+    height: 10px;
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--border) 80%, transparent);
+    overflow: hidden;
+  }
+  .simple-bar-chart__fill {
+    display: block;
+    height: 100%;
+    border-radius: 5px;
+    min-width: 2px;
+    transition: width 0.35s ease;
+  }
+  .simple-bar-chart__fill--default {
+    background: color-mix(in srgb, var(--accent) 85%, var(--text) 15%);
+  }
+  .simple-bar-chart__fill--green {
+    background: color-mix(in srgb, #22c55e 90%, var(--bg));
+  }
+  .simple-bar-chart__fill--amber {
+    background: color-mix(in srgb, #eab308 90%, var(--bg));
+  }
+  .simple-bar-chart__fill--purple {
+    background: color-mix(in srgb, #a855f7 90%, var(--bg));
+  }
+  .simple-bar-chart__fill--cyan {
+    background: color-mix(in srgb, #06b6d4 90%, var(--bg));
+  }
+  .simple-bar-chart__fill--red {
+    background: color-mix(in srgb, #ef4444 90%, var(--bg));
+  }
+  .simple-bar-chart__value {
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  @media (max-width: 520px) {
+    .simple-bar-chart__row {
+      grid-template-columns: 1fr;
+      gap: 4px;
+    }
+    .simple-bar-chart__value {
+      justify-self: end;
+    }
+  }
+</style>

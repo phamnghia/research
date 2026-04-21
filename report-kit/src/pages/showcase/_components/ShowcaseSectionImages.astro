@@ -1,0 +1,34 @@
+---
+import ReportImage from '../../../components/ReportImage.astro';
+---
+
+  <section class="component-group" id="group-images">
+    <header class="component-group__header">
+      <h2>Hình ảnh</h2>
+      <p>Ảnh trong báo cáo với caption và lightbox khi click.</p>
+    </header>
+
+  {/* ─────── ReportImage + Lightbox ─────── */}
+  <section class="showcase-section" id="reportimage">
+    <h3>ReportImage <span style="font-weight:400;font-size:15px;color:var(--text-muted)">+ Lightbox</span></h3>
+    <p>Hình ảnh với caption HTML + source attribution. Click vào ảnh để zoom lightbox (ESC hoặc click ngoài để đóng). Props: <code>src</code>, <code>alt</code>, <code>caption?</code>, <code>source?</code>, <code>bordered?</code>.</p>
+    <div class="example-render">
+      <ReportImage
+        src="https://datasciencedojo.com/wp-content/uploads/2026/04/Obsidian-Graph-View-for-LLM-Wiki.png"
+        alt="opencode — terminal AI coding assistant"
+        caption="opencode terminal interface — full streaming response với tool execution panel."
+        source="https://github.com/sst/opencode"
+        sourceLabel="sst/opencode"
+        bordered={true}
+      />
+    </div>
+    <pre class="example-code"><code>{`<ReportImage
+  src="https://raw.githubusercontent.com/org/repo/main/docs/arch.png"
+  alt="Architecture diagram"
+  caption="Mô tả. Có thể dùng <a href='...'>link</a>."
+  source="https://github.com/org/repo"
+  bordered={true}
+/>`}</code></pre>
+  </section>
+
+  </section>

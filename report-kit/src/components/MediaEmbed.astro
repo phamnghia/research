@@ -1,0 +1,89 @@
+---
+/**
+ * MediaEmbed — video/audio native hoặc iframe (YouTube, Vimeo, …).
+ */
+type Kind = 'video' | 'audio' | 'iframe';
+
+interface Props {
+  kind: Kind;
+  src: string;
+  title: string;
+  caption?: string;
+  /** Chỉ iframe: tỷ lệ khung (mặc định 16/9) */
+  aspectRatio?: string;
+}
+
+const { kind, src, title, caption, aspectRatio = '16 / 9' } = Astro.props;
+---
+
+<figure class="media-embed">
+  {kind === 'video' && (
+    <video class="media-embed__media" controls playsinline preload="metadata" title={title}>
+      <source src={src} />
+      Trình duyệt không hỗ trợ video HTML5.
+    </video>
+  )}
+  {kind === 'audio' && (
+    <audio class="media-embed__media media-embed__media--audio" controls preload="metadata" title={title}>
+      <source src={src} />
+      Trình duyệt không hỗ trợ audio HTML5.
+    </audio>
+  )}
+  {kind === 'iframe' && (
+    <div class="media-embed__iframe-wrap" style={`aspect-ratio: ${aspectRatio};`}>
+      <iframe
+        class="media-embed__iframe"
+        src={src}
+        title={title}
+        loading="lazy"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowfullscreen
+        referrerpolicy="strict-origin-when-cross-origin"
+      />
+    </div>
+  )}
+  {caption && (
+    <figcaption class="media-embed__caption" set:html={caption} />
+  )}
+</figure>
+
+<style>
+  .media-embed {
+    margin: 0;
+    max-width: 100%;
+  }
+  .media-embed__media {
+    display: block;
+    width: 100%;
+    max-height: min(70vh, 480px);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-elev);
+  }
+  .media-embed__media--audio {
+    max-height: none;
+    width: 100%;
+  }
+  .media-embed__iframe-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 960px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--bg-elev);
+  }
+  .media-embed__iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+  .media-embed__caption {
+    margin: 10px 0 0;
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.45;
+  }
+</style>

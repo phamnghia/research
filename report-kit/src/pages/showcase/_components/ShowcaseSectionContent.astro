@@ -1,0 +1,209 @@
+---
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Chip from '../../../components/Chip.astro';
+import Accordion from '../../../components/Accordion.astro';
+import KeyTakeaway from '../../../components/KeyTakeaway.astro';
+import QuoteBlock from '../../../components/QuoteBlock.astro';
+import StepList from '../../../components/StepList.astro';
+import Timeline from '../../../components/Timeline.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+---
+
+  <section class="component-group" id="group-content">
+    <header class="component-group__header">
+      <h2>Nội dung &amp; nhấn mạnh</h2>
+      <p>
+        Khối kỹ thuật, rationale, callout/chip, takeaway và trích dẫn, accordion, checklist bước và timeline.
+      </p>
+    </header>
+
+  {/* ─────── Technique ─────── */}
+  <section class="showcase-section" id="technique">
+    <h3>Technique</h3>
+    <div class="example-render">
+      <Technique
+        id="demo-t1"
+        title="Kỹ thuật demo"
+        tid="A.1"
+        location='File: <code>src/agent/loop.ts:1-42</code>'
+      >
+        <p>Nội dung technique. Thường chứa WhyImportant + code + ProsCons + RefList.</p>
+      </Technique>
+    </div>
+    <pre class="example-code"><code>{`<Technique
+  id="t1"
+  title="1. Kỹ thuật X"
+  tid="A.1"
+  location='File: <code>src/agent/loop.ts:120-180</code>'
+>
+  <WhyImportant>...</WhyImportant>
+  <CodeBlock>...</CodeBlock>
+  <ProsCons pros={[...]} cons={[...]} />
+  <RefList items={[...]} />
+</Technique>`}</code></pre>
+  </section>
+
+  {/* ─────── WhyImportant ─────── */}
+  <section class="showcase-section" id="whyimportant">
+    <h3>WhyImportant</h3>
+    <div class="example-render">
+      <WhyImportant>
+        <strong>Tại sao quan trọng.</strong> Giải thích rationale 2-3 câu.
+      </WhyImportant>
+    </div>
+    <pre class="example-code"><code>{`<WhyImportant>
+  <strong>Tại sao quan trọng.</strong> Giải thích 2-3 câu.
+</WhyImportant>`}</code></pre>
+  </section>
+
+  {/* ─────── ProsCons ─────── */}
+  <section class="showcase-section" id="proscons">
+    <h3>ProsCons</h3>
+    <div class="example-render">
+      <ProsCons
+        pros={[
+          'Ưu điểm 1',
+          'Ưu điểm 2 có <code>inline code</code>',
+        ]}
+        cons={[
+          'Nhược 1',
+          'Nhược 2 với <a href="#">link</a>',
+        ]}
+      />
+    </div>
+    <pre class="example-code"><code>{`<ProsCons
+  pros={['Ưu 1', 'Ưu 2 có <code>inline</code>']}
+  cons={['Nhược 1', 'Nhược 2 với <a href="#">link</a>']}
+/>`}</code></pre>
+  </section>
+
+  {/* ─────── Callout ─────── */}
+  <section class="showcase-section" id="callout">
+    <h3>Callout</h3>
+    <div class="example-render">
+      <Callout type="info"><strong>Info</strong> — ghi chú thường.</Callout>
+      <Callout type="warn"><strong>Warn</strong> — lưu ý / pitfall.</Callout>
+      <Callout type="unique"><strong>Unique</strong> — điểm khác biệt.</Callout>
+      <Callout type="success"><strong>Success</strong> — kết luận tích cực.</Callout>
+    </div>
+    <pre class="example-code"><code>{`<Callout type="info">...</Callout>
+<Callout type="warn">...</Callout>
+<Callout type="unique">...</Callout>
+<Callout type="success">...</Callout>`}</code></pre>
+  </section>
+
+  {/* ─────── Chip ─────── */}
+  <section class="showcase-section" id="chip">
+    <h3>Chip</h3>
+    <div class="example-render">
+      <Chip>default</Chip>{' '}
+      <Chip variant="green">green</Chip>{' '}
+      <Chip variant="amber">amber</Chip>{' '}
+      <Chip variant="purple">purple</Chip>{' '}
+      <Chip variant="cyan">cyan</Chip>{' '}
+      <Chip variant="red">red</Chip>{' '}
+      <Chip variant="unique">unique</Chip>
+    </div>
+    <pre class="example-code"><code>{`<Chip>default</Chip>
+<Chip variant="green">Loop</Chip>
+<Chip variant="unique">UNIQUE</Chip>`}</code></pre>
+  </section>
+
+  {/* ─────── Accordion ─────── */}
+  <section class="showcase-section" id="accordion">
+    <h3>Accordion</h3>
+    <p>Collapsible section dùng <code>&lt;details&gt;/&lt;summary&gt;</code> — progressive enhancement, works without JS. Dùng cho failure modes, implementation recipe, FAQ.</p>
+    <div class="example-render">
+      <Accordion title="Failure modes & edge cases">
+        <p>Nội dung ẩn mặc định. Mở ra khi click tiêu đề.</p>
+        <ul>
+          <li>Edge case 1: timeout khi model trả về quá chậm</li>
+          <li>Edge case 2: template variable typo → literal <code>{`{KEY}`}</code> còn sót</li>
+        </ul>
+      </Accordion>
+      <Accordion title="Implementation recipe" defaultOpen={true}>
+        <p>Section này mở sẵn vì <code>defaultOpen=true</code>.</p>
+      </Accordion>
+    </div>
+    <pre class="example-code"><code>{`<Accordion title="Failure modes">
+  <p>Nội dung collapse...</p>
+</Accordion>
+
+<Accordion title="Recipe" defaultOpen={true}>
+  <p>Mở sẵn khi load.</p>
+</Accordion>`}</code></pre>
+  </section>
+
+  {/* ─────── KeyTakeaway ─────── */}
+  <section class="showcase-section" id="keytakeaway">
+    <h3>KeyTakeaway</h3>
+    <p>Hộp tóm tắt điểm chính cuối section — mỗi item render <code>✓</code> + HTML. Đặt trước <code>RefList</code> hoặc <code>DeepDiveLink</code>.</p>
+    <div class="example-render">
+      <KeyTakeaway items={[
+        'Tool description đóng vai trò như <strong>mini system prompt</strong> cho từng tool',
+        'Template variables (<code>{`{PLATFORM}`}</code>, <code>{`{SHELL}`}</code>) inject lúc khởi tạo',
+        'Tách file <code>.txt</code> giúp A/B test mà <em>không</em> đổi code',
+      ]} />
+    </div>
+    <pre class="example-code"><code>{`<KeyTakeaway items={[
+  'Điểm 1 — HTML hỗ trợ <strong>bold</strong>',
+  'Điểm 2 — <code>code</code> inline',
+]} />`}</code></pre>
+  </section>
+
+  {/* ─────── QuoteBlock ─────── */}
+  <section class="showcase-section" id="quoteblock">
+    <h3>QuoteBlock</h3>
+    <p>Pull quote với attribution và source link. Dùng để trích dẫn paper, blog, keynote — tạo visual anchor trong nội dung dài.</p>
+    <div class="example-render">
+      <QuoteBlock
+        quote="The model doesn't know what it doesn't know — the harness must constrain the solution space so the agent doesn't wander into failure modes."
+        author="Avi Chawla"
+        source="https://blog.dailydoseofds.com/p/the-anatomy-of-an-agent-harness"
+        sourceLabel="The Anatomy of an Agent Harness"
+      />
+    </div>
+    <pre class="example-code"><code>{`<QuoteBlock
+  quote="The model doesn't know what it doesn't know..."
+  author="Avi Chawla"
+  source="https://blog.dailydoseofds.com/..."
+  sourceLabel="The Anatomy of an Agent Harness"
+/>`}</code></pre>
+  </section>
+
+  {/* ─────── StepList ─────── */}
+  <section class="showcase-section" id="steplist">
+    <h3>StepList</h3>
+    <p>Visual numbered steps với connector line và optional code snippet per step. Dùng cho implementation recipe, how-to, migration guide.</p>
+    <div class="example-render">
+      <StepList steps={[
+        { title: 'Tạo file .txt cạnh .ts', description: 'Đặt description ra file riêng, cùng thư mục với implementation.', code: 'touch tool/bash.txt', lang: 'bash' },
+        { title: 'Import trong .ts', description: 'Bun hỗ trợ text import native. Node.js cần readFileSync.', code: `import DESCRIPTION from "./bash.txt"` },
+        { title: 'Inject template variables', description: 'Render lúc tool khởi tạo, không phải mỗi lần gọi.' },
+      ]} />
+    </div>
+    <pre class="example-code"><code>{`<StepList steps={[
+  { title: 'Bước 1', description: 'Mô tả', code: 'npm install', lang: 'bash' },
+  { title: 'Bước 2', description: 'Mô tả tiếp' },
+]} />`}</code></pre>
+  </section>
+
+  {/* ─────── Timeline ─────── */}
+  <section class="showcase-section" id="timeline">
+    <h3>Timeline</h3>
+    <p>Vertical timeline với dot markers + connector. Dùng cho lịch sử phát triển, evolution of techniques, chronological narrative.</p>
+    <div class="example-render">
+      <Timeline items={[
+        { date: '2023-Q1', title: 'LangChain ra mắt', description: 'Framework đầu tiên cho LLM chaining, giới thiệu khái niệm chain và agent abstractions.', tag: 'Milestone' },
+        { date: '2024-Q1', title: 'OpenAI Function Calling', description: 'Structured tool calling trở thành tiêu chuẩn — thay thế ReAct prompting thủ công.', tag: 'Standard' },
+        { date: '2024-Q3', title: 'Claude Code & opencode', description: 'Harness engineering với vòng lặp agent chặt chẽ, streaming, và multi-turn context.', tag: 'Modern' },
+      ]} />
+    </div>
+    <pre class="example-code"><code>{`<Timeline items={[
+  { date: '2024-Q1', title: 'Milestone', description: 'Mô tả...', tag: 'Label' },
+]} />`}</code></pre>
+  </section>
+
+  </section>

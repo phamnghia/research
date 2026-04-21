@@ -1,0 +1,152 @@
+---
+/**
+ * CompareMatrix — feature comparison matrix với ✓/✗/~ color-coded cells.
+ * Tốt hơn DataTable compare khi so sánh feature support giữa nhiều tools/versions.
+ *
+ * Props:
+ *   - features: string[] — hàng (feature names)
+ *   - subjects: string[] — cột (tool/version names)
+ *   - cells: MatrixCell[][] — [feature][subject]
+ *   - caption?: string
+ */
+export interface MatrixCell {
+  /** 'yes' → ✓ green | 'no' → ✗ red | 'partial' → ~ amber | 'na' → – muted | string → render as-is */
+  value: 'yes' | 'no' | 'partial' | 'na' | string;
+  note?: string;
+}
+
+interface Props {
+  features: string[];
+  subjects: string[];
+  cells: MatrixCell[][];
+  caption?: string;
+}
+
+const { features, subjects, cells, caption } = Astro.props;
+
+function renderCell(cell: MatrixCell): { symbol: string; cls: string; title: string } {
+  switch (cell.value) {
+    case 'yes':     return { symbol: '✓', cls: 'cm-yes',     title: cell.note ?? 'Có hỗ trợ' };
+    case 'no':      return { symbol: '✗', cls: 'cm-no',      title: cell.note ?? 'Không hỗ trợ' };
+    case 'partial': return { symbol: '~', cls: 'cm-partial', title: cell.note ?? 'Hỗ trợ một phần' };
+    case 'na':      return { symbol: '–', cls: 'cm-na',      title: cell.note ?? 'Không áp dụng' };
+    default:        return { symbol: cell.value, cls: 'cm-text', title: cell.note ?? '' };
+  }
+}
+---
+
+<div class="compare-matrix-wrap">
+  {caption && <p class="cm-caption">{caption}</p>}
+  <table class="compare-matrix">
+    <thead>
+      <tr>
+        <th class="cm-feature-col">Feature</th>
+        {subjects.map(s => <th>{s}</th>)}
+      </tr>
+    </thead>
+    <tbody>
+      {features.map((feature, fi) => (
+        <tr>
+          <td class="cm-feature-name">{feature}</td>
+          {subjects.map((_, si) => {
+            const cell = cells[fi]?.[si] ?? { value: 'na' };
+            const { symbol, cls, title } = renderCell(cell);
+            return (
+              <td class={`cm-cell ${cls}`} title={title}>
+                <span class="cm-sym">{symbol}</span>
+                {cell.note && cls === 'cm-text' && <span class="cm-note">{cell.note}</span>}
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+    </tbody>
+  </table>
+  <p class="cm-legend">
+    <span class="cm-yes cm-sym">✓</span> Có &nbsp;
+    <span class="cm-no cm-sym">✗</span> Không &nbsp;
+    <span class="cm-partial cm-sym">~</span> Một phần &nbsp;
+    <span class="cm-na cm-sym">–</span> N/A
+  </p>
+</div>
+
+<style>
+  .compare-matrix-wrap {
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+
+  .cm-caption {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0 0 8px;
+    font-style: italic;
+  }
+
+  .compare-matrix {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13.5px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .compare-matrix th {
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    text-align: center;
+  }
+
+  .cm-feature-col { text-align: left !important; }
+
+  .compare-matrix td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border-soft);
+    vertical-align: middle;
+    text-align: center;
+  }
+
+  .cm-feature-name {
+    text-align: left !important;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .compare-matrix tr:last-child td { border-bottom: none; }
+  .compare-matrix tr:hover td { background: color-mix(in srgb, var(--accent) 3%, var(--bg-elev)); }
+
+  /* Cell variants */
+  .cm-sym { font-weight: 800; font-size: 15px; }
+
+  .cm-yes .cm-sym  { color: var(--green); }
+  .cm-no .cm-sym   { color: var(--red); }
+  .cm-partial .cm-sym { color: var(--amber); }
+  .cm-na .cm-sym   { color: var(--text-muted); opacity: 0.5; }
+  .cm-text { color: var(--text); font-size: 13px; }
+
+  .cm-note {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .cm-legend {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 8px 0 0;
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+</style>

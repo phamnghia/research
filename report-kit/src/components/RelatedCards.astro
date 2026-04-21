@@ -1,0 +1,143 @@
+---
+/**
+ * RelatedCards — navigation card grid tới related reports / deep dives.
+ * Đặt cuối section hoặc cuối báo cáo để link tới related content.
+ *
+ * Props:
+ *   - cards: RelatedCard[]
+ *   - title?: string (default: 'Xem thêm')
+ */
+export interface RelatedCard {
+  href: string;
+  title: string;
+  description?: string;
+  tag?: string;
+}
+
+interface Props {
+  cards: RelatedCard[];
+  title?: string;
+}
+
+const { cards, title = 'Xem thêm' } = Astro.props;
+---
+
+<div class="related-cards">
+  <p class="rc-title">{title}</p>
+  <div class="rc-grid">
+    {cards.map(card => (
+      <a class="rc-card" href={card.href}>
+        <div class="rc-card-inner">
+          <div class="rc-head">
+            <span class="rc-name">{card.title}</span>
+            {card.tag && <span class="rc-tag">{card.tag}</span>}
+          </div>
+          {card.description && <p class="rc-desc">{card.description}</p>}
+          <span class="rc-arrow" aria-hidden="true">→</span>
+        </div>
+      </a>
+    ))}
+  </div>
+</div>
+
+<style>
+  .related-cards {
+    margin: 28px 0;
+  }
+
+  .rc-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--text-muted);
+    margin: 0 0 10px;
+  }
+
+  .rc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 10px;
+  }
+
+  .rc-card {
+    display: block;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .rc-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .rc-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 10%, transparent);
+    text-decoration: none;
+  }
+  .rc-card:hover::before { opacity: 1; }
+
+  .rc-card-inner { display: flex; flex-direction: column; gap: 4px; }
+
+  .rc-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .rc-name {
+    font-weight: 600;
+    font-size: 13.5px;
+    color: var(--text-bright);
+    line-height: 1.4;
+  }
+
+  .rc-tag {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+    padding: 2px 6px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+
+  .rc-desc {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  .rc-arrow {
+    font-size: 14px;
+    color: var(--accent);
+    margin-top: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .rc-card:hover .rc-arrow { opacity: 1; }
+
+  @media (max-width: 680px) {
+    .rc-grid { grid-template-columns: 1fr; }
+  }
+</style>

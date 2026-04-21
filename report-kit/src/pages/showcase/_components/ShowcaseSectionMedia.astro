@@ -1,0 +1,46 @@
+---
+import MediaEmbed from '../../../components/MediaEmbed.astro';
+---
+
+  <section class="component-group" id="group-media">
+    <header class="component-group__header">
+      <h2>Media nhúng</h2>
+      <p>Video/audio HTML5 hoặc iframe (YouTube, Vimeo, …). Luôn điền <code>title</code> cho accessibility.</p>
+    </header>
+
+  {/* ─────── MediaEmbed ─────── */}
+  <section class="showcase-section" id="mediaembed">
+    <h3>MediaEmbed</h3>
+    <p>
+      Prop <code>kind</code>: <code>video</code> | <code>audio</code> | <code>iframe</code>.
+      Ví dụ video dùng sample CC0 từ MDN; iframe dùng <code>youtube-nocookie</code>.
+    </p>
+    <div class="example-render">
+      <MediaEmbed
+        kind="video"
+        src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+        title="Demo video (MDN sample)"
+        caption="Video minh hoạ — thay <code>src</code> bằng file báo cáo của bạn."
+      />
+    </div>
+    <div class="example-render">
+      <MediaEmbed
+        kind="audio"
+        src="https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3"
+        title="Demo audio (MDN sample)"
+      />
+    </div>
+    <div class="example-render">
+      <MediaEmbed
+        kind="iframe"
+        src="https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ"
+        title="Big Buck Bunny (Blender Foundation) — embed demo"
+        caption="Iframe 16:9; chỉnh <code>aspectRatio</code> nếu khác."
+      />
+    </div>
+    <pre class="example-code"><code>{`<MediaEmbed kind="video" src="https://..." title="Mô tả ngắn" caption="Caption HTML" />
+
+<MediaEmbed kind="iframe" src="https://www.youtube-nocookie.com/embed/..." title="Video" />`}</code></pre>
+  </section>
+
+  </section>

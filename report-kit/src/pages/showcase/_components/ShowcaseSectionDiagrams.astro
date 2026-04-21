@@ -1,0 +1,115 @@
+---
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import MermaidDiagram from '../../../components/MermaidDiagram.astro';
+import TreeView from '../../../components/TreeView.astro';
+---
+
+  <section class="component-group" id="group-diagrams">
+    <header class="component-group__header">
+      <h2>Diagram &amp; code</h2>
+      <p>ASCII diagram, highlight code (Shiki), và ví dụ snippet.</p>
+    </header>
+
+  {/* ─────── Diagram ─────── */}
+  <section class="showcase-section" id="diagram">
+    <h3>Diagram</h3>
+    <div class="example-render">
+      <Diagram>
+        <Fragment is:raw>
+          ┌──────────┐     ┌──────────┐
+          │  Model   │ ──▶ │  Tool    │
+          └──────────┘     └──────────┘
+          ▲                │
+          └────── result ◀─┘
+        </Fragment>
+      </Diagram>
+    </div>
+    <pre class="example-code"><code>{`<Diagram><Fragment is:raw>...</Fragment></Diagram>`}</code></pre>
+  </section>
+
+  {/* ─────── CodeBlock ─────── */}
+  <section class="showcase-section" id="codeblock">
+    <h3>CodeBlock</h3>
+    <div class="example-render">
+      <CodeBlock caption="caption.ts">
+        <Fragment is:raw>function hi(name) {
+  return "hi " + name;
+}</Fragment>
+      </CodeBlock>
+    </div>
+    <p class="tip">
+      <strong>Tip:</strong> highlight bằng <a href="https://shiki.style/">Shiki</a> (github-light /
+      github-dark, theo <code>prefers-color-scheme</code>). Khi code có <code>{'{'}</code>/
+      <code>{'}'}</code>, bọc slot bằng{" "}
+      <code>{'<Fragment is:raw>...</Fragment>'}</code>.
+      Prop tuỳ chọn <code>lang</code> (vd <code>typescript</code>, <code>bash</code>, <code>markdown</code>);
+      không truyền thì component suy luận. Chuỗi HTML span cũ (<code>.kw</code>…) vẫn được strip và
+      highlight lại.
+    </p>
+    <pre class="example-code"><code>{`<CodeBlock caption="loop.ts" lang="typescript">
+  <Fragment is:raw>async function runLoop() { ... }</Fragment>
+</CodeBlock>
+
+<CodeBlock code="const x = 1;" lang="typescript" />`}</code></pre>
+  </section>
+
+  {/* ─────── MermaidDiagram ─────── */}
+  <section class="showcase-section" id="mermaiddiagram">
+    <h3>MermaidDiagram</h3>
+    <p>Render Mermaid.js diagram từ CDN — tự detect dark/light theme. Hỗ trợ flowchart, sequence, gantt, ER. Dùng thay <code>Diagram</code> ASCII khi cần visual phức tạp hơn.</p>
+    <div class="example-render">
+      <MermaidDiagram
+        chart={`graph TD
+  A([User Request]) --> B{Agent Loop}
+  B --> C[Call LLM]
+  C --> D{Tool Call?}
+  D -- yes --> E[Execute Tool]
+  E --> F[Append Result]
+  F --> B
+  D -- no --> G([Return Response])`}
+        caption="Agent loop decision flow"
+      />
+    </div>
+    <pre class="example-code"><code>{`<MermaidDiagram
+  chart={\`graph TD
+    A[Request] --> B{Tool Call?}
+    B -- yes --> C[Execute Tool]
+    B -- no --> D[Return]\`}
+  caption="Agent loop flow"
+/>`}</code></pre>
+  </section>
+
+  {/* ─────── TreeView ─────── */}
+  <section class="showcase-section" id="treeview">
+    <h3>TreeView</h3>
+    <p>File/directory tree với icon và màu theo extension. Thay thế <code>Diagram</code> ASCII cho folder structures.</p>
+    <div class="example-render">
+      <TreeView tree={`
+tool/
+  bash.ts  # implementation + schema
+  bash.txt  # description template
+  edit.ts
+  edit.txt
+  read.ts
+src/
+  agent/
+    loop.ts
+    session.ts
+  context/
+    compact.ts
+    window.ts
+  data/
+    reports.ts
+`} caption="Cấu trúc tool folder của opencode" />
+    </div>
+    <pre class="example-code"><code>{`<TreeView tree={\`
+src/
+  components/
+    Button.astro
+  pages/
+    index.astro
+\`} caption="Project structure" />`}</code></pre>
+  </section>
+
+  </section>

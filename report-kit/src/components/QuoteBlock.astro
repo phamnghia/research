@@ -1,0 +1,96 @@
+---
+/**
+ * QuoteBlock — pull quote với attribution và source link.
+ * Dùng để trích dẫn từ paper, blog, keynote, tạo visual anchor trong nội dung dài.
+ *
+ * Props:
+ *   - quote: string — nội dung quote (HTML)
+ *   - author?: string
+ *   - source?: string — URL gốc
+ *   - sourceLabel?: string — label cho link
+ */
+interface Props {
+  quote: string;
+  author?: string;
+  source?: string;
+  sourceLabel?: string;
+}
+
+const { quote, author, source, sourceLabel } = Astro.props;
+
+let autoLabel = sourceLabel;
+if (!autoLabel && source) {
+  try { autoLabel = new URL(source).hostname.replace(/^www\./, ''); }
+  catch { autoLabel = 'Nguồn'; }
+}
+---
+
+<blockquote class="quote-block">
+  <span class="qb-mark" aria-hidden="true">"</span>
+  <p class="qb-text" set:html={quote} />
+  {(author || source) && (
+    <footer class="qb-footer">
+      {author && <cite class="qb-author">{author}</cite>}
+      {source && (
+        <a class="qb-source" href={source} target="_blank" rel="noopener noreferrer">
+          ↗ {autoLabel}
+        </a>
+      )}
+    </footer>
+  )}
+</blockquote>
+
+<style>
+  .quote-block {
+    position: relative;
+    margin: 24px 0;
+    padding: 20px 24px 16px 32px;
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    background: color-mix(in srgb, var(--accent) 5%, var(--bg-elev));
+  }
+
+  .qb-mark {
+    position: absolute;
+    top: -4px;
+    left: 14px;
+    font-size: 52px;
+    line-height: 1;
+    color: var(--accent);
+    opacity: 0.25;
+    font-family: Georgia, serif;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .qb-text {
+    margin: 0 0 12px;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text-bright);
+    font-style: italic;
+  }
+
+  .qb-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .qb-author {
+    font-size: 13px;
+    font-style: normal;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .qb-author::before { content: '— '; }
+
+  .qb-source {
+    font-size: 12px;
+    color: var(--accent);
+    text-decoration: none;
+    opacity: 0.8;
+  }
+  .qb-source:hover { opacity: 1; text-decoration: underline; }
+</style>

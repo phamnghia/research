@@ -1,0 +1,129 @@
+---
+import ChartJsBlock from '../../../components/ChartJsBlock.astro';
+import SparklineChart from '../../../components/SparklineChart.astro';
+import SimpleBarChart from '../../../components/SimpleBarChart.astro';
+---
+
+  <section class="component-group" id="group-charts">
+    <header class="component-group__header">
+      <h2>Charts</h2>
+      <p>
+        <strong>Chart.js</strong> cho biểu đồ chuẩn (bar, line, doughnut, radar, polar). Phía dưới giữ
+        <code>SimpleBarChart</code> / <code>SparklineChart</code> khi cần SVG nhẹ, không bundle thư viện.
+      </p>
+    </header>
+
+  {/* ─────── Chart.js ─────── */}
+  <section class="showcase-section" id="chartjs">
+    <h3>Chart.js</h3>
+    <p>
+      Dependency: <code>chart.js</code>. Component <code>ChartJsBlock.astro</code> khởi tạo canvas trong
+      <code>&lt;script&gt;</code> (bundle Vite), màu trục đọc từ CSS variables.
+    </p>
+    <div class="example-render example-render--charts">
+      <ChartJsBlock
+        id="kit-chart-bar"
+        type="bar"
+        title="Bar — latency theo tool (demo)"
+        height={220}
+        labels={['bash', 'read', 'edit', 'grep', 'agent']}
+        datasets={[
+          { label: 'p50 (ms)', data: [38, 95, 210, 120, 640] },
+          { label: 'p99 (ms)', data: [120, 280, 890, 400, 2400] },
+        ]}
+      />
+      <ChartJsBlock
+        id="kit-chart-line"
+        type="line"
+        title="Line — token / step (tĩnh)"
+        height={200}
+        labels={['1', '2', '3', '4', '5', '6', '7', '8']}
+        datasets={[{ label: 'tokens', data: [120, 340, 290, 510, 480, 620, 590, 710] }]}
+      />
+      <div class="chart-js-row">
+        <ChartJsBlock
+          id="kit-chart-doughnut"
+          type="doughnut"
+          title="Doughnut — thời gian theo phase"
+          height={240}
+          labels={['LLM', 'tools', 'IO', 'idle']}
+          datasets={[{ label: 'share', data: [52, 28, 12, 8] }]}
+        />
+        <ChartJsBlock
+          id="kit-chart-radar"
+          type="radar"
+          title="Radar — so khía cạnh (1–10)"
+          height={260}
+          labels={['Speed', 'Safety', 'DX', 'Cost', 'Observability']}
+          datasets={[
+            { label: 'A', data: [8, 6, 9, 5, 7] },
+            { label: 'B', data: [6, 9, 7, 8, 6] },
+          ]}
+        />
+      </div>
+      <ChartJsBlock
+        id="kit-chart-polar"
+        type="polarArea"
+        title="Polar area — workload (tuỳ chọn)"
+        height={240}
+        labels={['ingest', 'plan', 'act', 'verify', 'report']}
+        datasets={[{ label: 'weight', data: [11, 16, 22, 9, 14] }]}
+      />
+    </div>
+    <pre class="example-code"><code>{`import ChartJsBlock from '../../components/ChartJsBlock.astro';
+
+<ChartJsBlock
+  id="my-bar"
+  type="bar"
+  labels={['A', 'B']}
+  datasets={[{ label: 'ms', data: [10, 20] }]}
+/>`}</code></pre>
+  </section>
+
+  {/* ─────── SimpleBarChart ─────── */}
+  <section class="showcase-section" id="simplebarchart">
+    <h3>SimpleBarChart</h3>
+    <p>Thanh ngang theo nhãn + giá trị; scale theo max trong data hoặc prop <code>max</code>.</p>
+    <div class="example-render">
+      <SimpleBarChart
+        title="Tool latency (demo)"
+        unit="ms"
+        items={[
+          { label: 'bash', value: 42, variant: 'green' },
+          { label: 'read', value: 120, variant: 'cyan' },
+          { label: 'edit', value: 280, variant: 'amber' },
+          { label: 'agent loop', value: 890, variant: 'purple' },
+        ]}
+      />
+    </div>
+    <pre class="example-code"><code>{`<SimpleBarChart
+  title="Latency"
+  unit="ms"
+  items={[
+    { label: 'bash', value: 42, variant: 'green' },
+    { label: 'edit', value: 280, variant: 'amber' },
+  ]}
+/>`}</code></pre>
+  </section>
+
+  {/* ─────── SparklineChart ─────── */}
+  <section class="showcase-section" id="sparklinechart">
+    <h3>SparklineChart</h3>
+    <p>Đường trend tối giản — ít nhất 2 điểm số. Màu theo <code>--accent</code>.</p>
+    <div class="example-render">
+      <SparklineChart
+        values={[12, 18, 14, 22, 19, 28, 24, 31]}
+        caption="Token / step (ví dụ)"
+        width={240}
+        height={40}
+      />
+    </div>
+    <pre class="example-code"><code>{`<SparklineChart
+  values={[12, 18, 14, 22]}
+  caption="Trend label"
+  width={200}
+  height={36}
+/>`}</code></pre>
+  </section>
+
+  </section>

@@ -1,0 +1,143 @@
+---
+/**
+ * TreeView — visual file/directory tree từ indented text.
+ * Thay thế <Diagram> cho folder structures — render với icons và màu.
+ *
+ * Props:
+ *   - tree: string — indented text (2 spaces per level), giống output `tree` command
+ *     Dùng template literal: tree={`\nfoo/\n  bar.ts\n  baz/\n`}
+ *   - caption?: string
+ *
+ * Icon mapping:
+ *   - Thư mục: tên kết thúc / → 📁
+ *   - .ts/.tsx → TS màu cyan | .py → PY | .md → MD | .json → JSON
+ *   - File thường → 📄
+ */
+interface Props {
+  tree: string;
+  caption?: string;
+}
+
+const { tree, caption } = Astro.props;
+
+interface TreeNode {
+  name: string;
+  depth: number;
+  isDir: boolean;
+  ext: string;
+  comment: string;
+}
+
+function parseTree(raw: string): TreeNode[] {
+  const lines = raw.split('\n').filter(l => l.trim().length > 0);
+  return lines.map(line => {
+    const trimmed = line.trimStart();
+    const depth = Math.floor((line.length - trimmed.length) / 2);
+    const commentIdx = trimmed.indexOf('  #');
+    const namePart = commentIdx >= 0 ? trimmed.slice(0, commentIdx) : trimmed;
+    const comment = commentIdx >= 0 ? trimmed.slice(commentIdx + 2) : '';
+    const name = namePart.trim().replace(/\/$/, '');
+    const isDir = namePart.trim().endsWith('/');
+    const ext = isDir ? '' : (name.split('.').pop() ?? '').toLowerCase();
+    return { name, depth, isDir, ext, comment };
+  });
+}
+
+function getIcon(node: TreeNode): string {
+  if (node.isDir) return '📁';
+  const icons: Record<string, string> = {
+    ts: '⟨⟩', tsx: '⟨⟩', js: '⟨⟩', jsx: '⟨⟩',
+    py: '🐍', md: '📝', json: '{ }', yaml: '{ }', toml: '{ }',
+    css: '🎨', astro: '🚀', html: '🌐', sh: '⌘', txt: '📄',
+  };
+  return icons[node.ext] ?? '📄';
+}
+
+function getClass(node: TreeNode): string {
+  if (node.isDir) return 'tv-dir';
+  const map: Record<string, string> = {
+    ts: 'tv-ts', tsx: 'tv-ts', js: 'tv-js', jsx: 'tv-js',
+    py: 'tv-py', md: 'tv-md', json: 'tv-json', yaml: 'tv-json',
+    css: 'tv-css', astro: 'tv-astro',
+  };
+  return map[node.ext] ?? 'tv-file';
+}
+
+const nodes = parseTree(tree);
+---
+
+<div class="tree-view">
+  {caption && <p class="tv-caption">{caption}</p>}
+  <div class="tv-body">
+    {nodes.map(node => (
+      <div class="tv-row" style={`padding-left: ${node.depth * 20 + 12}px`}>
+        <span class={`tv-icon ${node.isDir ? 'tv-icon-dir' : 'tv-icon-file'}`}>{getIcon(node)}</span>
+        <span class={`tv-name ${getClass(node)}`}>{node.name}{node.isDir ? '/' : ''}</span>
+        {node.comment && <span class="tv-comment"># {node.comment.trim().replace(/^#\s*/, '')}</span>}
+      </div>
+    ))}
+  </div>
+</div>
+
+<style>
+  .tree-view {
+    margin: 16px 0;
+  }
+
+  .tv-caption {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    margin: 0 0 6px;
+    font-style: italic;
+  }
+
+  .tv-body {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 0;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    overflow-x: auto;
+  }
+
+  .tv-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding-right: 16px;
+    line-height: 1.8;
+    white-space: nowrap;
+  }
+
+  .tv-row:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+
+  .tv-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+    width: 18px;
+    text-align: center;
+  }
+  .tv-icon-dir { opacity: 0.8; }
+  .tv-icon-file { opacity: 0.65; font-size: 10px; }
+
+  .tv-name { font-size: 13px; }
+
+  /* File type colors */
+  .tv-dir   { color: var(--text-bright); font-weight: 600; }
+  .tv-ts    { color: var(--cyan); }
+  .tv-js    { color: var(--amber); }
+  .tv-py    { color: var(--green); }
+  .tv-md    { color: var(--text-muted); }
+  .tv-json  { color: var(--amber); }
+  .tv-css   { color: var(--purple); }
+  .tv-astro { color: var(--accent); }
+  .tv-file  { color: var(--text); }
+
+  .tv-comment {
+    color: var(--text-muted);
+    font-size: 12px;
+    opacity: 0.6;
+    margin-left: 8px;
+  }
+</style>

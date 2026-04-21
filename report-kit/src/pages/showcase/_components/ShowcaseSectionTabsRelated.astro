@@ -1,0 +1,57 @@
+---
+import Tabs from '../../../components/Tabs.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RelatedCards from '../../../components/RelatedCards.astro';
+---
+
+  <section class="component-group" id="group-links-ui">
+    <header class="component-group__header">
+      <h2>Tabs &amp; related</h2>
+      <p>So sánh đoạn code đa ngôn ngữ và thẻ điều hướng tới báo cáo khác.</p>
+    </header>
+
+  {/* ─────── Tabs ─────── */}
+  <section class="showcase-section" id="tabs">
+    <h3>Tabs</h3>
+    <p>Tab bar + panels với JS toggle, accessible (<code>aria-selected</code>). Content đặt trong named slots <code>slot="tab-{`{id}`}"</code>. Dùng để so sánh multi-language, before/after.</p>
+    <div class="example-render">
+      <Tabs tabs={[{id:'ts', label:'TypeScript (Bun)'}, {id:'node', label:'Node.js'}, {id:'py', label:'Python'}]}>
+        <div data-tab-panel="ts">
+          <CodeBlock lang="typescript" code={`import DESCRIPTION from "./bash.txt"\n\nexport const BashTool = Tool.define("bash", Effect.gen(function* () {\n  return {\n    description: renderTemplate(DESCRIPTION, { PLATFORM: process.platform }),\n  }\n}))`} />
+        </div>
+        <div data-tab-panel="node">
+          <CodeBlock lang="typescript" code={`import { readFileSync } from "node:fs"\nimport { join, dirname } from "node:path"\n\nconst DESCRIPTION = readFileSync(join(__dirname, "bash.txt"), "utf8")`} />
+        </div>
+        <div data-tab-panel="py">
+          <CodeBlock lang="python" code={`from pathlib import Path\n\nDESCRIPTION = (Path(__file__).parent / "bash.txt").read_text()`} />
+        </div>
+      </Tabs>
+    </div>
+    <pre class="example-code"><code>{`<Tabs tabs={[{id:'ts', label:'TypeScript'}, {id:'py', label:'Python'}]}>
+  <div data-tab-panel="ts">
+    <CodeBlock lang="typescript" code="..." />
+  </div>
+  <div data-tab-panel="py">
+    <CodeBlock lang="python" code="..." />
+  </div>
+</Tabs>`}</code></pre>
+  </section>
+
+  {/* ─────── RelatedCards ─────── */}
+  <section class="showcase-section" id="relatedcards">
+    <h3>RelatedCards</h3>
+    <p>Navigation card grid tới related reports/deep dives. Đặt cuối section hoặc cuối báo cáo. Props: <code>cards</code>, <code>title?</code>.</p>
+    <div class="example-render">
+      <RelatedCards title="Báo cáo liên quan" cards={[
+        { href: '/reports/opencode/', title: 'opencode', description: '28 kỹ thuật harness engineering', tag: 'Harness' },
+        { href: '/reports/openharness/', title: 'OpenHarness', description: 'Python port of Claude Code', tag: 'Harness' },
+        { href: '/reports/llm-wiki/', title: 'LLM-wiki', description: 'RAG vs Wiki Knowledge Base', tag: 'RAG' },
+      ]} />
+    </div>
+    <pre class="example-code"><code>{`<RelatedCards title="Xem thêm" cards={[
+  { href: '/reports/opencode/', title: 'opencode', description: '28 kỹ thuật', tag: 'Harness' },
+  { href: '/reports/llm-wiki/', title: 'LLM-wiki', tag: 'RAG' },
+]} />`}</code></pre>
+  </section>
+
+  </section>
