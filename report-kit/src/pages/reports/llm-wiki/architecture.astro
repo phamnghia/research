@@ -115,7 +115,7 @@ const description = 'Phân tích chi tiết kiến trúc 3 lớp, ba operations 
             Raw sources <em>không bao giờ được modify</em> bởi LLM. Đây là design decision quan
             trọng nhất trong toàn bộ kiến trúc. Tại sao?
           </p>
-          <Diagram>{`
+          <Diagram>
 Nếu LLM sửa raw sources:
   - Bạn mất source of truth
   - Không thể "reset" wiki mà giữ lại nguyên liệu gốc
@@ -125,7 +125,7 @@ Immutable raw sources cho phép:
   - Rebuild wiki từ đầu bất cứ lúc nào (chạy lại ingest)
   - Trust wiki là derivative, source là authoritative
   - LLM errors trong wiki không ảnh hưởng sources
-          `}</Diagram>
+          </Diagram>
 
           <Subheading level="h4" text="Layer 2: Wiki — LLM owns this completely" />
           <p>
@@ -205,7 +205,7 @@ Immutable raw sources cho phép:
 
           <Subheading level="h4" text="CLAUDE.md template đầy đủ" />
           <CodeBlock caption="CLAUDE.md — production template" lang="markdown">
-            <Fragment is:raw>{`# Wiki Schema
+            <Fragment is:raw># Wiki Schema
 
 ## Overview
 This is a personal research wiki on [YOUR TOPIC].
@@ -219,7 +219,7 @@ You are the wiki maintainer. I curate sources; you do all the bookkeeping.
 - CLAUDE.md — this file
 
 ## Entity Page Format
-\`\`\`markdown
+```markdown
 # [Entity Name]
 **Type**: Concept | Person | Project | Library | Decision | Event
 **Summary**: One sentence. Must be standalone (no "it" or "this").
@@ -247,7 +247,7 @@ Things still unclear or needing more sources.
 
 ## References
 - [[raw/paper1.pdf]] — specific claim from here
-\`\`\`
+```
 
 ## Ingest Workflow
 When I say "ingest [source]":
@@ -283,7 +283,7 @@ Report findings before making changes.
 - Decay: 0.02 per week since last confirmation
 - When superseding: mark old claim with ~~strikethrough~~ + link to new
 - Contradictions: add ⚠️ badge on both pages + log entry
-`}</Fragment>
+</Fragment>
           </CodeBlock>
 
           <Callout type="warn">
@@ -335,7 +335,7 @@ If you find contradictions, flag them with ⚠️ on both pages.
 After ingesting, update index.md and append to log.md.`} />
 
           <Subheading level="h4" text="Flow diagram" />
-          <Diagram>{`
+          <Diagram>
 DROP source vào raw/
       │
       ▼
@@ -355,7 +355,7 @@ LLM reads source + index.md
       └─ Append log.md entry
 
 Result: wiki gets richer, not just longer
-          `}</Diagram>
+          </Diagram>
 
           <ProsCons
             pros={[
@@ -435,12 +435,12 @@ Report findings as a list. DON'T make changes yet.
 After I review, I'll say "apply fixes" for each category.`} />
 
           <Subheading level="h4" text="Lint cadence" />
-          <Diagram>{`
+          <Diagram>
 Every ~20 new pages   →  Run full lint
 After major ingest    →  Run contradiction check only
 Monthly               →  Run confidence decay check
 Quarterly             →  Review CLAUDE.md schema, update if needed
-          `}</Diagram>
+          </Diagram>
 
           <Callout type="warn">
             <strong>Common mistake:</strong> Never running lint. A wiki that never gets
@@ -532,7 +532,7 @@ grep "^## \\[" log.md | grep -o "ingest\\|query\\|lint" | sort | uniq -c`} />
           </WhyImportant>
 
           <Subheading level="h4" text="Schema evolution lifecycle" />
-          <Diagram>{`
+          <Diagram>
 Week 1: Copy default template → customize cho domain
   ↓
 Week 2-4: Ingest first dozen sources → discover edge cases

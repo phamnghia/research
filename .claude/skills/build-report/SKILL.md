@@ -81,7 +81,6 @@ Sau đó Edit file `<slug>/index.astro`:
   - Tag inline → `<Chip variant="...">`.
   - ASCII art → `<Diagram>`.
   - Hình ảnh từ refs → `<ReportImage src="..." alt="..." caption="..." source="..." />`.
-- Code snippet có `{` hoặc `}` PHẢI bọc `<Fragment is:raw>{\`...\`}</Fragment>` — nếu không Astro parse JSX expression và build fail.
 - **Hình ảnh**: khi đã tìm được URL ảnh (diagram, flow, screenshot) trong bước thu thập nguồn → nhớ embed vào báo cáo bằng `<ReportImage>`. Đây là HTML, không phải Markdown — hình ảnh được style đẹp và có caption.
 
 ```astro

@@ -37,6 +37,16 @@ export interface Report {
    * Chỉ cần thiết khi kind === 'deep-dive'.
    */
   topicLabel?: string;
+  /**
+   * Ảnh đại diện trên trang chủ — đường dẫn tĩnh trong `public/`
+   * (vd `/thumbnails/opencode.svg`).
+   */
+  thumbnail?: string;
+}
+
+/** Thumbnail hiển thị trên card landing (fallback nếu không khai báo). */
+export function getReportThumbnail(r: Report): string {
+  return r.thumbnail ?? '/thumbnails/default.svg';
 }
 
 export const reports: Report[] = [
@@ -51,6 +61,7 @@ export const reports: Report[] = [
     status: 'stable',
     kind: 'overview',
     tags: ['llm-wiki', 'rag', 'knowledge-base', 'karpathy', 'markdown', 'obsidian', 'claude-code'],
+    thumbnail: '/thumbnails/llm-wiki.jpg',
   },
   {
     slug: 'llm-wiki/architecture',
@@ -111,6 +122,7 @@ export const reports: Report[] = [
     status: 'stable',
     repo: 'anomalyco/opencode',
     tags: ['harness', 'typescript', 'effect-ts', 'bun', 'agent-loop', 'opencode'],
+    thumbnail: '/thumbnails/opencode.jpg',
   },
   // ── opencode deep-dives: Theme C — Tool Design (t13–t20) ──────────────────
   {
@@ -302,6 +314,7 @@ export const reports: Report[] = [
     status: 'stable',
     repo: 'HKUDS/OpenHarness',
     tags: ['harness', 'python', 'asyncio', 'multi-agent', 'mcp', 'openharness', 'claude-code'],
+    thumbnail: '/thumbnails/openharness.jpg',
   },
 ];
 
