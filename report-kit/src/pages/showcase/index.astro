@@ -1,6 +1,4 @@
 ---
-// /showcase — Showcase UI kit (sidebar + từng nhóm trong _components/).
-// Dev: http://127.0.0.1:4321/showcase/
 import ReportLayout from '../../layouts/ReportLayout.astro';
 import Sidebar from '../../components/Sidebar.astro';
 import Breadcrumb from '../../components/Breadcrumb.astro';
@@ -152,16 +150,28 @@ import ShowcaseSectionImages from './_components/ShowcaseSectionImages.astro';
   }
   .example-render > * + * { margin-top: 12px; }
 
-  /* Constrain the sidebar demo so it doesn't try to be 280px fixed */
-  .sidebar-demo {
-    display: grid;
-    grid-template-columns: 260px 1fr;
-    align-items: start;
+  /* Sidebar nhúng trong khung demo — không dùng nút fixed / drawer */
+  .sidebar-demo .sidebar-menu-btn,
+  .sidebar-demo .sidebar-backdrop,
+  .sidebar-demo .report-mobile-topbar {
+    display: none !important;
   }
-  .sidebar-demo aside {
-    position: static !important;
-    height: auto !important;
-    border-right: 1px solid var(--border);
+  .sidebar-demo .sidebar-column {
+    display: grid;
+    grid-template-columns: minmax(0, 260px) 1fr;
+    align-items: start;
+    width: 100%;
+    min-height: 0;
+  }
+  .sidebar-demo aside.report-sidebar {
+    position: relative !important;
+    transform: none !important;
+    inset: auto !important;
+    width: auto !important;
+    max-height: 280px !important;
+    z-index: 1 !important;
+    box-shadow: none !important;
+    padding: 20px 16px !important;
   }
 
   pre.example-code {

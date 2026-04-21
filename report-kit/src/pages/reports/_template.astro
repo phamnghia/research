@@ -174,20 +174,17 @@ const description = '<Mô tả ngắn 1-2 câu, sẽ hiển thị ở <meta name
           <p>Mô tả ngắn gọn cách thuật toán/kỹ thuật vận hành.</p>
 
           {/* Diagram ASCII */}
-          <Diagram>{`
+          <Diagram>
 ┌──────────┐     ┌──────────┐
 │  Model   │ ──▶ │  Tool    │
 └──────────┘     └──────────┘
       ▲                │
       └────── result ◀─┘
-          `}</Diagram>
+          </Diagram>
 
           <Subheading level="h4" text="Code từ repo" />
           <CodeBlock caption="loop.ts">
-            {/*
-              Nếu snippet chứa `{` hoặc `}`, bọc trong Fragment is:raw + template literal.
-            */}
-            <Fragment is:raw>{`
+            <Fragment is:raw>
 async function runLoop(session) {
   while (true) {
     const resp = await model.stream(session.messages);
@@ -195,7 +192,7 @@ async function runLoop(session) {
     await runToolCalls(resp.toolCalls);
   }
 }
-`}</Fragment>
+</Fragment>
           </CodeBlock>
 
           <ProsCons

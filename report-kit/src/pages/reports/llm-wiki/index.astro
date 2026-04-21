@@ -362,7 +362,7 @@ Fixed: 2 orphan pages linked, 1 contradiction flagged in scaling-laws.md
 
           <Subheading level="h4" text="Ví dụ CLAUDE.md cho research wiki" />
           <CodeBlock caption="CLAUDE.md (schema file)" lang="markdown">
-            <Fragment is:raw>{`# Wiki Schema — AI Research
+            <Fragment is:raw># Wiki Schema — AI Research
 
 ## Structure
 - wiki/ — entity pages (one concept per file)
@@ -371,7 +371,7 @@ Fixed: 2 orphan pages linked, 1 contradiction flagged in scaling-laws.md
 - wiki/log.md — chronological log
 
 ## Entity Page Format
-\`\`\`markdown
+```markdown
 # [Entity Name]
 **Type**: Concept | Person | Project | Library | Decision
 **Summary**: One sentence.
@@ -384,7 +384,7 @@ Fixed: 2 orphan pages linked, 1 contradiction flagged in scaling-laws.md
 - uses: [[Entity A]]
 - contradicts: [[Entity B]]
 ## Open Questions
-\`\`\`
+```
 
 ## Ingest Workflow
 1. Read source
@@ -398,7 +398,7 @@ Fixed: 2 orphan pages linked, 1 contradiction flagged in scaling-laws.md
 - Every entity page must have ≥1 inbound link
 - Confidence <0.5 → flag for verification
 - Contradiction found → mark both pages, log decision
-`}</Fragment>
+</Fragment>
           </CodeBlock>
 
           <ProsCons

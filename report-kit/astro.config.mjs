@@ -1,9 +1,11 @@
 import { defineConfig } from 'astro/config';
+import icon from 'astro-icon';
 import { sseDemoMockPlugin } from './vite-plugins/sse-demo-mock.ts';
 
 // https://astro.build/config
 export default defineConfig({
   site: 'http://127.0.0.1:4321',
+  integrations: [icon()],
   server: {
     host: '127.0.0.1',
     port: 4321,

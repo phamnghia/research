@@ -9,10 +9,13 @@
     "start": "astro dev --host 127.0.0.1 --port 4321",
     "build": "astro build",
     "preview": "astro preview --host 127.0.0.1 --port 4321",
-    "astro": "astro"
+    "astro": "astro",
+    "deploy": "bun run build && cp -r dist/* /var/www/nghiapd-research"
   },
   "dependencies": {
+    "@iconify-json/lucide": "^1.2.102",
     "astro": "^4.16.18",
+    "astro-icon": "^1.1.5",
     "chart.js": "^4.5.1",
     "mermaid": "^11.14.0",
     "shiki": "^3.23.0"
