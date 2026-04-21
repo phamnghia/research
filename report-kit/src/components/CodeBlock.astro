@@ -4,6 +4,7 @@
  * - `code`: chuỗi (plain hoặc legacy HTML span.kw/str/… — tự strip).
  * - `lang`: id ngôn ngữ Shiki (mặc định suy luận từ nội dung).
  * - Slot: vẫn dùng được (vd Fragment is:raw + template literal).
+ * - Copy button + language badge được thêm tự động.
  */
 import { codeToHtml } from "shiki";
 import { toPlainCodeForShiki } from "../lib/codeBlockPlain";
@@ -38,6 +39,15 @@ function inferLang(source: string, explicit?: string): string {
 
 const lang = inferLang(plain, langProp);
 
+const langBadgeMap: Record<string, string> = {
+  typescript: "TS", tsx: "TSX", javascript: "JS", jsx: "JSX",
+  python: "PY", bash: "SH", shell: "SH", sh: "SH",
+  json: "JSON", yaml: "YAML", toml: "TOML", sql: "SQL",
+  markdown: "MD", html: "HTML", css: "CSS", rust: "RS",
+  go: "GO", txt: "TXT", xml: "XML",
+};
+const badgeLabel = langBadgeMap[lang] ?? lang.toUpperCase().slice(0, 5);
+
 const shikiOpts = {
   lang,
   themes: { light: "github-light", dark: "github-dark" },
@@ -49,27 +59,112 @@ if (plain.length > 0) {
     highlighted = await codeToHtml(plain, shikiOpts);
   } catch {
     try {
-      highlighted = await codeToHtml(plain, {
-        ...shikiOpts,
-        lang: "txt",
-      });
+      highlighted = await codeToHtml(plain, { ...shikiOpts, lang: "txt" });
     } catch {
       highlighted = `<pre class="shiki"><code>${plain.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code></pre>`;
     }
   }
 }
+
+// Escape plain text for data attribute (used by copy button)
+const escapedPlain = plain.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$/g, "\\$");
 ---
 
-{caption && <h4>{caption}</h4>}
-<div class="code-block-root" set:html={highlighted} />
+{caption && <h4 class="cb-caption">{caption}</h4>}
+<div class="code-block-wrap">
+  <span class="cb-lang-badge">{badgeLabel}</span>
+  <button class="cb-copy-btn" aria-label="Copy code" data-plain={plain}>Copy</button>
+  <div class="code-block-root" set:html={highlighted} />
+</div>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('.cb-copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const text = btn.dataset.plain ?? '';
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = 'Copied ✓';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 1500);
+      } catch {
+        btn.textContent = 'Failed';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+      }
+    });
+  });
+</script>
 
 <style is:global>
-  .code-block-root {
+  .code-block-wrap {
+    position: relative;
     margin: 10px 0;
+  }
+
+  .cb-caption {
+    margin-bottom: 0 !important;
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+  }
+
+  .cb-lang-badge {
+    position: absolute;
+    top: 9px;
+    left: 14px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    opacity: 0.7;
+    pointer-events: none;
+    z-index: 2;
+    line-height: 1;
+  }
+
+  .cb-copy-btn {
+    position: absolute;
+    top: 7px;
+    right: 10px;
+    z-index: 2;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-family: inherit;
+    font-weight: 500;
+    background: var(--bg-elev);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    line-height: 1.4;
+  }
+
+  .code-block-wrap:hover .cb-copy-btn {
+    opacity: 1;
+  }
+
+  .cb-copy-btn:hover {
+    color: var(--text-bright);
+    border-color: var(--accent);
+  }
+
+  .cb-copy-btn.copied {
+    color: var(--green);
+    border-color: var(--green);
+    opacity: 1;
+  }
+
+  .code-block-root {
+    margin: 0;
   }
   .code-block-root :global(pre.shiki) {
     margin: 0;
-    padding: 14px 16px;
+    padding: 12px 16px 12px 48px;
     border-radius: 6px;
     border: 1px solid var(--border);
     overflow-x: auto;

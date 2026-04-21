@@ -1,0 +1,80 @@
+---
+/**
+ * Accordion — collapsible section dùng <details>/<summary>.
+ * Progressive enhancement: hoạt động không cần JS; CSS smooth animation.
+ *
+ * Props:
+ *   - title: string — tiêu đề hiển thị trên summary bar
+ *   - defaultOpen?: boolean — mở sẵn khi load (default: false)
+ */
+interface Props {
+  title: string;
+  defaultOpen?: boolean;
+}
+
+const { title, defaultOpen = false } = Astro.props;
+---
+
+<details class="accordion" open={defaultOpen || undefined}>
+  <summary class="accordion-summary">
+    <span class="accordion-title">{title}</span>
+    <span class="accordion-icon" aria-hidden="true">▸</span>
+  </summary>
+  <div class="accordion-body">
+    <slot />
+  </div>
+</details>
+
+<style>
+  .accordion {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 16px 0;
+    overflow: hidden;
+    background: var(--bg-elev);
+  }
+
+  .accordion-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 13px 18px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-bright);
+    transition: background 0.15s ease;
+  }
+  .accordion-summary::-webkit-details-marker { display: none; }
+  .accordion-summary::marker { display: none; }
+
+  .accordion-summary:hover {
+    background: color-mix(in srgb, var(--accent) 5%, var(--bg-elev));
+  }
+
+  .accordion-title { flex: 1; }
+
+  .accordion-icon {
+    color: var(--text-muted);
+    font-size: 12px;
+    transition: transform 0.22s ease;
+    flex-shrink: 0;
+  }
+
+  .accordion[open] .accordion-icon {
+    transform: rotate(90deg);
+  }
+
+  .accordion-body {
+    padding: 4px 18px 16px;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  /* Smooth open/close via grid trick */
+  .accordion:not([open]) .accordion-body {
+    display: none;
+  }
+</style>

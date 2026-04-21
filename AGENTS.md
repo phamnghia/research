@@ -1,6 +1,6 @@
 # Research Workspace — Nghĩa & Cowork
 
-Đây là không gian nghiên cứu chung giữa Nghĩa (nghiapd9@fpt.com) và Cowork. Mỗi khi được gọi vào folder này, Claude đóng vai trò **trợ lý nghiên cứu**: cùng đào sâu chủ đề, tổng hợp nguồn, và xuất ra báo cáo có cấu trúc.
+Đây là không gian nghiên cứu chung giữa Nghĩa ([nghiapd9@fpt.com](mailto:nghiapd9@fpt.com)) và Cowork. Mỗi khi được gọi vào folder này, Claude đóng vai trò **trợ lý nghiên cứu**: cùng đào sâu chủ đề, tổng hợp nguồn, và xuất ra báo cáo có cấu trúc.
 
 ## 🎯 Nguyên tắc tối thượng
 
@@ -16,6 +16,7 @@
 Khi Cowork phân tích repo/hệ thống mới, **không regenerate CSS hay component** — tạo folder `src/pages/reports/<slug>/` với `index.astro` bên trong + đăng ký metadata.
 
 **Quy tắc folder bắt buộc:**
+
 - **Layer 1 (overview)**: `src/pages/reports/<slug>/index.astro` — xuất hiện ở trang chủ
 - **Layer 2 (deep dive)**: `src/pages/reports/<slug>/<topic>.astro` — ẩn ở trang chủ, link từ Layer 1
 - **Import paths trong folder**: dùng `../../../layouts/` và `../../../components/` (3 cấp)
@@ -72,11 +73,7 @@ Research/
 │   │       └── deep-dives/        # notes cho 4 deep dives
 │   └── scripts/migrate_report.py  # HTML → .astro converter (khi cần)
 ├── archive/                       # File cũ (legacy HTML, old topics/sources)
-├── notes/                         # Ghi chú rời, brainstorm không thuộc topic nào
-├── drafts/                        # Bản nháp đang viết dở
-├── artifacts/  (DEPRECATED)       # Đã move sang archive/, build output ở report-kit/dist/
-├── sources/    (DEPRECATED)       # Đã gộp vào report-kit/research/<slug>/references.md
-└── topics/     (DEPRECATED)       # Đã gộp vào report-kit/research/<slug>/
+└── notes/                         # Ghi chú rời, brainstorm không thuộc topic nào
 ```
 
 ## 🚀 Luồng công việc mặc định
@@ -91,10 +88,10 @@ Tóm tắt các bước:
 2. **Setup research folder**: `report-kit/research/<slug>/` với `README.md` + `references.md` (copy từ `_TEMPLATE/`).
 3. **Đọc & ghi chú** vào `research/<slug>/techniques.md`, thu thập link vào `references.md`.
 4. **Tạo báo cáo trong folder riêng** (KHÔNG tạo flat file):
-   ```bash
+  ```bash
    mkdir -p report-kit/src/pages/reports/<slug>
    cp report-kit/src/pages/reports/_template.astro report-kit/src/pages/reports/<slug>/index.astro
-   ```
+  ```
    Sửa title, Sidebar, body; dùng component thật (không paste raw HTML).
    **Quan trọng**: import paths dùng `../../../layouts/` và `../../../components/` (3 cấp).
 5. **Đăng ký** trong `report-kit/src/data/reports.ts` (slug = tên folder).
@@ -172,6 +169,7 @@ Props: `src` (URL hoặc path), `alt` (bắt buộc), `caption` (HTML), `source`
 ### Khi nào tìm ảnh
 
 Khi fetch refs, **luôn chủ động tìm**:
+
 - Diagram kiến trúc trong README hoặc `docs/` của repo
 - Sơ đồ luồng (sequence, flow) trong docs chính thức
 - Benchmark / performance chart từ blog / paper
@@ -188,40 +186,42 @@ Ghi URL ảnh tìm được vào `deep-dives/<topic>/images.md` để dùng lạ
 
 ## 🧩 Components sẵn có (không dùng lại raw HTML)
 
-| Component | Khi dùng |
-|-----------|----------|
-| `ReportLayout` | Skeleton mỗi báo cáo |
-| `Sidebar` | TOC trái, nhận `groups: SidebarGroup[]` |
-| `Hero` | Title + subtitle + meta bar trên đầu |
-| `Breadcrumb` | Link "Tất cả báo cáo" về `/` |
-| `Section` | `<h2>` section với theme tag |
-| `Subheading` | h3/h4 phụ có anchor |
-| `Technique` | Card 1 kỹ thuật (id, title, tid, location) — hover highlight |
-| `WhyImportant` | Block "Tại sao quan trọng" bên trong Technique |
-| `ProsCons` | 2 cột ưu/nhược |
-| `Callout` | info / warn / unique / success |
-| `Chip` | Tag inline (variants: green/amber/purple/cyan/red/unique) |
-| `Diagram` | ASCII art block (giữ whitespace) |
-| `CodeBlock` | Shiki highlight + copy button + language badge. Props: `code`, `lang`, `caption` |
-| `DeepDiveLink` | Link dạng nút tới trang phân tích sâu |
-| `ReportImage` | Hình ảnh với caption + attribution + **click-to-zoom lightbox**. Props: `src`, `alt`, `caption`, `source`, `bordered` |
-| `RefList` | List tham khảo cuối technique |
-| `LinkList` | H3 + danh sách link |
-| `SummaryTable` | Bảng tóm tắt kỹ thuật với chip |
-| `DataTable` | Bảng thường / so sánh nhiều cột |
-| **`Accordion`** | Collapsible `<details>/<summary>` — failure modes, recipe, FAQ. Props: `title`, `defaultOpen?` |
-| **`KeyTakeaway`** | Hộp tóm tắt `✓` cuối section. Props: `items: string[]` (HTML), `title?` |
-| **`QuoteBlock`** | Pull quote với attribution + source. Props: `quote`, `author?`, `source?`, `sourceLabel?` |
-| **`StatGrid`** | Grid metric cards (số to + label). Props: `stats: Stat[]`, `columns?: 2\|3\|4` |
-| **`Timeline`** | Vertical timeline với dot markers. Props: `items: TimelineItem[]` |
-| **`StepList`** | Visual numbered steps với connector line. Props: `steps: Step[]` (title, description, code?, lang?) |
-| **`CompareMatrix`** | Feature matrix ✓/✗/~ color-coded. Props: `features`, `subjects`, `cells: MatrixCell[][]` |
-| **`TreeView`** | File/directory tree với icons theo extension. Props: `tree: string`, `caption?` |
-| **`Tabs`** | Tab bar + panels. Props: `tabs: {id,label}[]`; content trong named slots `slot="tab-{id}"` |
-| **`RelatedCards`** | Navigation card grid tới related reports. Props: `cards: RelatedCard[]`, `title?` |
-| **`MermaidDiagram`** | Mermaid.js diagram từ CDN (flowchart, sequence, gantt). Props: `chart: string`, `caption?` |
 
-Xem tất cả component render sống: chạy `npm run dev` rồi mở [`/components`](http://127.0.0.1:4321/components/).
+| Component            | Khi dùng                                                                                                              |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `ReportLayout`       | Skeleton mỗi báo cáo                                                                                                  |
+| `Sidebar`            | TOC trái, nhận `groups: SidebarGroup[]`                                                                               |
+| `Hero`               | Title + subtitle + meta bar trên đầu                                                                                  |
+| `Breadcrumb`         | Link "Tất cả báo cáo" về `/`                                                                                          |
+| `Section`            | `<h2>` section với theme tag                                                                                          |
+| `Subheading`         | h3/h4 phụ có anchor                                                                                                   |
+| `Technique`          | Card 1 kỹ thuật (id, title, tid, location) — hover highlight                                                          |
+| `WhyImportant`       | Block "Tại sao quan trọng" bên trong Technique                                                                        |
+| `ProsCons`           | 2 cột ưu/nhược                                                                                                        |
+| `Callout`            | info / warn / unique / success                                                                                        |
+| `Chip`               | Tag inline (variants: green/amber/purple/cyan/red/unique)                                                             |
+| `Diagram`            | ASCII art block (giữ whitespace)                                                                                      |
+| `CodeBlock`          | Shiki highlight + copy button + language badge. Props: `code`, `lang`, `caption`                                      |
+| `DeepDiveLink`       | Link dạng nút tới trang phân tích sâu                                                                                 |
+| `ReportImage`        | Hình ảnh với caption + attribution + **click-to-zoom lightbox**. Props: `src`, `alt`, `caption`, `source`, `bordered` |
+| `RefList`            | List tham khảo cuối technique                                                                                         |
+| `LinkList`           | H3 + danh sách link                                                                                                   |
+| `SummaryTable`       | Bảng tóm tắt kỹ thuật với chip                                                                                        |
+| `DataTable`          | Bảng thường / so sánh nhiều cột                                                                                       |
+| `**Accordion`**      | Collapsible `<details>/<summary>` — failure modes, recipe, FAQ. Props: `title`, `defaultOpen?`                        |
+| `**KeyTakeaway**`    | Hộp tóm tắt `✓` cuối section. Props: `items: string[]` (HTML), `title?`                                               |
+| `**QuoteBlock**`     | Pull quote với attribution + source. Props: `quote`, `author?`, `source?`, `sourceLabel?`                             |
+| `**StatGrid**`       | Grid metric cards (số to + label). Props: `stats: Stat[]`, `columns?: 2|3|4`                                          |
+| `**Timeline**`       | Vertical timeline với dot markers. Props: `items: TimelineItem[]`                                                     |
+| `**StepList**`       | Visual numbered steps với connector line. Props: `steps: Step[]` (title, description, code?, lang?)                   |
+| `**CompareMatrix**`  | Feature matrix ✓/✗/~ color-coded. Props: `features`, `subjects`, `cells: MatrixCell[][]`                              |
+| `**TreeView**`       | File/directory tree với icons theo extension. Props: `tree: string`, `caption?`                                       |
+| `**Tabs**`           | Tab bar + panels. Props: `tabs: {id,label}[]`; content trong named slots `slot="tab-{id}"`                            |
+| `**RelatedCards**`   | Navigation card grid tới related reports. Props: `cards: RelatedCard[]`, `title?`                                     |
+| `**MermaidDiagram**` | Mermaid.js diagram từ CDN (flowchart, sequence, gantt). Props: `chart: string`, `caption?`                            |
+
+
+Xem tất cả component render sống: chạy `npm run dev` rồi mở `[/components](http://127.0.0.1:4321/components/)`.
 
 ## ⚠️ Anti-patterns
 

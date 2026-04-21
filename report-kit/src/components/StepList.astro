@@ -1,0 +1,125 @@
+---
+/**
+ * StepList — visual numbered steps với connector line.
+ * Dùng cho implementation recipes, how-to guides, migration steps.
+ *
+ * Props:
+ *   - steps: Step[]
+ */
+export interface Step {
+  title: string;
+  description: string;
+  code?: string;
+  lang?: string;
+}
+
+interface Props {
+  steps: Step[];
+}
+
+const { steps } = Astro.props;
+---
+
+<ol class="step-list">
+  {steps.map((step, i) => (
+    <li class="step-item">
+      <div class="step-num-col">
+        <span class="step-num">{i + 1}</span>
+        {i < steps.length - 1 && <span class="step-connector" />}
+      </div>
+      <div class="step-body">
+        <strong class="step-title">{step.title}</strong>
+        <p class="step-desc">{step.description}</p>
+        {step.code && (
+          <pre class="step-code"><code>{step.code}</code></pre>
+        )}
+      </div>
+    </li>
+  ))}
+</ol>
+
+<style>
+  .step-list {
+    list-style: none;
+    margin: 20px 0;
+    padding: 0;
+  }
+
+  .step-item {
+    display: flex;
+    gap: 18px;
+    position: relative;
+  }
+
+  .step-num-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+    width: 34px;
+  }
+
+  .step-num {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    font-size: 14px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+
+  .step-connector {
+    flex: 1;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--accent), color-mix(in srgb, var(--accent) 15%, var(--border)));
+    margin-top: 4px;
+    min-height: 20px;
+  }
+
+  .step-body {
+    padding-bottom: 28px;
+    flex: 1;
+    min-width: 0;
+    padding-top: 4px;
+  }
+
+  .step-title {
+    display: block;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 4px;
+  }
+
+  .step-desc {
+    margin: 0 0 10px;
+    font-size: 13.5px;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+
+  .step-code {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 12px;
+    overflow-x: auto;
+    margin: 0;
+  }
+
+  .step-code code {
+    background: transparent;
+    padding: 0;
+    border: none;
+    color: var(--text);
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+  }
+</style>

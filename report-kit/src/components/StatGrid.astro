@@ -1,0 +1,104 @@
+---
+/**
+ * StatGrid — grid metric cards để highlight key numbers.
+ * Dùng ở intro section, benchmark highlights, tóm tắt số liệu.
+ *
+ * Props:
+ *   - stats: Stat[] — mỗi stat có value (số to), label, note tùy chọn, variant màu
+ *   - columns?: 2 | 3 | 4 — số cột (default: 3, auto-adjust on small screens)
+ */
+export interface Stat {
+  value: string;
+  label: string;
+  note?: string;
+  variant?: 'default' | 'green' | 'amber' | 'red' | 'purple' | 'cyan';
+}
+
+interface Props {
+  stats: Stat[];
+  columns?: 2 | 3 | 4;
+}
+
+const { stats, columns = 3 } = Astro.props;
+---
+
+<div class="stat-grid" style={`--sg-cols: ${columns};`}>
+  {stats.map(s => (
+    <div class={`stat-card${s.variant && s.variant !== 'default' ? ' stat-' + s.variant : ''}`}>
+      <span class="stat-value">{s.value}</span>
+      <span class="stat-label">{s.label}</span>
+      {s.note && <span class="stat-note">{s.note}</span>}
+    </div>
+  ))}
+</div>
+
+<style>
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(var(--sg-cols, 3), 1fr);
+    gap: 12px;
+    margin: 20px 0;
+  }
+
+  .stat-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .stat-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+
+  .stat-value {
+    font-size: 2rem;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.04em;
+    color: var(--text-bright);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-label {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  .stat-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    opacity: 0.8;
+    margin-top: 2px;
+  }
+
+  /* Variants */
+  .stat-green { border-color: color-mix(in srgb, var(--green) 35%, var(--border)); background: color-mix(in srgb, var(--green) 8%, var(--bg-elev)); }
+  .stat-green .stat-value { color: var(--green); }
+
+  .stat-amber { border-color: color-mix(in srgb, var(--amber) 35%, var(--border)); background: color-mix(in srgb, var(--amber) 8%, var(--bg-elev)); }
+  .stat-amber .stat-value { color: var(--amber); }
+
+  .stat-red { border-color: color-mix(in srgb, var(--red) 35%, var(--border)); background: color-mix(in srgb, var(--red) 8%, var(--bg-elev)); }
+  .stat-red .stat-value { color: var(--red); }
+
+  .stat-purple { border-color: color-mix(in srgb, var(--purple) 35%, var(--border)); background: color-mix(in srgb, var(--purple) 8%, var(--bg-elev)); }
+  .stat-purple .stat-value { color: var(--purple); }
+
+  .stat-cyan { border-color: color-mix(in srgb, var(--cyan) 35%, var(--border)); background: color-mix(in srgb, var(--cyan) 8%, var(--bg-elev)); }
+  .stat-cyan .stat-value { color: var(--cyan); }
+
+  @media (max-width: 680px) {
+    .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 400px) {
+    .stat-grid { grid-template-columns: 1fr; }
+  }
+</style>

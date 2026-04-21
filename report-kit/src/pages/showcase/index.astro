@@ -1,0 +1,194 @@
+---
+// /showcase — Showcase UI kit (sidebar + từng nhóm trong _components/).
+// Dev: http://127.0.0.1:4321/showcase/
+import ReportLayout from '../../layouts/ReportLayout.astro';
+import Sidebar from '../../components/Sidebar.astro';
+import Breadcrumb from '../../components/Breadcrumb.astro';
+import { componentsPageSidebar } from '../../lib/components-sidebar-data';
+import ShowcaseSectionLayout from './_components/ShowcaseSectionLayout.astro';
+import ShowcaseSectionContent from './_components/ShowcaseSectionContent.astro';
+import ShowcaseSectionDiagrams from './_components/ShowcaseSectionDiagrams.astro';
+import ShowcaseSectionLinks from './_components/ShowcaseSectionLinks.astro';
+import ShowcaseSectionTables from './_components/ShowcaseSectionTables.astro';
+import ShowcaseSectionCharts from './_components/ShowcaseSectionCharts.astro';
+import ShowcaseSectionMedia from './_components/ShowcaseSectionMedia.astro';
+import ShowcaseSectionLiveData from './_components/ShowcaseSectionLiveData.astro';
+import ShowcaseSectionTabsRelated from './_components/ShowcaseSectionTabsRelated.astro';
+import ShowcaseSectionImages from './_components/ShowcaseSectionImages.astro';
+---
+<ReportLayout
+  title="Components — Research Report Kit"
+  description="Showcase mọi component của Research Report Kit, kèm ví dụ render thực và code snippet."
+>
+  <div class="layout layout--components-page">
+    <Sidebar intro="Components" groups={componentsPageSidebar} />
+    <main class="components-page-main">
+      <Breadcrumb href="/" label="Trang chủ kit" />
+      <header class="hero components-page-hero">
+        <h1>Components showcase</h1>
+        <div class="sub">
+          Toàn bộ component của report-kit, render sống + code snippet. Sidebar trái dùng
+          <code>Sidebar.astro</code> giống báo cáo (scroll spy + active). File template:
+          <code>src/pages/reports/_template.astro</code>.
+        </div>
+      </header>
+
+      <ShowcaseSectionLayout />
+      <ShowcaseSectionContent />
+      <ShowcaseSectionDiagrams />
+      <ShowcaseSectionLinks />
+      <ShowcaseSectionTables />
+      <ShowcaseSectionCharts />
+      <ShowcaseSectionMedia />
+      <ShowcaseSectionLiveData />
+      <ShowcaseSectionTabsRelated />
+      <ShowcaseSectionImages />
+
+      <footer class="components-page-footer">
+        <p>
+          <strong>Tiếp theo:</strong> copy <code>src/pages/reports/_template.astro</code> khi
+          bắt đầu báo cáo mới. Xem <a href="/"><code>/</code></a> để thấy các báo cáo hiện có.
+        </p>
+      </footer>
+    </main>
+  </div>
+</ReportLayout>
+
+<style is:global>
+  /* Global: class nằm trong _components, không thuộc file này → cần is:global */
+  .layout--components-page main.components-page-main {
+    max-width: 1040px;
+  }
+  .components-page-hero {
+    margin-bottom: 8px;
+  }
+  .components-page-footer {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-soft);
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+  .components-page-footer a {
+    color: var(--accent);
+  }
+
+  .example-render--charts {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+  .chart-js-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 880px) {
+    .chart-js-row {
+      grid-template-columns: 1fr;
+    }
+  }
+  .example-render--flush {
+    padding: 0;
+    background: transparent;
+    border: none;
+  }
+
+  .livedata-plan-list {
+    margin: 12px 0 0;
+    padding-left: 1.25rem;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.65;
+    max-width: 860px;
+  }
+  .livedata-plan-list li + li {
+    margin-top: 12px;
+  }
+
+  .showcase-section {
+    margin: 40px 0;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .component-group {
+    margin: 44px 0 0;
+    padding: 0 0 36px;
+    border-bottom: 1px solid var(--border);
+  }
+  .component-group__header h2 {
+    margin: 0 0 8px;
+    font-size: 24px;
+    font-weight: 650;
+    color: var(--text-bright);
+    letter-spacing: -0.3px;
+  }
+  .component-group__header p {
+    margin: 0 0 8px;
+    font-size: 14px;
+    color: var(--text-muted);
+    max-width: 820px;
+    line-height: 1.55;
+  }
+  .showcase-section > h3 {
+    margin: 0 0 12px;
+    font-size: 20px;
+    color: var(--text-bright);
+    font-weight: 600;
+  }
+  .showcase-section > p {
+    color: var(--text-muted);
+    font-size: 14px;
+    max-width: 820px;
+  }
+
+  .example-render {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin: 16px 0;
+  }
+  .example-render > * + * { margin-top: 12px; }
+
+  /* Constrain the sidebar demo so it doesn't try to be 280px fixed */
+  .sidebar-demo {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    align-items: start;
+  }
+  .sidebar-demo aside {
+    position: static !important;
+    height: auto !important;
+    border-right: 1px solid var(--border);
+  }
+
+  pre.example-code {
+    background: var(--bg-code);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.55;
+    margin: 0;
+  }
+  pre.example-code code {
+    background: transparent;
+    padding: 0;
+    border: 0;
+    color: var(--text);
+  }
+
+  .tip {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-left: 3px solid var(--accent);
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    font-size: 13.5px;
+    color: var(--text);
+    margin: 12px 0 16px;
+  }
+  .tip code { font-size: 12.5px; }
+</style>

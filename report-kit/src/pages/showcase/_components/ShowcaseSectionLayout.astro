@@ -1,0 +1,127 @@
+---
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+---
+
+  {/* ══════ 1. Layout & khung trang ══════ */}
+  <section class="component-group" id="group-layout">
+    <header class="component-group__header">
+      <h2>Layout &amp; khung trang</h2>
+      <p>
+        Khung trang báo cáo (<code>ReportLayout</code>), điều hướng phụ (<code>Sidebar</code>,
+        <code>Breadcrumb</code>), hero và section heading.
+      </p>
+    </header>
+
+  <section class="showcase-section" id="layouts">
+    <h3>Layouts</h3>
+    <p>
+      <code>ReportLayout</code> wrap mỗi báo cáo — inject <code>report.css</code>,
+      set <code>&lt;title&gt;</code>. Page tự define <code>&lt;div class="layout"&gt;</code>.
+      <code>IndexLayout</code> dành cho trang landing & showcase.
+    </p>
+    <pre class="example-code"><code>{`import ReportLayout from '../../layouts/ReportLayout.astro';
+
+<ReportLayout title="Tên báo cáo" description="Mô tả ngắn">
+  <div class="layout">
+    <Sidebar ... />
+    <main> ... </main>
+  </div>
+</ReportLayout>`}</code></pre>
+  </section>
+
+  {/* ─────── Breadcrumb ─────── */}
+  <section class="showcase-section" id="breadcrumb">
+    <h3>Breadcrumb</h3>
+    <div class="example-render">
+      <Breadcrumb />
+    </div>
+    <pre class="example-code"><code>{`<Breadcrumb />
+<Breadcrumb href="/" label="Tất cả báo cáo" />`}</code></pre>
+  </section>
+
+  {/* ─────── Sidebar ─────── */}
+  <section class="showcase-section" id="sidebar">
+    <h3>Sidebar</h3>
+    <p>
+      Cột mục lục cố định bên trái. Prop <code>groups</code> là mảng các group,
+      mỗi group có <code>items: {`[{ href, label, section? }]`}</code>.
+      Khi <code>section: true</code>, item được in đậm như heading.
+    </p>
+    <div class="example-render sidebar-demo">
+      <Sidebar
+        intro="Mục lục demo"
+        groups={[
+          { title: 'Mở đầu', items: [{ href: '#intro', label: 'Tổng quan', section: true }] },
+          {
+            title: 'Nhóm A',
+            items: [
+              { href: '#t1', label: '1. Kỹ thuật X' },
+              { href: '#t2', label: '2. Kỹ thuật Y' },
+            ],
+          },
+        ]}
+      />
+    </div>
+    <pre class="example-code"><code>{`<Sidebar
+  intro="Mục lục"
+  groups={[
+    { title: 'Mở đầu', items: [{ href: '#intro', label: 'Tổng quan', section: true }] },
+    { title: 'Nhóm A', items: [
+        { href: '#t1', label: '1. Kỹ thuật X' },
+    ] },
+  ]}
+/>`}</code></pre>
+  </section>
+
+  {/* ─────── Hero ─────── */}
+  <section class="showcase-section" id="hero">
+    <h3>Hero</h3>
+    <div class="example-render">
+      <Hero
+        title="Demo Hero"
+        subtitle="Subtitle có thể chứa <a href='#'>link</a> và <code>inline code</code>."
+        meta={[
+          { label: 'Ngày', value: '2026-04-20' },
+          { label: 'Repo', value: '<code>org/repo</code>' },
+        ]}
+      />
+    </div>
+    <pre class="example-code"><code>{`<Hero
+  title="Tên report"
+  subtitle="Mô tả ngắn, có thể chứa <a> và <code>"
+  meta={[
+    { label: 'Ngày', value: '2026-04-20' },
+    { label: 'Repo', value: '<code>org/repo</code>' },
+  ]}
+/>`}</code></pre>
+  </section>
+
+  {/* ─────── Section ─────── */}
+  <section class="showcase-section" id="section">
+    <h3>Section</h3>
+    <div class="example-render">
+      <Section id="demo-sec" title="Một section h2" themeTag="Demo">
+        <p>Body section. Có thể chứa bất cứ component nào bên trong.</p>
+      </Section>
+    </div>
+    <pre class="example-code"><code>{`<Section id="intro" title="Tổng quan" themeTag="Intro">
+  <p>...</p>
+</Section>`}</code></pre>
+  </section>
+
+  {/* ─────── Subheading ─────── */}
+  <section class="showcase-section" id="subheading">
+    <h3>Subheading</h3>
+    <div class="example-render">
+      <Subheading level="h3" text="h3 Subheading" />
+      <Subheading level="h4" text="h4 Subheading" />
+    </div>
+    <pre class="example-code"><code>{`<Subheading level="h3" text="Cách hoạt động" />
+<Subheading level="h4" text="Chi tiết implementation" id="detail" />`}</code></pre>
+  </section>
+
+  </section>

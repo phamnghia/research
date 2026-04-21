@@ -1,0 +1,118 @@
+---
+/**
+ * Tabs — tab bar + panels với client-side JS toggle.
+ *
+ * Usage: bọc từng panel trong <div data-tab-panel="{id}">
+ *
+ *   <Tabs tabs={[{id:'ts', label:'TypeScript'}, {id:'py', label:'Python'}]}>
+ *     <div data-tab-panel="ts">
+ *       <CodeBlock lang="typescript" code="..." />
+ *     </div>
+ *     <div data-tab-panel="py">
+ *       <CodeBlock lang="python" code="..." />
+ *     </div>
+ *   </Tabs>
+ */
+export interface TabItem {
+  id: string;
+  label: string;
+}
+
+interface Props {
+  tabs: TabItem[];
+}
+
+const { tabs } = Astro.props;
+---
+
+<div class="tabs-root">
+  <div class="tabs-bar" role="tablist">
+    {tabs.map((tab, i) => (
+      <button
+        class={`tab-btn${i === 0 ? ' active' : ''}`}
+        role="tab"
+        aria-selected={i === 0 ? 'true' : 'false'}
+        data-tab-id={tab.id}
+      >
+        {tab.label}
+      </button>
+    ))}
+  </div>
+  <div class="tabs-panels">
+    <slot />
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLElement>('.tabs-root').forEach(root => {
+    const btns = root.querySelectorAll<HTMLButtonElement>('.tab-btn');
+    const panels = root.querySelectorAll<HTMLElement>('[data-tab-panel]');
+
+    // Hide all except first on init
+    panels.forEach((p, i) => {
+      if (i !== 0) p.style.display = 'none';
+    });
+
+    btns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.tabId;
+        btns.forEach(b => {
+          const active = b.dataset.tabId === id;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        panels.forEach(p => {
+          p.style.display = p.dataset.tabPanel === id ? '' : 'none';
+        });
+      });
+    });
+  });
+</script>
+
+<style>
+  .tabs-root {
+    margin: 16px 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--bg-elev);
+  }
+
+  .tabs-bar {
+    display: flex;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs-bar::-webkit-scrollbar { display: none; }
+
+  .tab-btn {
+    flex-shrink: 0;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    background: transparent;
+    color: var(--text-muted);
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: var(--text-bright); }
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .tabs-panels {
+    padding: 16px;
+  }
+
+  .tabs-panels :global([data-tab-panel]) {
+    /* panels managed by JS display toggle */
+  }
+</style>

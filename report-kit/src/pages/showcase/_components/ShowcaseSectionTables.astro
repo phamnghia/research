@@ -1,0 +1,104 @@
+---
+import SummaryTable from '../../../components/SummaryTable.astro';
+import DataTable from '../../../components/DataTable.astro';
+import CompareMatrix from '../../../components/CompareMatrix.astro';
+import StatGrid from '../../../components/StatGrid.astro';
+---
+
+  <section class="component-group" id="group-tables">
+    <header class="component-group__header">
+      <h2>Bảng &amp; số liệu tĩnh</h2>
+      <p>Tóm tắt hàng, bảng so sánh, ma trận tính năng và thẻ metric.</p>
+    </header>
+
+  {/* ─────── SummaryTable ─────── */}
+  <section class="showcase-section" id="summarytable">
+    <h3>SummaryTable</h3>
+    <div class="example-render">
+      <SummaryTable
+        rows={[
+          { id: 'A.1', title: '<a href="#">Kỹ thuật X</a>', chipLabel: 'Loop', chipVariant: 'green' },
+          { id: 'A.2', title: '<a href="#">Kỹ thuật Y</a>', chipLabel: 'Context', chipVariant: 'amber' },
+          { id: 'B.1', title: '<a href="#">Kỹ thuật Z</a>', chipLabel: 'UNIQUE', chipVariant: 'unique' },
+        ]}
+      />
+    </div>
+    <pre class="example-code"><code>{`<SummaryTable
+  headers={['ID', 'Kỹ thuật', 'Theme']}
+  rows={[
+    { id: 'A.1', title: '<a href="#t1">...</a>', chipLabel: 'Loop', chipVariant: 'green' },
+  ]}
+/>`}</code></pre>
+  </section>
+
+  {/* ─────── DataTable ─────── */}
+  <section class="showcase-section" id="datatable">
+    <h3>DataTable</h3>
+    <div class="example-render">
+      <DataTable
+        variant="compare"
+        richCells
+        headers={['Aspect', 'Project A', 'Project B']}
+        rows={[
+          ['Language', '<code>TypeScript</code>', '<code>Python</code>'],
+          ['Multi-agent', 'Task tool', '<strong>Subprocess swarm</strong>'],
+        ]}
+      />
+    </div>
+    <pre class="example-code"><code>{`<DataTable
+  variant="compare"
+  richCells
+  headers={['Aspect', 'A', 'B']}
+  rows={[
+    ['Language', '<code>TS</code>', '<code>Python</code>'],
+  ]}
+/>`}</code></pre>
+  </section>
+
+  {/* ─────── CompareMatrix ─────── */}
+  <section class="showcase-section" id="comparematrix">
+    <h3>CompareMatrix</h3>
+    <p>Feature matrix với ✓/✗/~ color-coded. Đẹp hơn DataTable khi so sánh feature support. Values: <code>'yes'</code> | <code>'no'</code> | <code>'partial'</code> | <code>'na'</code> | string tùy ý.</p>
+    <div class="example-render">
+      <CompareMatrix
+        features={['Text import', 'Template vars', 'Type-safe schema', 'A/B test prompt']}
+        subjects={['opencode', 'Claude Code', 'Aider', 'OpenHarness']}
+        cells={[
+          [{value:'yes'}, {value:'no'}, {value:'no'}, {value:'no'}],
+          [{value:'yes'}, {value:'partial', note:'f-string'}, {value:'no'}, {value:'partial', note:'f-string'}],
+          [{value:'yes'}, {value:'yes'}, {value:'no'}, {value:'no'}],
+          [{value:'yes'}, {value:'partial'}, {value:'no'}, {value:'no'}],
+        ]}
+        caption="So sánh quản lý tool description giữa các harness"
+      />
+    </div>
+    <pre class="example-code"><code>{`<CompareMatrix
+  features={['Feature A', 'Feature B']}
+  subjects={['Tool 1', 'Tool 2']}
+  cells={[
+    [{value:'yes'}, {value:'no'}],
+    [{value:'partial', note:'caveat'}, {value:'yes'}],
+  ]}
+/>`}</code></pre>
+  </section>
+
+  {/* ─────── StatGrid ─────── */}
+  <section class="showcase-section" id="statgrid">
+    <h3>StatGrid</h3>
+    <p>Grid metric cards — big number + label + note tùy chọn. Variants: <code>green</code>, <code>amber</code>, <code>red</code>, <code>purple</code>, <code>cyan</code>. Dùng ở intro section.</p>
+    <div class="example-render">
+      <StatGrid stats={[
+        { value: '28', label: 'Kỹ thuật', note: 'phân tích chi tiết' },
+        { value: '6', label: 'Nhóm chủ đề', variant: 'green' },
+        { value: '3', label: 'Deep dives', variant: 'cyan' },
+        { value: '94%', label: 'Tool coverage', variant: 'amber' },
+      ]} columns={4} />
+    </div>
+    <pre class="example-code"><code>{`<StatGrid stats={[
+  { value: '28', label: 'Kỹ thuật', note: 'phân tích chi tiết' },
+  { value: '6', label: 'Nhóm', variant: 'green' },
+  { value: '94%', label: 'Coverage', variant: 'amber' },
+]} columns={3} />`}</code></pre>
+  </section>
+
+  </section>

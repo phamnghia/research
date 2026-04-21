@@ -1,0 +1,128 @@
+---
+/**
+ * Timeline — vertical timeline với dot markers và connector line.
+ * Dùng cho lịch sử phát triển, evolution of techniques, chronological steps.
+ *
+ * Props:
+ *   - items: TimelineItem[]
+ */
+export interface TimelineItem {
+  date?: string;
+  title: string;
+  description: string;
+  tag?: string;
+}
+
+interface Props {
+  items: TimelineItem[];
+}
+
+const { items } = Astro.props;
+---
+
+<div class="timeline">
+  {items.map((item, i) => (
+    <div class="tl-item">
+      <div class="tl-left">
+        {item.date && <span class="tl-date">{item.date}</span>}
+        <div class="tl-dot" />
+        {i < items.length - 1 && <div class="tl-line" />}
+      </div>
+      <div class="tl-content">
+        <div class="tl-head">
+          <span class="tl-title">{item.title}</span>
+          {item.tag && <span class="tl-tag">{item.tag}</span>}
+        </div>
+        <p class="tl-desc">{item.description}</p>
+      </div>
+    </div>
+  ))}
+</div>
+
+<style>
+  .timeline {
+    margin: 20px 0;
+    padding: 0;
+  }
+
+  .tl-item {
+    display: flex;
+    gap: 20px;
+    min-height: 60px;
+  }
+
+  .tl-left {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+    width: 72px;
+  }
+
+  .tl-date {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+    margin-bottom: 8px;
+    text-align: center;
+    letter-spacing: 0.3px;
+  }
+
+  .tl-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 0 2px var(--accent);
+    flex-shrink: 0;
+  }
+
+  .tl-line {
+    flex: 1;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--accent), color-mix(in srgb, var(--accent) 20%, var(--border)));
+    margin-top: 4px;
+    min-height: 24px;
+  }
+
+  .tl-content {
+    padding: 0 0 28px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .tl-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+
+  .tl-title {
+    font-weight: 700;
+    font-size: 14.5px;
+    color: var(--text-bright);
+  }
+
+  .tl-tag {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev));
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+    padding: 2px 7px;
+    border-radius: 8px;
+  }
+
+  .tl-desc {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+</style>

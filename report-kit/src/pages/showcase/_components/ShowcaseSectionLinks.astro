@@ -1,0 +1,71 @@
+---
+import DeepDiveLink from '../../../components/DeepDiveLink.astro';
+import RefList from '../../../components/RefList.astro';
+import LinkList from '../../../components/LinkList.astro';
+---
+
+  <section class="component-group" id="group-links">
+    <header class="component-group__header">
+      <h2>Liên kết &amp; điều hướng</h2>
+      <p>Tham khảo, link đọc thêm và deep dive.</p>
+    </header>
+
+  {/* ─────── DeepDiveLink ─────── */}
+  <section class="showcase-section" id="deepdivelink">
+    <h3>DeepDiveLink</h3>
+    <p class="tip">
+      Nút/link tới trang phân tích sâu từng technique (báo cáo opencode). Viền nét đứt + halo gradient
+      nhẹ (accent → purple → cyan).
+    </p>
+    <div class="example-render">
+      <DeepDiveLink href="/reports/opencode/t2/">
+        Phân tích sâu T2: event types, Effect.Stream, UI real-time update, cancel semantics
+      </DeepDiveLink>
+    </div>
+    <pre class="example-code"><code>{`<DeepDiveLink href="/reports/opencode/t2/">
+  Phân tích sâu T2: …mô tả ngắn…
+</DeepDiveLink>`}</code></pre>
+  </section>
+
+  {/* ─────── RefList ─────── */}
+  <section class="showcase-section" id="reflist">
+    <h3>RefList</h3>
+    <div class="example-render">
+      <RefList
+        items={[
+          '<a href="https://example.com/a">Bài A — Tác giả</a>',
+          '<a href="https://example.com/b">Bài B — Tác giả khác</a>',
+        ]}
+      />
+    </div>
+    <pre class="example-code"><code>{`<RefList
+  title="Tham khảo"
+  items={[
+    '<a href="https://...">Bài A — Tác giả</a>',
+    '<a href="https://...">Bài B</a>',
+  ]}
+/>`}</code></pre>
+  </section>
+
+  {/* ─────── LinkList ─────── */}
+  <section class="showcase-section" id="linklist">
+    <h3>LinkList</h3>
+    <div class="example-render">
+      <LinkList
+        title="Link đọc thêm"
+        items={[
+          '<a href="https://martinfowler.com/articles/harness-engineering.html">Martin Fowler — Harness Engineering</a>',
+          '<a href="https://openai.com/index/harness-engineering/">OpenAI — Harness engineering</a>',
+        ]}
+      />
+    </div>
+    <pre class="example-code"><code>{`<LinkList
+  title="Link đọc thêm"
+  items={[
+    '<a href="...">Link 1</a>',
+    '<a href="...">Link 2</a>',
+  ]}
+/>`}</code></pre>
+  </section>
+
+  </section>

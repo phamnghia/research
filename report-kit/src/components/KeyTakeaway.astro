@@ -1,0 +1,89 @@
+---
+/**
+ * KeyTakeaway — hộp tóm tắt điểm chính cuối section.
+ * Mỗi item render với checkmark ✓, hỗ trợ HTML trong từng item.
+ *
+ * Props:
+ *   - items: string[] — mỗi item là HTML string (set:html)
+ *   - title?: string — tiêu đề hộp (default: 'Điểm chính')
+ */
+interface Props {
+  items: string[];
+  title?: string;
+}
+
+const { items, title = 'Điểm chính' } = Astro.props;
+---
+
+<div class="key-takeaway">
+  <div class="kt-header">
+    <span class="kt-icon" aria-hidden="true">✦</span>
+    <span class="kt-title">{title}</span>
+  </div>
+  <ul class="kt-list">
+    {items.map(item => (
+      <li class="kt-item">
+        <span class="kt-check" aria-hidden="true">✓</span>
+        <span set:html={item} />
+      </li>
+    ))}
+  </ul>
+</div>
+
+<style>
+  .key-takeaway {
+    margin: 24px 0;
+    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+    background: color-mix(in srgb, var(--accent) 6%, var(--bg-elev));
+    overflow: hidden;
+  }
+
+  .kt-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev));
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  }
+
+  .kt-icon {
+    color: var(--accent);
+    font-size: 12px;
+  }
+
+  .kt-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--accent);
+  }
+
+  .kt-list {
+    list-style: none;
+    margin: 0;
+    padding: 12px 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .kt-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text);
+  }
+
+  .kt-check {
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+</style>

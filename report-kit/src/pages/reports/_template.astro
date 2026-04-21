@@ -38,6 +38,18 @@ import LinkList from '../../components/LinkList.astro';
 import WhyImportant from '../../components/WhyImportant.astro';
 import ReportImage from '../../components/ReportImage.astro';
 import DeepDiveLink from '../../components/DeepDiveLink.astro';
+// ── New components (import khi cần) ──────────────────────────────────────
+import Accordion from '../../components/Accordion.astro';
+import KeyTakeaway from '../../components/KeyTakeaway.astro';
+import QuoteBlock from '../../components/QuoteBlock.astro';
+import StatGrid from '../../components/StatGrid.astro';
+import Timeline from '../../components/Timeline.astro';
+import StepList from '../../components/StepList.astro';
+import CompareMatrix from '../../components/CompareMatrix.astro';
+import TreeView from '../../components/TreeView.astro';
+import Tabs from '../../components/Tabs.astro';
+import RelatedCards from '../../components/RelatedCards.astro';
+import MermaidDiagram from '../../components/MermaidDiagram.astro';
 
 const title = '<Tên báo cáo>';
 const description = '<Mô tả ngắn 1-2 câu, sẽ hiển thị ở <meta name="description">>';
@@ -259,6 +271,22 @@ async function runLoop(session) {
       <Section id="wrap" title="Tổng kết" themeTag="Wrap">
         <p>Nhận định cuối + recommendation. Có thể tiếp nối với RefList tổng.</p>
 
+        {/*
+          ── KeyTakeaway: tóm tắt điểm chính ──
+          Đặt trước RefList để close section đẹp.
+        */}
+        {/* <KeyTakeaway items={[
+          'Điểm chính 1 — dùng <strong>bold</strong> để nhấn mạnh',
+          'Điểm chính 2 — hỗ trợ <code>code</code> inline',
+        ]} /> */}
+
+        {/*
+          ── RelatedCards: link tới báo cáo / deep dive liên quan ──
+        */}
+        {/* <RelatedCards title="Báo cáo liên quan" cards={[
+          { href: '/reports/opencode/', title: 'opencode', description: '28 kỹ thuật', tag: 'Harness' },
+        ]} /> */}
+
         <RefList
           title="Tham khảo tổng"
           items={[
@@ -267,6 +295,81 @@ async function runLoop(session) {
           ]}
         />
       </Section>
+
+      {/*
+        ═══════════════════════════════════════════════════════════════
+        VÍ DỤ CÁC COMPONENT MỚI — uncomment khi cần dùng
+        ═══════════════════════════════════════════════════════════════
+
+        ── StatGrid ── key metrics ở đầu intro section
+        <StatGrid stats={[
+          { value: '28', label: 'Kỹ thuật', note: 'phân tích chi tiết' },
+          { value: '6', label: 'Nhóm', variant: 'green' },
+          { value: '3', label: 'Deep dives', variant: 'cyan' },
+        ]} />
+
+        ── Accordion ── collapse failure modes / recipe / FAQ
+        <Accordion title="Failure modes & edge cases">
+          <p>...</p>
+        </Accordion>
+
+        ── QuoteBlock ── pull quote từ paper/blog
+        <QuoteBlock
+          quote="..."
+          author="Author Name"
+          source="https://..."
+          sourceLabel="Tên bài viết"
+        />
+
+        ── StepList ── implementation recipe dạng steps
+        <StepList steps={[
+          { title: 'Bước 1', description: 'Mô tả', code: 'npm install', lang: 'bash' },
+          { title: 'Bước 2', description: 'Mô tả tiếp' },
+        ]} />
+
+        ── CompareMatrix ── so sánh feature ✓/✗/~
+        <CompareMatrix
+          features={['Feature A', 'Feature B']}
+          subjects={['Tool 1', 'Tool 2', 'Tool 3']}
+          cells={[
+            [{value:'yes'}, {value:'no'}, {value:'partial'}],
+            [{value:'yes'}, {value:'yes'}, {value:'na'}],
+          ]}
+        />
+
+        ── TreeView ── folder structure
+        <TreeView tree={`
+src/
+  agent/
+    loop.ts
+  tools/
+    bash.ts
+    bash.txt
+`} />
+
+        ── Tabs ── multi-language code comparison
+        <Tabs tabs={[{id:'ts', label:'TypeScript'}, {id:'py', label:'Python'}]}>
+          <div data-tab-panel="ts">
+            <CodeBlock lang="typescript" code="..." />
+          </div>
+          <div data-tab-panel="py">
+            <CodeBlock lang="python" code="..." />
+          </div>
+        </Tabs>
+
+        ── Timeline ── evolution / chronology
+        <Timeline items={[
+          { date: '2024-Q1', title: 'Milestone', description: '...', tag: 'Label' },
+        ]} />
+
+        ── MermaidDiagram ── architecture/flow diagram
+        <MermaidDiagram
+          chart={`graph TD
+            A[Input] --> B{Decision}
+            B -- yes --> C[Action]`}
+          caption="Caption mô tả diagram"
+        />
+      */}
     </main>
   </div>
 </ReportLayout>

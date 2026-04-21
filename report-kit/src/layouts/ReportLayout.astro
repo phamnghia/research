@@ -23,3 +23,45 @@ const { title, description = '', lang = 'vi' } = Astro.props;
   <slot />
 </body>
 </html>
+
+<script>
+  // Sidebar active section tracking via IntersectionObserver
+  (function () {
+    const aside = document.querySelector('aside');
+    if (!aside) return;
+
+    const sections = Array.from(document.querySelectorAll<HTMLElement>('main section[id]'));
+    if (!sections.length) return;
+
+    const links = Array.from(aside.querySelectorAll<HTMLAnchorElement>('a[href^="#"]'));
+    if (!links.length) return;
+
+    function setActive(id: string) {
+      links.forEach(a => {
+        const match = a.getAttribute('href') === '#' + id;
+        a.classList.toggle('active', match);
+      });
+    }
+
+    // Mark first section active immediately
+    if (sections[0]) setActive(sections[0].id);
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Find the topmost visible section
+        const visible = entries
+          .filter(e => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible.length > 0) {
+          setActive((visible[0].target as HTMLElement).id);
+        }
+      },
+      {
+        rootMargin: '-8% 0px -70% 0px',
+        threshold: 0,
+      }
+    );
+
+    sections.forEach(s => observer.observe(s));
+  })();
+</script>
