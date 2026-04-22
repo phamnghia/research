@@ -1,0 +1,315 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RefList from '../../../components/RefList.astro';
+import DataTable from '../../../components/DataTable.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+import ReportImage from '../../../components/ReportImage.astro';
+import KeyTakeaway from '../../../components/KeyTakeaway.astro';
+
+const title = 'Deep Dive: LightRAG Retrieval & Query Modes';
+const description = 'Phân tích retrieval của LightRAG: QueryParam modes, low/high keywords, local/global/hybrid/mix, vector chunks, token truncation, context build, rerank và references.';
+---
+
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar
+      intro="Retrieval"
+      groups={[
+        {
+          title: 'Context',
+          items: [
+            { href: '#intro', label: 'Tổng quan', section: true },
+            { href: '#modes', label: 'Query modes' },
+          ],
+        },
+        {
+          title: 'Core',
+          items: [
+            { href: '#t1', label: '1. Keyword extraction' },
+            { href: '#t2', label: '2. Local/global branches' },
+            { href: '#t3', label: '3. Mix mode' },
+            { href: '#t4', label: '4. Context compiler' },
+            { href: '#t5', label: '5. Rerank + references' },
+          ],
+        },
+        {
+          title: 'Kết luận',
+          items: [
+            { href: '#pitfalls', label: 'Failure modes', section: true },
+            { href: '#wrap', label: 'Tổng kết', section: true },
+          ],
+        },
+      ]}
+    />
+
+    <main>
+      <Breadcrumb href="/reports/lightrag/" label="← LightRAG Overview" />
+
+      <Hero
+        title={title}
+        subtitle={`Phân tích chi tiết từ báo cáo <a href="/reports/lightrag/">Tổng quan LightRAG</a> — từ user query đến final prompt/context.`}
+        meta={[
+          { label: 'Báo cáo cha', value: '<a href="/reports/lightrag/">← LightRAG Overview</a>' },
+          { label: 'Topic', value: 'Retrieval' },
+          { label: 'Default mode', value: '<code>mix</code>' },
+          { label: 'Ngày', value: '2026-04-22' },
+        ]}
+      />
+
+      <Section id="intro" title="Tổng quan" themeTag="Intro">
+        <p>
+          Retrieval là phần LightRAG biến graph artifact thành context cho LLM. Query được phân tích thành
+          low-level keywords và high-level keywords, tìm candidates trong entity/relationship vector stores,
+          bổ sung neighbors/chunks từ graph, rồi compile thành context có token budget.
+        </p>
+
+        <ReportImage
+          src="https://learnopencv.com/wp-content/uploads/2024/11/LightRAG-Querying-Flowchart-Dual-Level-Retrieval-Generation-Knowledge-Graphs-scaled.jpg"
+          alt="LightRAG retrieval flowchart mô tả query, low-level retrieval, high-level retrieval, knowledge graph, text chunks và answer generation"
+          caption="Retrieval flow: query không đi thẳng vào chunks; nó đi qua keyword extraction, entity/relation retrieval, graph context và vector chunks."
+          source="https://learnopencv.com/lightrag/"
+          sourceLabel="LearnOpenCV"
+          bordered={true}
+        />
+
+        <Callout type="info">
+          <strong>Docs và source có một khác biệt đáng chú ý:</strong> một số docs cũ mô tả default mode là
+          <code>global</code>, nhưng source snapshot <code>v1.4.15</code> đặt <code>QueryParam.mode = "mix"</code>.
+          Khi viết app, hãy kiểm tra source/package version thay vì chỉ dựa vào snippet cũ.
+        </Callout>
+      </Section>
+
+      <Section id="modes" title="Query modes" themeTag="Modes">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Mode', 'Retrieval source', 'Nên dùng khi nào', 'Rủi ro']}
+          rows={[
+            ['<code>naive</code>', 'Direct vector chunks', 'Baseline nhanh, corpus nhỏ, debug vector search', 'Bỏ qua entity/relation graph'],
+            ['<code>local</code>', 'Entity VDB + related graph data', 'Câu hỏi detail về entity cụ thể', 'Có thể thiếu broader context'],
+            ['<code>global</code>', 'Relationship VDB + related entities', 'Câu hỏi topic/theme rộng', 'Có thể thiếu fact cụ thể'],
+            ['<code>hybrid</code>', 'Local + global graph branches', 'Cân bằng entity và relationship', 'Không lấy direct vector chunks như mix'],
+            ['<code>mix</code>', 'Hybrid graph + direct vector chunks', 'Default thực dụng cho production', 'Nhiều candidates hơn, cần rerank/token control'],
+            ['<code>bypass</code>', 'Không retrieval', 'Test LLM hoặc custom prompt', 'Không grounded vào corpus'],
+          ]}
+        />
+
+        <ReportImage
+          src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/README.assets/b2aaf634151b4706892693ffb43d9093.png"
+          alt="Kiến trúc LightRAG cho thấy low-level keys và high-level keys trong dual-level retrieval"
+          caption="Dual-level retrieval trong architecture diagram: entity keys phục vụ local detail, relation/theme keys phục vụ global abstraction."
+          source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/README.md"
+          sourceLabel="HKUDS/LightRAG README"
+          bordered={true}
+        />
+      </Section>
+
+      <Section id="core" title="Retrieval internals" themeTag="Code">
+        <Technique id="t1" title="1. Keyword extraction tách low-level và high-level intent" tid="R.1" location="lightrag/operate.py:get_keywords_from_query">
+          <WhyImportant>
+            <strong>LightRAG không search bằng raw query duy nhất.</strong> Nó chuyển query thành hai nhóm keywords
+            để điều hướng retrieval: low-level cho entity cụ thể, high-level cho relationships/themes.
+          </WhyImportant>
+
+          <Diagram>{`
+User query:
+  "How do electric vehicles affect urban air quality and transportation infrastructure?"
+
+Low-level keywords:
+  electric vehicles, urban air quality, transportation infrastructure
+
+High-level keywords:
+  environmental impact, infrastructure planning, policy trade-offs
+          `}</Diagram>
+
+          <ProsCons
+            pros={[
+              'Tách intent giúp local/global branches hoạt động đúng vai trò.',
+              'Có thể truyền sẵn <code>hl_keywords</code>/<code>ll_keywords</code> trong QueryParam để debug.',
+              'Giảm phụ thuộc vào một vector query duy nhất.',
+            ]}
+            cons={[
+              'Thêm LLM call trước retrieval nếu keywords không được truyền sẵn.',
+              'Keyword extraction sai sẽ kéo sai candidate graph.',
+              'Cần prompt/model đủ tốt cho domain-specific terminology.',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t2" title="2. Local/global branches truy vấn entity và relationship VDB" tid="R.2" location="lightrag/operate.py:_perform_kg_search">
+          <WhyImportant>
+            <strong>Graph retrieval vẫn bắt đầu bằng vector search.</strong> LightRAG không brute-force graph.
+            Nó dùng vector DB để chọn entity/relation candidates, sau đó mới dùng graph để mở rộng context.
+          </WhyImportant>
+
+          <CodeBlock caption="Branch selection trong _perform_kg_search" lang="python">
+            <Fragment is:raw>
+if query_param.mode == "local" and len(ll_keywords) > 0:
+    local_entities, local_relations = await _get_node_data(
+        ll_keywords,
+        knowledge_graph_inst,
+        entities_vdb,
+        query_param,
+        query_embedding=ll_embedding,
+    )
+elif query_param.mode == "global" and len(hl_keywords) > 0:
+    global_relations, global_entities = await _get_edge_data(
+        hl_keywords,
+        knowledge_graph_inst,
+        relationships_vdb,
+        query_param,
+        query_embedding=hl_embedding,
+    )
+else:
+    # hybrid or mix: run both branches
+            </Fragment>
+          </CodeBlock>
+
+          <Callout type="unique">
+            <strong>Tối ưu đáng chú ý:</strong> source batch pre-compute embeddings cho query, low-level keywords
+            và high-level keywords trong một call nếu cần. Điều này tránh 2-3 round-trip embedding tuần tự.
+          </Callout>
+        </Technique>
+
+        <Technique id="t3" title="3. Mix mode thêm vector chunks và round-robin merge" tid="R.3" location="lightrag/operate.py:3694-4053">
+          <WhyImportant>
+            <strong><code>mix</code> giữ lại lợi ích của NaiveRAG.</strong> Dù graph có ích, nhiều câu hỏi vẫn cần
+            đoạn text raw. Mix mode lấy thêm chunks từ <code>chunks_vdb</code>, rồi merge với chunks liên quan
+            đến entities và relations.
+          </WhyImportant>
+
+          <CodeBlock caption="Round-robin merge chunks từ ba nguồn" lang="python">
+            <Fragment is:raw>
+max_len = max(len(vector_chunks), len(entity_chunks), len(relation_chunks))
+for i in range(max_len):
+    if i < len(vector_chunks):
+        # source C: direct vector chunk
+        merged_chunks.append(vector_chunks[i])
+    if i < len(entity_chunks):
+        # source E: entity-related chunk
+        merged_chunks.append(entity_chunks[i])
+    if i < len(relation_chunks):
+        # source R: relation-related chunk
+        merged_chunks.append(relation_chunks[i])
+            </Fragment>
+          </CodeBlock>
+
+          <DataTable
+            richCells
+            headers={['Source', 'Trong log', 'Ý nghĩa']}
+            rows={[
+              ['Direct vector chunks', '<code>C</code>', 'Semantic chunks từ raw query, giống NaiveRAG branch'],
+              ['Entity-related chunks', '<code>E</code>', 'Chunks liên quan đến entity candidates từ local branch'],
+              ['Relation-related chunks', '<code>R</code>', 'Chunks liên quan đến relation candidates từ global branch'],
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t4" title="4. Context compiler áp token budget theo stage" tid="R.4" location="lightrag/operate.py:_build_query_context, _build_context_str">
+          <WhyImportant>
+            <strong>Candidate nhiều không đồng nghĩa context tốt.</strong> LightRAG tách search và context build.
+            Sau khi có entity/relation/chunk candidates, nó truncate theo token budget rồi build prompt cuối.
+          </WhyImportant>
+
+          <CodeBlock caption="4-stage query context architecture" lang="python">
+            <Fragment is:raw>
+# _build_query_context()
+search_result = await _perform_kg_search(...)
+truncation_result = await _apply_token_truncation(search_result, query_param, ...)
+merged_chunks = await _merge_all_chunks(
+    filtered_entities=truncation_result["filtered_entities"],
+    filtered_relations=truncation_result["filtered_relations"],
+    vector_chunks=search_result["vector_chunks"],
+    ...
+)
+context, raw_data = await _build_context_str(
+    truncation_result["entities_context"],
+    truncation_result["relations_context"],
+    merged_chunks,
+    query,
+    query_param,
+    ...
+)
+            </Fragment>
+          </CodeBlock>
+
+          <Callout type="info">
+            <strong>Debug tip:</strong> dùng <code>only_need_context=True</code> để xem context thật trước khi LLM
+            generate answer. Đây là cách nhanh nhất để biết lỗi nằm ở retrieval hay generation.
+          </Callout>
+        </Technique>
+
+        <Technique id="t5" title="5. Rerank và references là quality/trace layer" tid="R.5" location="lightrag/rerank.py; docs/AdvancedFeatures.md">
+          <WhyImportant>
+            <strong>Rerank giúp mix mode không bị quá rộng.</strong> Khi retrieval lấy candidates từ graph và chunks,
+            reranker có thể lọc lại chunks trước khi đưa vào LLM. References giúp response có trace về source path.
+          </WhyImportant>
+
+          <ReportImage
+            src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/docs/LightRAG-API-Server.assets/image-20250323122754387.png"
+            alt="LightRAG WebUI screenshot hiển thị graph/query interaction"
+            caption="WebUI/API là nơi hữu ích để kiểm tra retrieved context và graph query behavior trước khi nhúng vào app."
+            source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/LightRAG-API-Server.md"
+            sourceLabel="LightRAG API Server docs"
+            bordered={true}
+          />
+
+          <CodeBlock caption="Rerank chunking guard" lang="python">
+            <Fragment is:raw>
+if enable_chunking:
+    documents, doc_indices = chunk_documents_for_rerank(
+        documents, max_tokens=max_tokens_per_doc
+    )
+    if top_n is not None:
+        top_n = None  # aggregate document scores after chunk-level rerank
+            </Fragment>
+          </CodeBlock>
+        </Technique>
+      </Section>
+
+      <Section id="pitfalls" title="Failure modes" themeTag="Pitfalls">
+        <DataTable
+          richCells
+          headers={['Failure mode', 'Triệu chứng', 'Cách xử lý']}
+          rows={[
+            ['Keyword extraction lệch', 'Context trả entity/relation không liên quan', 'Log/inspect <code>hl_keywords</code>/<code>ll_keywords</code>, thử truyền keywords thủ công'],
+            ['Entity aliases phân mảnh', 'Graph có nhiều node gần trùng nghĩa', 'Tighten entity types/prompt; review graph bằng WebUI; cân nhắc normalization ngoài pipeline'],
+            ['Chunks chiếm hết context', 'Answer giống NaiveRAG, ít relation reasoning', 'Giảm <code>chunk_top_k</code>, bật rerank, tăng budget cho entity/relation'],
+            ['Relation VDB noisy', 'High-level query trả broad nhưng shallow', 'Tune extraction prompt/model; kiểm tra relation keywords và description'],
+            ['Embedding mismatch', 'Query lỗi schema/dimension hoặc trả kết quả rỗng', 'Không đổi embedding sau index; recreate vector storage nếu đổi model'],
+          ]}
+        />
+      </Section>
+
+      <Section id="wrap" title="Tổng kết" themeTag="Wrap">
+        <KeyTakeaway
+          title="Retrieval takeaways"
+          items={[
+            '<code>mix</code> là mode nên bắt đầu vì kết hợp graph và vector chunks.',
+            'LightRAG query context là pipeline 4 stage; debug từng stage sẽ nhanh hơn debug answer cuối.',
+            'Rerank không phải garnish; với corpus lớn, nó là quality gate để giảm noise.',
+            'Nếu query cần exact audit, luôn inspect references/raw context trước khi tin output.',
+          ]}
+        />
+
+        <RefList items={[
+          '<a href="https://aclanthology.org/2025.findings-emnlp.568.pdf">LightRAG paper PDF — dual-level retrieval</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/base.py">base.py — QueryParam</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/operate.py">operate.py — query context pipeline</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/rerank.py">rerank.py</a>',
+        ]} />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>
+

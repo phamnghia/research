@@ -1,6 +1,6 @@
 # Index — Mục lục nghiên cứu
 
-> Cập nhật lần cuối: 2026-04-20
+> Cập nhật lần cuối: 2026-04-22
 
 File này là "bản đồ" của toàn bộ workspace. Mỗi khi thêm topic hoặc bài tổng hợp lớn, cập nhật ở đây.
 
@@ -31,6 +31,11 @@ Thêm báo cáo mới → xem [`../.claude/skills/build-report/SKILL.md`](../.cl
 
 | Slug | Trạng thái | Mục tiêu | Canonical | Research notes | Bản gốc (archive) | Cập nhật |
 |------|------------|----------|-----------|----------------|-------------------|----------|
+| `lightrag` | `stable` | Overview LightRAG của HKUDS: cách tiếp cận, cài đặt, ứng dụng, graph-based indexing, dual-level retrieval, storage/API và vận hành production | [`reports/lightrag/index.astro`](../report-kit/src/pages/reports/lightrag/index.astro) | [`research/lightrag/`](../report-kit/research/lightrag/) | — | 2026-04-22 |
+| `lightrag/indexing` | `stable` | Deep dive: chunking, entity/relation extraction, parser hardening, merge, source tracking, vector upsert và incremental update | [`reports/lightrag/indexing.astro`](../report-kit/src/pages/reports/lightrag/indexing.astro) | [`research/lightrag/deep-dives/indexing/`](../report-kit/research/lightrag/deep-dives/indexing/) | — | 2026-04-22 |
+| `lightrag/retrieval` | `stable` | Deep dive: QueryParam modes, low/high keywords, local/global/hybrid/mix, vector chunks, token truncation, context build, rerank và references | [`reports/lightrag/retrieval.astro`](../report-kit/src/pages/reports/lightrag/retrieval.astro) | [`research/lightrag/deep-dives/retrieval/`](../report-kit/research/lightrag/deep-dives/retrieval/) | — | 2026-04-22 |
+| `lightrag/storage-api` | `stable` | Deep dive: storage abstraction, Server/API/WebUI, setup wizard, Docker deployment và backend selection | [`reports/lightrag/storage-api.astro`](../report-kit/src/pages/reports/lightrag/storage-api.astro) | [`research/lightrag/deep-dives/storage-api/`](../report-kit/research/lightrag/deep-dives/storage-api/) | — | 2026-04-22 |
+| `lightrag/operations` | `stable` | Deep dive: concurrency hierarchy, global LLM priority queue, deletion/rebuild, cache, token tracking, Langfuse, RAGAS và failure modes | [`reports/lightrag/operations.astro`](../report-kit/src/pages/reports/lightrag/operations.astro) | [`research/lightrag/deep-dives/operations/`](../report-kit/research/lightrag/deep-dives/operations/) | — | 2026-04-22 |
 | `opencode` | `stable` | Hiểu sâu 28 kỹ thuật harness của sst/opencode; có code + pros/cons | [`reports/opencode/index.astro`](../report-kit/src/pages/reports/opencode/index.astro) | [`research/opencode-harness/`](../report-kit/research/opencode-harness/) | [`archive/opencode-harness-report.html`](../archive/opencode-harness-report.html) | 2026-04-20 |
 | `opencode/t13` | `stable` | Deep dive: Tool description .txt pattern — tách description ra file .txt với template variable injection | [`reports/opencode/t13/index.astro`](../report-kit/src/pages/reports/opencode/t13/index.astro) | — | — | 2026-04-20 |
 | `opencode/t14` | `stable` | Deep dive: Effect-based lazy tool init với service injection — Tool.define() + wrap() OTel | [`reports/opencode/t14/index.astro`](../report-kit/src/pages/reports/opencode/t14/index.astro) | — | — | 2026-04-20 |
@@ -57,6 +62,9 @@ Thêm báo cáo mới → xem [`../.claude/skills/build-report/SKILL.md`](../.cl
 
 ## Ghi chú lẻ đáng chú ý
 
+- **LightRAG = graph artifact builder + query context compiler**. Điểm đáng học nhất không phải WebUI mà là pipeline: chunk → entity/relation extraction → graph/vector upsert → query modes (`local/global/hybrid/mix`) → token-budgeted context. Snapshot nghiên cứu: `HKUDS/LightRAG` `v1.4.15` (`64d3326`).
+- **LightRAG phù hợp corpus động hơn GraphRAG-style community reports**. Paper nhấn mạnh incremental update bằng merge graph fragment thay vì rebuild toàn bộ index/community reports; code production bổ sung doc_status, pipeline lock, source_ids và rebuild logic khi delete.
+- **Default query mode trong source hiện là `mix`**. `mix` kết hợp local/global graph retrieval với direct vector chunks; đây là mode nên bắt đầu khi prototype thay vì chọn `local`/`global` quá sớm.
 - **opencode = fork of sst/opencode** — repo `anomalyco/opencode` là fork/mirror. Core stack: TypeScript + Bun + Effect-TS v4 beta + Drizzle + Vercel AI SDK + tree-sitter WASM + Zod.
 - **Effect-TS** là điểm khác biệt lớn so với harness khác (Claude Code, Aider, Cline dùng Promise thuần). Trade-off: onboarding khó hơn nhưng interruption / retry / tracing composable.
 - **HKUDS/OpenHarness = "Python port của Claude Code" + agent organization**. Tech stack: Python 3.10+ asyncio + Pydantic v2 + Typer + dual TUI (Rich/Textual + React Ink) + Anthropic SDK + OpenAI SDK + MCP. Khác biệt lớn nhất vs opencode: multi-agent swarm (subprocess + mailbox + worktree), multi-channel bus (Slack/Feishu/Discord/Telegram/Matrix), Docker sandbox, cron scheduler, AST-based LSP.
@@ -73,6 +81,7 @@ Thêm báo cáo mới → xem [`../.claude/skills/build-report/SKILL.md`](../.cl
 
 ## Thay đổi cấu trúc
 
+- 2026-04-22 — **LightRAG**: Thêm 5 trang mới (1 overview + 4 deep dives) về HKUDS/LightRAG `v1.4.15`: overview có cách tiếp cận, cài đặt, ứng dụng ở đầu; deep dives phủ indexing, retrieval/query modes, storage/API/WebUI và operations/concurrency/evaluation.
 - 2026-04-20 — **Deep dives t13–t28**: Thêm 16 trang phân tích sâu cho opencode — Theme C (Tool Design), D (Provider Abstraction), E (Permission Model), F (System Prompt). Mỗi trang có code anatomy, diagram, failure modes, comparison, implementation recipe.
 - 2026-04-20 — **LLM Wiki**: Thêm 5 trang mới (1 overview + 4 deep dives) về LLM Wiki pattern của Andrej Karpathy (gist April 2026, 16M views). Khám phá: LLM Wiki KHÔNG phải wiki về kỹ thuật LLM mà là pattern xây dựng knowledge base persistent bằng LLM thay thế RAG. Deep dives phủ: architecture 3-layer, LLM Wiki v2 memory tiers (rohitg00/agentmemory), hybrid search BM25+vector+graph (95.2% LongMemEval-S), và implementation guide.
 - 2026-04-20 — **Reorganize**: `topics/` + `sources/` đã gộp vào `report-kit/research/<slug>/`; `artifacts/*.html` đã move vào `archive/`. CLAUDE.md được rewrite để report-kit là canonical (xem [`../CLAUDE.md`](../CLAUDE.md)).

@@ -1,0 +1,333 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RefList from '../../../components/RefList.astro';
+import DataTable from '../../../components/DataTable.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+import ReportImage from '../../../components/ReportImage.astro';
+import KeyTakeaway from '../../../components/KeyTakeaway.astro';
+import StepList from '../../../components/StepList.astro';
+
+const title = 'Deep Dive: LightRAG Storage, API & WebUI';
+const description = 'Phân tích Storage abstraction, Server/API/WebUI, setup wizard, Docker deployment và backend selection của LightRAG v1.4.15.';
+---
+
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar
+      intro="Storage/API"
+      groups={[
+        {
+          title: 'Context',
+          items: [
+            { href: '#intro', label: 'Tổng quan', section: true },
+            { href: '#webui', label: 'WebUI screenshots' },
+          ],
+        },
+        {
+          title: 'Architecture',
+          items: [
+            { href: '#t1', label: '1. Four storage roles' },
+            { href: '#t2', label: '2. Initialization lifecycle' },
+            { href: '#t3', label: '3. Backend selection' },
+            { href: '#t4', label: '4. Server/API/WebUI' },
+            { href: '#t5', label: '5. Deployment config' },
+          ],
+        },
+        {
+          title: 'Kết luận',
+          items: [
+            { href: '#matrix', label: 'Production matrix', section: true },
+            { href: '#wrap', label: 'Tổng kết', section: true },
+          ],
+        },
+      ]}
+    />
+
+    <main>
+      <Breadcrumb href="/reports/lightrag/" label="← LightRAG Overview" />
+
+      <Hero
+        title={title}
+        subtitle={`Phân tích chi tiết từ báo cáo <a href="/reports/lightrag/">Tổng quan LightRAG</a> — storage contracts, backend matrix và deployable server.`}
+        meta={[
+          { label: 'Báo cáo cha', value: '<a href="/reports/lightrag/">← LightRAG Overview</a>' },
+          { label: 'Topic', value: 'Storage/API' },
+          { label: 'Server port default', value: '<code>9621</code>' },
+          { label: 'Ngày', value: '2026-04-22' },
+        ]}
+      />
+
+      <Section id="intro" title="Tổng quan" themeTag="Intro">
+        <p>
+          LightRAG đáng chú ý vì nó không hard-code một database. Core tách bốn vai trò storage:
+          KV, vector, graph và doc-status. Server layer lại đóng gói core thành WebUI/API/Ollama-compatible
+          service, giúp prototype nhanh và deploy như một service riêng.
+        </p>
+
+        <ReportImage
+          src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/docs/LightRAG-API-Server.assets/image-20250323122538997.png"
+          alt="LightRAG API Server WebUI screenshot với giao diện quản lý tài liệu và graph"
+          caption="LightRAG Server WebUI: document indexing, graph exploration và query interface nằm cùng một runtime."
+          source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/LightRAG-API-Server.md"
+          sourceLabel="LightRAG API Server docs"
+          bordered={true}
+        />
+
+        <Callout type="info">
+          <strong>Rule vận hành:</strong> bắt đầu bằng default local storage để kiểm tra graph quality,
+          sau đó mới chuyển backend production. Đừng ingest corpus lớn rồi mới đổi embedding/storage schema.
+        </Callout>
+      </Section>
+
+      <Section id="webui" title="WebUI screenshots" themeTag="UI">
+        <ReportImage
+          src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/docs/LightRAG-API-Server.assets/image-20250323122754387.png"
+          alt="LightRAG WebUI screenshot về graph exploration và query interaction"
+          caption="Graph exploration giúp kiểm tra entity/relation quality sau indexing."
+          source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/LightRAG-API-Server.md"
+          sourceLabel="LightRAG API Server docs"
+          bordered={true}
+        />
+
+        <ReportImage
+          src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/docs/LightRAG-API-Server.assets/image-20250323123011220.png"
+          alt="LightRAG WebUI screenshot về query/document interface"
+          caption="Query/document panels trong WebUI cho phép smoke test API behavior trước khi tích hợp vào app khác."
+          source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/LightRAG-API-Server.md"
+          sourceLabel="LightRAG API Server docs"
+          bordered={true}
+        />
+
+        <ReportImage
+          src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/docs/LightRAG-API-Server.assets/image-20250323194750379.png"
+          alt="LightRAG WebUI screenshot về trạng thái hoặc cấu hình server"
+          caption="Server-side panels hữu ích cho kiểm tra trạng thái vận hành, workspace và cấu hình."
+          source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/LightRAG-API-Server.md"
+          sourceLabel="LightRAG API Server docs"
+          bordered={true}
+        />
+      </Section>
+
+      <Section id="architecture" title="Storage architecture" themeTag="Storage">
+        <Technique id="t1" title="1. Four storage roles tách trách nhiệm rõ" tid="S.1" location="lightrag/lightrag.py:640-737; lightrag/base.py">
+          <WhyImportant>
+            <strong>RAG production cần nhiều hơn một vector store.</strong> LightRAG lưu documents/chunks/cache
+            trong KV, semantic search trong vector stores, relation structure trong graph store và pipeline state
+            trong doc-status storage.
+          </WhyImportant>
+
+          <Diagram>{`
+LightRAG instance
+  ├─ KV storage
+  │  ├─ full_docs
+  │  ├─ text_chunks
+  │  ├─ llm_response_cache
+  │  ├─ full_entities / full_relations
+  │  └─ entity_chunks / relation_chunks
+  ├─ Vector storage
+  │  ├─ entities_vdb
+  │  ├─ relationships_vdb
+  │  └─ chunks_vdb
+  ├─ Graph storage
+  │  └─ chunk_entity_relation_graph
+  └─ Doc status storage
+     └─ pending / processing / processed / failed
+          `}</Diagram>
+
+          <DataTable
+            richCells
+            headers={['Role', 'Read/write path', 'Nếu mất/corrupt thì sao']}
+            rows={[
+              ['KV', 'Insert/query/cache/export', 'Mất full docs/chunks/cache; khó rebuild references'],
+              ['Vector', 'Entity/relation/chunk semantic retrieval', 'Graph còn đó nhưng query semantic mất candidates'],
+              ['Graph', 'Neighbor traversal, degree, subgraph, KG visualization', 'Chỉ còn vector chunks; mất lợi thế graph RAG'],
+              ['Doc status', 'Pipeline monitor, retry, deletion', 'Upload/insert khó recover và UI status sai'],
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t2" title="2. Initialization lifecycle: create objects trước, initialize sau" tid="S.2" location="lightrag/lightrag.py:531-797">
+          <WhyImportant>
+            <strong>Storage lifecycle rõ giúp tránh deadlock và side effect sớm.</strong> Dataclass init tạo wrapper/config,
+            còn <code>initialize_storages()</code> mới mở backend. Docs nhấn mạnh phải gọi explicit init trước khi dùng core.
+          </WhyImportant>
+
+          <CodeBlock caption="initialize_storages khởi tạo từng storage" lang="python">
+            <Fragment is:raw>
+async def initialize_storages(self):
+    if self._storages_status == StoragesStatus.CREATED:
+        await initialize_pipeline_status(workspace=self.workspace)
+
+        for storage in (
+            self.full_docs,
+            self.text_chunks,
+            self.full_entities,
+            self.full_relations,
+            self.entity_chunks,
+            self.relation_chunks,
+            self.entities_vdb,
+            self.relationships_vdb,
+            self.chunks_vdb,
+            self.chunk_entity_relation_graph,
+            self.llm_response_cache,
+            self.doc_status,
+        ):
+            if storage:
+                await storage.initialize()
+            </Fragment>
+          </CodeBlock>
+
+          <Callout type="warn">
+            <strong>Core integration pitfall:</strong> tạo <code>LightRAG(...)</code> xong mà quên
+            <code>await rag.initialize_storages()</code> sẽ lỗi. Khi app shutdown, gọi
+            <code>await rag.finalize_storages()</code> để backend flush/close đúng.
+          </Callout>
+        </Technique>
+
+        <Technique id="t3" title="3. Backend selection là quyết định kiến trúc, không phải config phụ" tid="S.3" location="docs/ProgramingWithCore.md">
+          <WhyImportant>
+            <strong>Backend quyết định scale, consistency và operational burden.</strong> Default local stack phù hợp demo;
+            production cần chọn theo workload, team expertise và yêu cầu graph/vector scale.
+          </WhyImportant>
+
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Scenario', 'KV', 'Vector', 'Graph', 'Doc status']}
+            rows={[
+              ['Local demo', 'JsonKV', 'NanoVectorDB', 'NetworkX', 'JsonDocStatus'],
+              ['Postgres-centric team', 'PGKV', 'PGVector', 'PGGraph/AGE', 'PGDocStatus'],
+              ['Graph-heavy analysis', 'Redis/Postgres', 'Milvus/Qdrant', 'Neo4j/Memgraph', 'Postgres/Mongo'],
+              ['Unified search platform', 'OpenSearchKV', 'OpenSearchVector', 'OpenSearchGraph', 'OpenSearchDocStatus'],
+              ['Managed document app', 'MongoKV', 'MongoVector Atlas', 'MongoGraph', 'MongoDocStatus'],
+            ]}
+          />
+
+          <ProsCons
+            pros={[
+              'Có thể dùng default storage để iterate nhanh.',
+              'Backend matrix đủ rộng để đi từ laptop đến production.',
+              'OpenSearch path mới cho phép unify cả 4 storage roles.',
+            ]}
+            cons={[
+              'Mỗi backend có isolation semantics khác nhau.',
+              'Một số backend cần plugin/managed service mới đủ capability.',
+              'Đổi embedding/vector backend sau ingest có migration cost đáng kể.',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t4" title="4. Server/API/WebUI biến LightRAG thành service" tid="S.4" location="docs/LightRAG-API-Server.md">
+          <WhyImportant>
+            <strong>Service mode rút ngắn đường từ research sang app.</strong> Bạn có thể upload documents,
+            query, visualize graph và tích hợp chatbot ngoài qua Ollama-compatible endpoints mà không cần viết
+            FastAPI wrapper riêng từ đầu.
+          </WhyImportant>
+
+          <CodeBlock caption="Cài và chạy server" lang="bash">
+            <Fragment is:raw>
+uv tool install "lightrag-hku[api]"
+cp env.example .env
+# chỉnh LLM_BINDING, EMBEDDING_BINDING, storage, auth...
+lightrag-server
+
+# production non-Windows
+lightrag-gunicorn --workers 4
+            </Fragment>
+          </CodeBlock>
+
+          <Callout type="info">
+            <strong>Ollama-compatible interface:</strong> Server có thể giả lập LightRAG như một Ollama chat model,
+            giúp Open WebUI hoặc chatbot khác gọi vào LightRAG dễ hơn.
+          </Callout>
+        </Technique>
+
+        <Technique id="t5" title="5. Deployment config: .env, wizard, Docker và reverse proxy" tid="S.5" location="docs/InteractiveSetup.md; docs/LightRAG-API-Server.md">
+          <WhyImportant>
+            <strong>Config sai dễ làm server chạy nhưng dùng nhầm model/storage.</strong> LightRAG cố ý đọc
+            <code>.env</code> ở startup directory để mỗi instance có config riêng. System env override `.env`.
+          </WhyImportant>
+
+          <StepList
+            steps={[
+              {
+                title: 'Generate base env',
+                description: 'Chọn LLM, embedding và reranker trước.',
+                code: 'make env-base',
+                lang: 'bash',
+              },
+              {
+                title: 'Generate storage env',
+                description: 'Chọn local JSON/NetworkX hoặc backend production như OpenSearch/Postgres/Neo4j.',
+                code: 'make env-storage',
+                lang: 'bash',
+              },
+              {
+                title: 'Generate server env',
+                description: 'Chọn port, auth, SSL và server-facing settings.',
+                code: 'make env-server\nmake env-security-check',
+                lang: 'bash',
+              },
+            ]}
+          />
+
+          <CodeBlock caption="Docker compose path" lang="bash">
+            <Fragment is:raw>
+git clone https://github.com/HKUDS/LightRAG.git
+cd LightRAG
+cp env.example .env
+# configure LLM/embedding/storage in .env
+docker compose up
+            </Fragment>
+          </CodeBlock>
+        </Technique>
+      </Section>
+
+      <Section id="matrix" title="Production matrix" themeTag="Matrix">
+        <DataTable
+          richCells
+          headers={['Decision', 'Recommendation', 'Reason']}
+          rows={[
+            ['Embedding model', 'Chọn trước ingest lớn và freeze', 'Dimension đổi sẽ ảnh hưởng vector schema'],
+            ['Workspace strategy', 'Dùng workspace per tenant/project', 'Storage isolation method khác nhau theo backend'],
+            ['Graph backend', 'NetworkX cho dev; Neo4j/Memgraph/OpenSearch/Postgres AGE cho scale', 'Graph traversal và WebUI phụ thuộc backend capability'],
+            ['Vector backend', 'Qdrant/Milvus/PGVector/OpenSearch theo team stack', 'Rerank không thay thế vector recall tốt'],
+            ['Reverse proxy', 'Set upload limit, streaming timeout, disable gzip cho streaming', 'Tránh 413 và buffering làm stream chậm'],
+            ['Secrets', 'System env hoặc secret manager; audit bằng env-security-check', '.env dễ bị copy/commit sai'],
+          ]}
+        />
+      </Section>
+
+      <Section id="wrap" title="Tổng kết" themeTag="Wrap">
+        <KeyTakeaway
+          title="Storage/API takeaways"
+          items={[
+            'LightRAG cần bốn loại storage; đừng thiết kế production như chỉ có vector DB.',
+            'Server/WebUI rất hữu ích để inspect graph quality và query behavior trước khi tích hợp app.',
+            'Embedding dimension, workspace isolation và backend choice là quyết định migration-cost cao.',
+            'OpenSearch là option đáng chú ý nếu muốn unified storage cho cả KV/vector/graph/doc-status.',
+          ]}
+        />
+
+        <RefList items={[
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/LightRAG-API-Server.md">LightRAG Server and WebUI</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/ProgramingWithCore.md">Programming With LightRAG Core</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/InteractiveSetup.md">Interactive Setup</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/lightrag.py">lightrag.py storage lifecycle</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/base.py">base.py storage interfaces</a>',
+        ]} />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>
+

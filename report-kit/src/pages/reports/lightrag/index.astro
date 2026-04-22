@@ -1,0 +1,714 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RefList from '../../../components/RefList.astro';
+import SummaryTable from '../../../components/SummaryTable.astro';
+import DataTable from '../../../components/DataTable.astro';
+import LinkList from '../../../components/LinkList.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+import ReportImage from '../../../components/ReportImage.astro';
+import DeepDiveLink from '../../../components/DeepDiveLink.astro';
+import StatGrid from '../../../components/StatGrid.astro';
+import StepList from '../../../components/StepList.astro';
+import KeyTakeaway from '../../../components/KeyTakeaway.astro';
+
+const title = 'LightRAG — Graph RAG nhẹ, nhanh và cập nhật tăng dần';
+const description = 'Nghiên cứu chuyên sâu LightRAG của HKUDS: cách tiếp cận, cài đặt, ứng dụng, graph-based indexing, dual-level retrieval, storage/API và vận hành production.';
+---
+
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar
+      intro="LightRAG"
+      groups={[
+        {
+          title: 'Mở đầu',
+          items: [
+            { href: '#intro', label: 'Tổng quan', section: true },
+            { href: '#approach', label: 'Cách tiếp cận' },
+            { href: '#install', label: 'Cài đặt' },
+            { href: '#applications', label: 'Ứng dụng' },
+            { href: '#summary', label: 'Bảng tóm tắt' },
+          ],
+        },
+        {
+          title: 'Thành phần lõi',
+          items: [
+            { href: '#t1', label: '1. Graph indexing' },
+            { href: '#t2', label: '2. Incremental update' },
+            { href: '#t3', label: '3. Dual-level retrieval' },
+            { href: '#t4', label: '4. Mix mode' },
+            { href: '#t5', label: '5. Token budget' },
+          ],
+        },
+        {
+          title: 'Triển khai',
+          items: [
+            { href: '#t6', label: '6. Storage abstraction' },
+            { href: '#t7', label: '7. Server/API/WebUI' },
+            { href: '#t8', label: '8. Rerank + references' },
+            { href: '#t9', label: '9. Concurrency' },
+            { href: '#t10', label: '10. Observability' },
+          ],
+        },
+        {
+          title: 'Kết luận',
+          items: [
+            { href: '#decision', label: 'Decision matrix', section: true },
+            { href: '#wrap', label: 'Tổng kết', section: true },
+          ],
+        },
+      ]}
+    />
+
+    <main>
+      <Breadcrumb />
+
+      <Hero
+        title={title}
+        subtitle="Layer 1 overview cho LightRAG <code>HKUDS/LightRAG</code> — bắt đầu bằng cách tiếp cận, cài đặt, ứng dụng; các phần sau đi sâu vào thành phần và kỹ thuật."
+        meta={[
+          { label: 'Snapshot', value: '<code>v1.4.15</code> / <code>64d3326</code>' },
+          { label: 'Package', value: '<code>lightrag-hku==1.4.15</code>' },
+          { label: 'Paper', value: '<a href="https://aclanthology.org/2025.findings-emnlp.568/">EMNLP Findings 2025</a>' },
+          { label: 'Ngày', value: '2026-04-22' },
+          { label: 'Deep dives', value: '4' },
+        ]}
+      />
+
+      <Section id="intro" title="Tổng quan" themeTag="Intro">
+        <Callout type="info">
+          <strong>Đây là báo cáo lớp 1.</strong> Mỗi nhóm kỹ thuật lớn có trang layer 2 riêng:
+          <a href="/reports/lightrag/indexing/">Indexing</a>,
+          <a href="/reports/lightrag/retrieval/">Retrieval</a>,
+          <a href="/reports/lightrag/storage-api/">Storage/API</a>, và
+          <a href="/reports/lightrag/operations/">Operations</a>.
+        </Callout>
+
+        <p>
+          LightRAG là một graph-based RAG framework của HKUDS. Thay vì chỉ lưu chunks trong vector DB
+          như NaiveRAG, LightRAG extract entity và relationship từ từng chunk, lưu graph + vector
+          representations, rồi query bằng hai tầng: <strong>low-level</strong> cho entity cụ thể và
+          <strong>high-level</strong> cho relationship/theme rộng hơn. Mục tiêu là giữ được context
+          multi-hop mà không phải đi theo hướng community-report nặng như GraphRAG.
+        </p>
+
+        <StatGrid
+          columns={4}
+          stats={[
+            { value: '34k', label: 'GitHub stars', note: 'repo HKUDS/LightRAG', variant: 'cyan' },
+            { value: 'v1.4.15', label: 'Release đọc source', note: '2026-04-19', variant: 'green' },
+            { value: '11.2s', label: 'Avg query time', note: 'paper appendix vs GraphRAG 23.6s', variant: 'amber' },
+            { value: '39.5MB', label: 'Storage test', note: 'paper appendix vs GraphRAG 286.7MB', variant: 'purple' },
+          ]}
+        />
+
+        <ReportImage
+          src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/README.assets/b2aaf634151b4706892693ffb43d9093.png"
+          alt="Sơ đồ kiến trúc LightRAG gồm graph-based text indexing, low-level keys, high-level keys, index graph và dual-level retrieval"
+          caption="Kiến trúc tổng quan: raw text được chuyển thành graph entity/relation, sau đó retrieval dùng cả low-level entity keys và high-level relation/theme keys."
+          source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/README.md"
+          sourceLabel="HKUDS/LightRAG README"
+          bordered={true}
+        />
+
+        <Callout type="unique">
+          <strong>Điểm đáng học:</strong> LightRAG không chỉ là một app RAG có WebUI. Đây là một thiết kế
+          storage + retrieval đáng copy: tách KV/vector/graph/doc-status, query context 4 stage,
+          default <code>mix</code> mode, và pipeline vận hành có concurrency/cancellation/status rõ ràng.
+        </Callout>
+      </Section>
+
+      <Section id="approach" title="Cách tiếp cận" themeTag="Approach">
+        <p>
+          LightRAG giải quyết một trade-off phổ biến trong RAG: flat vector chunks nhanh và đơn giản
+          nhưng yếu với câu hỏi cần quan hệ nhiều bước; GraphRAG giàu ngữ cảnh nhưng community traversal
+          và report regeneration có chi phí cao. LightRAG chọn hướng trung gian: xây graph nhỏ hơn,
+          query bằng vector search trên entity/relation keys, rồi chỉ lấy subgraph/chunks cần thiết.
+        </p>
+
+        <Diagram>{`
+NaiveRAG:
+  Query -> Vector chunks -> LLM
+  Fast, simple, but weak at multi-hop synthesis
+
+GraphRAG:
+  Query -> Community reports -> LLM
+  Rich global summaries, but expensive to retrieve/update
+
+LightRAG:
+  Query -> low-level entity keys + high-level relation keys + vector chunks -> LLM
+  Graph-aware, incremental, and cheaper than report traversal
+        `}</Diagram>
+
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Khía cạnh', 'NaiveRAG', 'GraphRAG', 'LightRAG']}
+          rows={[
+            ['Index artifact', 'Vector chunks', 'Entity graph + community reports', '<strong>Entity/relation graph + vector stores</strong>'],
+            ['Query target', 'Nearest chunks', 'Community summaries + graph traversal', '<strong>Entity keys, relation keys, chunks</strong>'],
+            ['Update mới', 'Add chunks', 'Có thể phải rebuild community reports', '<strong>Merge incremental entities/relations</strong>'],
+            ['Điểm mạnh', 'Đơn giản, latency thấp', 'Global summaries tốt', '<strong>Cân bằng local detail và global relation</strong>'],
+            ['Điểm yếu', 'Mất relation structure', 'Chi phí retrieval/update cao', 'Phụ thuộc LLM extraction và embedding/rerank quality'],
+          ]}
+        />
+
+        <KeyTakeaway
+          title="Cách đọc LightRAG"
+          items={[
+            'Đừng đọc như một vector DB wrapper; hãy đọc như <strong>graph artifact builder</strong> cộng với <strong>query context compiler</strong>.',
+            'Nếu corpus không có entity/relation đáng kể, LightRAG có thể là overkill so với NaiveRAG.',
+            'Nếu corpus thay đổi liên tục, incremental merge là lý do chính để cân nhắc LightRAG thay GraphRAG.',
+          ]}
+        />
+      </Section>
+
+      <Section id="install" title="Cài đặt" themeTag="Setup">
+        <p>
+          Có hai cách dùng chính: chạy server/API/WebUI như một dịch vụ độc lập, hoặc embed LightRAG Core
+          vào ứng dụng Python. Repo hiện khuyến nghị <code>uv</code>, nhưng vẫn hỗ trợ <code>pip</code>.
+        </p>
+
+        <StepList
+          steps={[
+            {
+              title: 'Chọn mode triển khai',
+              description: 'Dùng server nếu muốn WebUI, API, document upload, graph exploration và Ollama-compatible endpoints. Dùng core nếu bạn đang viết app Python hoặc nghiên cứu thuật toán.',
+              code: 'uv tool install "lightrag-hku[api]"\n# hoặc: uv pip install lightrag-hku',
+              lang: 'bash',
+            },
+            {
+              title: 'Tạo cấu hình model/storage',
+              description: 'Dùng wizard để tạo .env thay vì sửa tay toàn bộ. Bước bắt buộc đầu tiên là LLM, embedding và reranker.',
+              code: 'make env-base\nmake env-storage\nmake env-server\nmake env-security-check',
+              lang: 'bash',
+            },
+            {
+              title: 'Chạy server hoặc core',
+              description: 'Server đọc .env ở startup directory; core cần initialize_storages trước khi insert/query.',
+              code: 'lightrag-server\n# production non-Windows: lightrag-gunicorn --workers 4',
+              lang: 'bash',
+            },
+          ]}
+        />
+
+        <CodeBlock caption="Core API tối giản" lang="python">
+          <Fragment is:raw>
+import asyncio
+from lightrag import LightRAG, QueryParam
+from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
+
+async def main():
+    rag = LightRAG(
+        working_dir="./rag_storage",
+        llm_model_func=gpt_4o_mini_complete,
+        embedding_func=openai_embed,
+    )
+    await rag.initialize_storages()
+    try:
+        await rag.ainsert("Your text")
+        answer = await rag.aquery(
+            "What are the top themes?",
+            param=QueryParam(mode="mix"),
+        )
+        print(answer)
+    finally:
+        await rag.finalize_storages()
+
+asyncio.run(main())
+          </Fragment>
+        </CodeBlock>
+
+        <Callout type="warn">
+          <strong>Không đổi embedding model sau khi index.</strong> Vector dimension thường nằm trong schema
+          table/collection. Nếu đổi từ <code>bge-m3</code> sang <code>text-embedding-3-large</code>,
+          cần recreate vector storage thay vì chỉ đổi env var.
+        </Callout>
+      </Section>
+
+      <Section id="applications" title="Ứng dụng" themeTag="Use cases">
+        <p>
+          LightRAG phù hợp nhất khi câu hỏi cần tổng hợp entity/relation qua nhiều tài liệu. Nếu chỉ cần
+          hỏi đáp một vài file ngắn, chi phí graph extraction có thể không đáng. Nếu tài liệu dài, nhiều
+          quan hệ, và cần cập nhật tăng dần, LightRAG có lợi thế rõ.
+        </p>
+
+        <SummaryTable
+          headers={['Use case', 'Vì sao hợp', 'Lưu ý']}
+          rows={[
+            { id: 'Legal', title: 'Hợp đồng, compliance, governance', chipLabel: 'Multi-hop', chipVariant: 'amber' },
+            { id: 'Tech Docs', title: 'Tài liệu kiến trúc, runbook, dependency graph', chipLabel: 'Ops', chipVariant: 'green' },
+            { id: 'Research', title: 'Paper corpus, entity/concept relations, literature review', chipLabel: 'Research', chipVariant: 'purple' },
+            { id: 'Product', title: 'FAQ + docs + changelog cần cập nhật liên tục', chipLabel: 'Incremental', chipVariant: 'cyan' },
+          ]}
+        />
+
+        <ProsCons
+          pros={[
+            'Tốt cho câu hỏi cần liên kết nhiều entity/relation thay vì chỉ retrieve top-k chunks.',
+            'Có server/WebUI sẵn để thử nhanh, graph exploration, upload và query.',
+            'Storage backend đa dạng: local JSON/NetworkX cho dev, PostgreSQL/Neo4j/Milvus/Qdrant/OpenSearch cho production.',
+            'Có đường tiến hóa rõ: rerank, references, Langfuse tracing, RAGAS evaluation, RAG-Anything multimodal.',
+          ]}
+          cons={[
+            'Indexing tốn LLM calls và nhạy với chất lượng extraction.',
+            'Model nhỏ hoặc reasoning model dùng sai stage có thể tạo graph noisy hoặc chậm.',
+            'Cần quản trị schema embedding/storage nghiêm túc để tránh mismatch khi vận hành.',
+            'Không thay thế exact citation pipeline nếu yêu cầu audit từng claim ở mức chunk/source nghiêm ngặt.',
+          ]}
+        />
+      </Section>
+
+      <Section id="summary" title="Bảng tóm tắt kỹ thuật" themeTag="Overview">
+        <SummaryTable
+          rows={[
+            { id: 'T1', title: '<a href="#t1">Graph-based text indexing</a>', chipLabel: 'Indexing', chipVariant: 'green' },
+            { id: 'T2', title: '<a href="#t2">Incremental graph update</a>', chipLabel: 'Indexing', chipVariant: 'green' },
+            { id: 'T3', title: '<a href="#t3">Dual-level retrieval</a>', chipLabel: 'Retrieval', chipVariant: 'purple' },
+            { id: 'T4', title: '<a href="#t4">Mix mode: KG + vector chunks</a>', chipLabel: 'Retrieval', chipVariant: 'purple' },
+            { id: 'T5', title: '<a href="#t5">Token budget + context compiler</a>', chipLabel: 'Context', chipVariant: 'amber' },
+            { id: 'T6', title: '<a href="#t6">4-way storage abstraction</a>', chipLabel: 'Storage', chipVariant: 'cyan' },
+            { id: 'T7', title: '<a href="#t7">Server/API/WebUI + setup wizard</a>', chipLabel: 'API', chipVariant: 'cyan' },
+            { id: 'T8', title: '<a href="#t8">Rerank + references</a>', chipLabel: 'Quality', chipVariant: 'red' },
+            { id: 'T9', title: '<a href="#t9">Concurrent control hierarchy</a>', chipLabel: 'Ops', chipVariant: 'amber' },
+            { id: 'T10', title: '<a href="#t10">Observability, cache, evaluation</a>', chipLabel: 'Ops', chipVariant: 'amber' },
+          ]}
+        />
+      </Section>
+
+      <Section id="core" title="Thành phần và kỹ thuật chuyên sâu" themeTag="Deep">
+        <Technique id="t1" title="1. Graph-based text indexing" tid="T1" location="Paper §3.1; Source: lightrag/operate.py">
+          <WhyImportant>
+            <strong>Đây là khác biệt nền tảng so với NaiveRAG.</strong> Chunks không chỉ được embed;
+            chúng được dùng để tạo entity nodes và relation edges. Retrieval sau đó có thể tìm theo
+            semantic key nhưng vẫn giữ được structure của knowledge graph.
+          </WhyImportant>
+
+          <p>
+            Pipeline gồm chunking, entity/relation extraction, parse output, merge duplicate nodes/edges,
+            và upsert vào cả graph store lẫn vector stores. Entity dùng tên làm key; relation có keywords
+            và description để hỗ trợ high-level retrieval.
+          </p>
+
+          <ReportImage
+            src="https://learnopencv.com/wp-content/uploads/2024/11/LightRAG-VectorDB-Json-KV-Store-Indexing-Flowchart-scaled.jpg"
+            alt="Flowchart indexing LightRAG minh họa document splitting, entity relationship extraction, JSON KV store, vector database và graph"
+            caption="Indexing flow: document được chia chunk, LLM extract entity/relation, sau đó ghi vào KV store, vector DB và knowledge graph."
+            source="https://learnopencv.com/lightrag/"
+            sourceLabel="LearnOpenCV"
+            bordered={true}
+          />
+
+          <CodeBlock caption="Chunking theo token size — lightrag/operate.py" lang="python">
+            <Fragment is:raw>
+def chunking_by_token_size(
+    tokenizer,
+    content,
+    split_by_character=None,
+    split_by_character_only=False,
+    chunk_overlap_token_size=100,
+    chunk_token_size=1200,
+):
+    tokens = tokenizer.encode(content)
+    results = []
+    for index, start in enumerate(
+        range(0, len(tokens), chunk_token_size - chunk_overlap_token_size)
+    ):
+        chunk_content = tokenizer.decode(tokens[start : start + chunk_token_size])
+        results.append({
+            "tokens": min(chunk_token_size, len(tokens) - start),
+            "content": chunk_content.strip(),
+            "chunk_order_index": index,
+        })
+    return results
+            </Fragment>
+          </CodeBlock>
+
+          <ProsCons
+            pros={[
+              'Giữ được relation structure thay vì chỉ similarity chunks.',
+              'Entity/relation có thể query độc lập qua vector stores.',
+              'Graph artifact có thể visualize, export và rebuild một phần.',
+            ]}
+            cons={[
+              'Indexing phụ thuộc LLM extraction; model yếu tạo noisy graph.',
+              'Chi phí insert cao hơn NaiveRAG vì phải gọi LLM trên chunks.',
+              'Cần kiểm soát entity types, delimiter và source metadata.',
+            ]}
+          />
+
+          <RefList items={[
+            '<a href="https://aclanthology.org/2025.findings-emnlp.568.pdf">LightRAG paper — graph-based text indexing</a>',
+            '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/operate.py">operate.py — extraction and chunking</a>',
+          ]} />
+
+          <DeepDiveLink href="/reports/lightrag/indexing/">
+            Phân tích sâu: indexing pipeline, extraction parser, merge và incremental update
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t2" title="2. Incremental graph update" tid="T2" location="Paper §3.1; Source: lightrag/lightrag.py + operate.py">
+          <WhyImportant>
+            <strong>Incremental update là lý do LightRAG nhẹ hơn GraphRAG trong corpus động.</strong>
+            Document mới được extract thành graph fragment rồi merge vào graph hiện có; không cần rebuild
+            community reports toàn cục.
+          </WhyImportant>
+
+          <p>
+            Trong source, insert không ghi thẳng vào graph một cách ad-hoc. Nó đi qua queue, status storage,
+            pipeline lock và merge helpers. Khi document deletion xảy ra, các entity/relation bị ảnh hưởng
+            được rebuild từ chunks/cache còn lại để tránh stale source.
+          </p>
+
+          <Diagram>{`
+New document
+  -> chunk
+  -> extract entities/relations
+  -> merge source_ids + descriptions
+  -> upsert graph nodes/edges
+  -> upsert entity/relationship vectors
+  -> update doc_status
+          `}</Diagram>
+
+          <Callout type="warn">
+            <strong>Không có free lunch.</strong> Incremental graph merge giảm chi phí rebuild, nhưng nếu
+            extraction tạo entity aliases không nhất quán, graph vẫn bị phân mảnh. Production cần prompt/schema
+            entity types rõ và có workflow quan sát graph.
+          </Callout>
+        </Technique>
+
+        <Technique id="t3" title="3. Dual-level retrieval" tid="T3" location="Paper §3.2; Source: lightrag/operate.py">
+          <WhyImportant>
+            <strong>Dual-level retrieval là phần biến graph thành query advantage.</strong> Low-level tập trung
+            vào entity cụ thể; high-level tập trung vào relationship/theme. Full LightRAG kết hợp cả hai để
+            vừa có depth vừa có breadth.
+          </WhyImportant>
+
+          <p>
+            Paper mô tả low-level retrieval cho câu hỏi cụ thể như entity facts, còn high-level retrieval cho
+            câu hỏi abstract. Source hiện thực hóa bằng <code>ll_keywords</code> và <code>hl_keywords</code>:
+            local branch query <code>entities_vdb</code>, global branch query <code>relationships_vdb</code>.
+          </p>
+
+          <CodeBlock caption="QueryParam modes — lightrag/base.py" lang="python">
+            <Fragment is:raw>
+@dataclass
+class QueryParam:
+    mode: Literal["local", "global", "hybrid", "naive", "mix", "bypass"] = "mix"
+    only_need_context: bool = False
+    only_need_prompt: bool = False
+    response_type: str = "Multiple Paragraphs"
+    stream: bool = False
+    top_k: int = int(os.getenv("TOP_K", str(DEFAULT_TOP_K)))
+    chunk_top_k: int = int(os.getenv("CHUNK_TOP_K", str(DEFAULT_CHUNK_TOP_K)))
+    enable_rerank: bool = os.getenv("RERANK_BY_DEFAULT", "true").lower() == "true"
+    include_references: bool = False
+            </Fragment>
+          </CodeBlock>
+
+          <ProsCons
+            pros={[
+              'Local branch trả lời tốt câu hỏi entity/detail.',
+              'Global branch mở rộng sang relationships và themes.',
+              'Hybrid/mix cân bằng breadth/depth tốt hơn single mode.',
+            ]}
+            cons={[
+              'Keyword extraction sai làm retrieval lệch hướng.',
+              'High-level relation VDB phụ thuộc relation keywords do LLM tạo.',
+              'Cần tune top_k/chunk_top_k/token budget theo corpus.',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/lightrag/retrieval/">
+            Phân tích sâu: query modes, keyword extraction, mix mode, rerank và context build
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t4" title="4. Mix mode: KG + vector chunks" tid="T4" location="Source: lightrag/operate.py::_perform_kg_search">
+          <WhyImportant>
+            <strong><code>mix</code> là default thực dụng.</strong> Nó không bắt người dùng chọn giữa graph
+            và chunks: local/global graph search lấy entities/relations, direct vector search lấy chunks
+            có semantic match cao, rồi merge/dedupe trước khi build prompt.
+          </WhyImportant>
+
+          <ReportImage
+            src="https://learnopencv.com/wp-content/uploads/2024/11/LightRAG-Querying-Flowchart-Dual-Level-Retrieval-Generation-Knowledge-Graphs-scaled.jpg"
+            alt="Flowchart retrieval LightRAG minh họa query, low-level retrieval, high-level retrieval, graph context, text chunks và response generation"
+            caption="Retrieval flow: query được tách thành low-level/high-level keys, kết hợp graph retrieval và vector retrieval trước khi đưa context vào LLM."
+            source="https://learnopencv.com/lightrag/"
+            sourceLabel="LearnOpenCV"
+            bordered={true}
+          />
+
+          <CodeBlock caption="Mix branch trong search — lightrag/operate.py" lang="python">
+            <Fragment is:raw>
+if query_param.mode == "mix" and chunks_vdb:
+    vector_chunks = await _get_vector_context(
+        query,
+        chunks_vdb,
+        query_param,
+        query_embedding,
+    )
+    for i, chunk in enumerate(vector_chunks):
+        chunk_id = chunk.get("chunk_id") or chunk.get("id")
+        if chunk_id:
+            chunk_tracking[chunk_id] = {
+                "source": "C",
+                "frequency": 1,
+                "order": i + 1,
+            }
+            </Fragment>
+          </CodeBlock>
+        </Technique>
+
+        <Technique id="t5" title="5. Token budget + context compiler" tid="T5" location="Source: lightrag/operate.py::_build_query_context">
+          <WhyImportant>
+            <strong>Retrieval chỉ hữu ích nếu context cuối cùng vừa đủ và sạch.</strong> LightRAG không nối
+            tất cả entity/relation/chunk vào prompt. Nó search, truncate, merge chunks, rồi build context
+            theo token budget.
+          </WhyImportant>
+
+          <Diagram>{`
+_build_query_context()
+  1. _perform_kg_search()
+  2. _apply_token_truncation()
+  3. _merge_all_chunks()
+  4. _build_context_str()
+          `}</Diagram>
+
+          <p>
+            Stage 4 tính trước system prompt tokens, KG context tokens, query tokens và buffer. Phần token còn lại
+            mới cấp cho chunks. Đây là pattern đáng học: context compiler phải biết overhead, không chỉ truncate
+            theo một constant cố định.
+          </p>
+
+          <RefList items={[
+            '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/operate.py">operate.py — _build_query_context</a>',
+            '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/base.py">base.py — QueryParam token limits</a>',
+          ]} />
+        </Technique>
+
+        <Technique id="t6" title="6. 4-way storage abstraction" tid="T6" location="Source: lightrag/lightrag.py; docs/ProgramingWithCore.md">
+          <WhyImportant>
+            <strong>LightRAG production readiness nằm nhiều ở storage abstraction.</strong> Nó không hard-code
+            một backend. KV, vector, graph và doc-status có thể chọn backend khác nhau.
+          </WhyImportant>
+
+          <DataTable
+            variant="compare"
+            richCells
+            headers={['Storage role', 'Default dev', 'Production options', 'Dùng để làm gì']}
+            rows={[
+              ['KV', '<code>JsonKVStorage</code>', 'PostgreSQL, Redis, MongoDB, OpenSearch', 'Full docs, text chunks, caches, entity/relation metadata'],
+              ['Vector', '<code>NanoVectorDBStorage</code>', 'PGVector, Milvus, Qdrant, Faiss, MongoVector, OpenSearch', 'Entities, relationships, chunks semantic search'],
+              ['Graph', '<code>NetworkXStorage</code>', 'Neo4j, PostgreSQL AGE, Memgraph, OpenSearch', 'Nodes, edges, degree, traversal, subgraph'],
+              ['Doc status', '<code>JsonDocStatusStorage</code>', 'PostgreSQL, MongoDB, OpenSearch', 'Pending/processing/processed/failed và pipeline monitoring'],
+            ]}
+          />
+
+          <CodeBlock caption="Storage objects được tạo trong __post_init__ — lightrag/lightrag.py" lang="python">
+            <Fragment is:raw>
+self.text_chunks = self.key_string_value_json_storage_cls(
+    namespace=NameSpace.KV_STORE_TEXT_CHUNKS,
+    workspace=self.workspace,
+    embedding_func=self.embedding_func,
+)
+self.chunk_entity_relation_graph = self.graph_storage_cls(
+    namespace=NameSpace.GRAPH_STORE_CHUNK_ENTITY_RELATION,
+    workspace=self.workspace,
+    embedding_func=self.embedding_func,
+)
+self.entities_vdb = self.vector_db_storage_cls(
+    namespace=NameSpace.VECTOR_STORE_ENTITIES,
+    workspace=self.workspace,
+    embedding_func=self.embedding_func,
+    meta_fields={"entity_name", "source_id", "content", "file_path"},
+)
+            </Fragment>
+          </CodeBlock>
+
+          <DeepDiveLink href="/reports/lightrag/storage-api/">
+            Phân tích sâu: storage backend matrix, API server, WebUI, Docker và setup wizard
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t7" title="7. Server/API/WebUI + setup wizard" tid="T7" location="docs/LightRAG-API-Server.md; docs/InteractiveSetup.md">
+          <WhyImportant>
+            <strong>WebUI biến LightRAG từ library thành deployable service.</strong> Nó hỗ trợ document indexing,
+            knowledge graph exploration, query interface và Ollama-compatible endpoint cho các chatbot khác.
+          </WhyImportant>
+
+          <ReportImage
+            src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/README.assets/iShot_2025-03-23_12.40.08.png"
+            alt="Screenshot LightRAG WebUI hiển thị graph exploration và giao diện quản lý/query"
+            caption="LightRAG Server cung cấp WebUI để upload/index documents, quan sát knowledge graph và chạy RAG query."
+            source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/README.md"
+            sourceLabel="HKUDS/LightRAG README"
+            bordered={true}
+          />
+
+          <Callout type="info">
+            <strong>Setup wizard mới trong 2026.03.</strong> Thay vì sửa <code>env.example</code> thủ công,
+            có thể chạy <code>make env-base</code>, <code>make env-storage</code>, <code>make env-server</code>
+            và <code>make env-security-check</code>.
+          </Callout>
+        </Technique>
+
+        <Technique id="t8" title="8. Rerank + references" tid="T8" location="Source: lightrag/rerank.py; docs/AdvancedFeatures.md">
+          <WhyImportant>
+            <strong>Rerank là quality gate sau retrieval.</strong> Graph/vector retrieval lấy candidate rộng;
+            reranker giúp giảm noise, đặc biệt với <code>mix</code> mode và corpus có chunks dài.
+          </WhyImportant>
+
+          <p>
+            `rerank.py` có helper chunk documents vượt token limit trước khi gọi rerank API, rồi aggregate
+            scores về document gốc bằng <code>max</code>, <code>mean</code> hoặc <code>first</code>. Đây là
+            chi tiết nhỏ nhưng quan trọng khi reranker có max 512 tokens/doc.
+          </p>
+
+          <CodeBlock caption="Rerank long documents — lightrag/rerank.py" lang="python">
+            <Fragment is:raw>
+def aggregate_chunk_scores(chunk_results, doc_indices, num_original_docs, aggregation="max"):
+    doc_scores = {i: [] for i in range(num_original_docs)}
+    for result in chunk_results:
+        chunk_idx = result["index"]
+        score = result["relevance_score"]
+        if 0 <= chunk_idx < len(doc_indices):
+            doc_scores[doc_indices[chunk_idx]].append(score)
+
+    aggregated_results = []
+    for doc_idx, scores in doc_scores.items():
+        if not scores:
+            continue
+        final_score = max(scores) if aggregation == "max" else sum(scores) / len(scores)
+        aggregated_results.append({"index": doc_idx, "relevance_score": final_score})
+    return sorted(aggregated_results, key=lambda x: x["relevance_score"], reverse=True)
+            </Fragment>
+          </CodeBlock>
+        </Technique>
+
+        <Technique id="t9" title="9. Concurrent control hierarchy" tid="T9" location="docs/LightRAG_concurrent_explain.md; lightrag/lightrag.py">
+          <WhyImportant>
+            <strong>Concurrency trong graph RAG dễ tạo bottleneck và conflict.</strong> LightRAG tách control
+            theo document, chunk, graph merge và global LLM queue để tránh document processing chiếm hết
+            tài nguyên query.
+          </WhyImportant>
+
+          <Diagram>{`
+Document level:
+  max_parallel_insert
+
+Chunk extraction level:
+  per-document semaphore = llm_model_max_async
+
+Graph merge/rebuild level:
+  graph_max_async ~= llm_model_max_async * 2
+
+LLM level:
+  global prioritized queue
+  user query > merge > extraction
+          `}</Diagram>
+
+          <ProsCons
+            pros={[
+              'Có pipeline_status để monitor busy/request_pending/cancellation.',
+              'Query user được ưu tiên hơn extraction/merge.',
+              'Giới hạn max_parallel_insert giảm conflict entity naming giữa files.',
+            ]}
+            cons={[
+              'Set concurrency quá cao không chắc nhanh hơn vì LLM queue vẫn là bottleneck.',
+              'Parallel document insert tăng chi phí rollback/retry nếu nhiều file đang midway.',
+              'Local LLM cần tính context length và throughput trước khi nâng MAX_ASYNC.',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/lightrag/operations/">
+            Phân tích sâu: concurrency, deletion/rebuild, cache, tracing và failure modes
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t10" title="10. Observability, cache, evaluation" tid="T10" location="docs/AdvancedFeatures.md">
+          <WhyImportant>
+            <strong>Graph RAG khó debug nếu không thấy token, cache, trace và retrieved context.</strong>
+            LightRAG có các mảnh cần thiết để vận hành: TokenTracker, export graph, cache tools, Langfuse
+            và RAGAS evaluation.
+          </WhyImportant>
+
+          <DataTable
+            richCells
+            headers={['Capability', 'Dùng khi nào', 'Ghi chú']}
+            rows={[
+              ['TokenTracker', 'Theo dõi token usage khi insert/query batch', 'Hữu ích để phát hiện extraction cost bất thường'],
+              ['Graph export', 'Backup, audit, phân tích ngoài LightRAG', 'CSV, Excel, Markdown, TXT'],
+              ['Cache management', 'Debug query cache/extraction cache', '<code>aclear_cache()</code> xóa toàn llm_response_cache; query cache có tool riêng'],
+              ['Langfuse', 'Trace LLM calls OpenAI-compatible', 'Chưa cover mọi backend như Ollama/Azure/AWS Bedrock'],
+              ['RAGAS', 'Đánh giá RAG quality/context precision', 'Có script evaluation riêng trong repo'],
+            ]}
+          />
+        </Technique>
+      </Section>
+
+      <Section id="decision" title="Decision matrix" themeTag="Decision">
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Tình huống', 'Nên dùng LightRAG?', 'Lý do']}
+          rows={[
+            ['Corpus nhỏ, Q&A đơn giản', '<strong>Không ưu tiên</strong>', 'NaiveRAG hoặc full-text/vector search đơn giản đủ và rẻ hơn.'],
+            ['Corpus nhiều entity/relation', '<strong>Có</strong>', 'Graph indexing giúp câu hỏi multi-hop tốt hơn top-k chunks.'],
+            ['Data cập nhật liên tục', '<strong>Có</strong>', 'Incremental graph merge tránh rebuild toàn bộ community reports.'],
+            ['Yêu cầu exact citation strict', '<strong>Cân nhắc</strong>', 'LightRAG có references, nhưng cần kiểm soát audit pipeline riêng nếu compliance nghiêm ngặt.'],
+            ['Team chưa có LLM/embedding ops', '<strong>Prototype trước</strong>', 'Dễ chạy demo, nhưng production cần quản lý model, storage, cache, trace và backup.'],
+          ]}
+        />
+      </Section>
+
+      <Section id="wrap" title="Tổng kết" themeTag="Wrap">
+        <p>
+          LightRAG đáng nghiên cứu vì nó gom nhiều bài học engineering của graph RAG vào một implementation
+          tương đối gọn: graph-based indexing, dual-level retrieval, mix mode, storage abstraction và pipeline
+          vận hành có concurrency/status rõ ràng. Điểm mạnh chính là corpus động và câu hỏi multi-hop; điểm yếu
+          chính là chi phí/chất lượng extraction.
+        </p>
+
+        <KeyTakeaway
+          title="Kết luận thực dụng"
+          items={[
+            'Dùng LightRAG khi corpus có quan hệ rõ và cần cập nhật tăng dần.',
+            'Bắt đầu bằng server/WebUI để quan sát graph trước khi embed core vào app.',
+            'Production phải khóa embedding model, setup trace/evaluation, và tune concurrency theo LLM backend.',
+            'Nếu chỉ cần chatbot hỏi tài liệu ngắn, LightRAG là dư thừa.',
+          ]}
+        />
+
+        <LinkList
+          title="Deep dives"
+          items={[
+            '<a href="/reports/lightrag/indexing/">Indexing — chunking, extraction, merge, incremental update</a>',
+            '<a href="/reports/lightrag/retrieval/">Retrieval — query modes, mix mode, token budget, rerank</a>',
+            '<a href="/reports/lightrag/storage-api/">Storage/API — backend matrix, server, WebUI, Docker</a>',
+            '<a href="/reports/lightrag/operations/">Operations — concurrency, deletion, cache, tracing</a>',
+          ]}
+        />
+
+        <RefList items={[
+          '<a href="https://github.com/HKUDS/LightRAG">HKUDS/LightRAG — GitHub</a>',
+          '<a href="https://pypi.org/project/lightrag-hku/">lightrag-hku — PyPI</a>',
+          '<a href="https://aclanthology.org/2025.findings-emnlp.568/">LightRAG — ACL Anthology</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/ProgramingWithCore.md">Programming With LightRAG Core</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/LightRAG-API-Server.md">LightRAG Server and WebUI</a>',
+        ]} />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

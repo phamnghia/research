@@ -50,6 +50,68 @@ export function getReportThumbnail(r: Report): string {
 }
 
 export const reports: Report[] = [
+  // ── LightRAG — HKUDS ─────────────────────────────────────────────────────
+  {
+    slug: 'lightrag',
+    title: 'LightRAG — Graph RAG nhẹ, nhanh và cập nhật tăng dần',
+    description:
+      'Nghiên cứu chuyên sâu LightRAG của HKUDS: cách tiếp cận, cài đặt, ứng dụng, graph-based indexing, dual-level retrieval, storage/API và vận hành production. Gồm 4 deep dive về indexing, retrieval, storage/API và operations.',
+    date: '2026-04-22',
+    techniqueCount: 10,
+    status: 'stable',
+    repo: 'HKUDS/LightRAG',
+    kind: 'overview',
+    tags: ['lightrag', 'rag', 'graph-rag', 'knowledge-graph', 'retrieval', 'python'],
+    thumbnail: '/thumbnails/lightrag.jpg',
+  },
+  {
+    slug: 'lightrag/indexing',
+    title: 'Deep Dive: LightRAG Indexing Pipeline',
+    description:
+      'Phân tích chi tiết pipeline indexing của LightRAG: chunking, entity/relation extraction, parser hardening, merge, source tracking, vector upsert và incremental update.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'lightrag',
+    topicLabel: 'Indexing Pipeline',
+    tags: ['lightrag', 'indexing', 'knowledge-graph', 'entity-extraction', 'python'],
+  },
+  {
+    slug: 'lightrag/retrieval',
+    title: 'Deep Dive: LightRAG Retrieval & Query Modes',
+    description:
+      'QueryParam modes, low/high keywords, local/global/hybrid/mix, vector chunks, token truncation, context build, rerank và references trong LightRAG.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'lightrag',
+    topicLabel: 'Retrieval & Query Modes',
+    tags: ['lightrag', 'retrieval', 'query-mode', 'rerank', 'graph-rag'],
+  },
+  {
+    slug: 'lightrag/storage-api',
+    title: 'Deep Dive: LightRAG Storage, API & WebUI',
+    description:
+      'Storage abstraction, Server/API/WebUI, setup wizard, Docker deployment và backend selection của LightRAG v1.4.15.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'lightrag',
+    topicLabel: 'Storage, API & WebUI',
+    tags: ['lightrag', 'storage', 'api', 'webui', 'deployment'],
+  },
+  {
+    slug: 'lightrag/operations',
+    title: 'Deep Dive: LightRAG Operations, Concurrency & Evaluation',
+    description:
+      'Vận hành LightRAG: concurrency hierarchy, global LLM priority queue, deletion/rebuild, cache, token tracking, Langfuse, RAGAS và failure modes.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'lightrag',
+    topicLabel: 'Operations, Concurrency & Evaluation',
+    tags: ['lightrag', 'operations', 'concurrency', 'cache', 'observability'],
+  },
   // ── LLM Wiki — Andrej Karpathy ────────────────────────────────────────────
   {
     slug: 'llm-wiki',

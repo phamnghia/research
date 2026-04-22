@@ -1,0 +1,317 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RefList from '../../../components/RefList.astro';
+import DataTable from '../../../components/DataTable.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+import ReportImage from '../../../components/ReportImage.astro';
+import MermaidDiagram from '../../../components/MermaidDiagram.astro';
+import KeyTakeaway from '../../../components/KeyTakeaway.astro';
+
+const title = 'Deep Dive: LightRAG Operations, Concurrency & Evaluation';
+const description = 'Phân tích vận hành LightRAG: concurrency hierarchy, global LLM priority queue, deletion/rebuild, cache, token tracking, Langfuse, RAGAS và failure modes.';
+---
+
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar
+      intro="Operations"
+      groups={[
+        {
+          title: 'Context',
+          items: [
+            { href: '#intro', label: 'Tổng quan', section: true },
+            { href: '#concurrency-map', label: 'Concurrency map' },
+          ],
+        },
+        {
+          title: 'Operations',
+          items: [
+            { href: '#t1', label: '1. Document-level concurrency' },
+            { href: '#t2', label: '2. Global LLM queue' },
+            { href: '#t3', label: '3. Delete + rebuild' },
+            { href: '#t4', label: '4. Cache + token tracking' },
+            { href: '#t5', label: '5. Tracing + evaluation' },
+          ],
+        },
+        {
+          title: 'Kết luận',
+          items: [
+            { href: '#runbook', label: 'Runbook', section: true },
+            { href: '#wrap', label: 'Tổng kết', section: true },
+          ],
+        },
+      ]}
+    />
+
+    <main>
+      <Breadcrumb href="/reports/lightrag/" label="← LightRAG Overview" />
+
+      <Hero
+        title={title}
+        subtitle={`Phân tích chi tiết từ báo cáo <a href="/reports/lightrag/">Tổng quan LightRAG</a> — những phần quyết định hệ thống có chạy ổn khi ingest/query thật.`}
+        meta={[
+          { label: 'Báo cáo cha', value: '<a href="/reports/lightrag/">← LightRAG Overview</a>' },
+          { label: 'Topic', value: 'Operations' },
+          { label: 'Concurrency knobs', value: '<code>MAX_PARALLEL_INSERT</code>, <code>MAX_ASYNC</code>' },
+          { label: 'Ngày', value: '2026-04-22' },
+        ]}
+      />
+
+      <Section id="intro" title="Tổng quan" themeTag="Intro">
+        <p>
+          LightRAG vận hành khó hơn một RAG vector-only pipeline vì indexing có LLM extraction, graph merge,
+          vector upsert, status tracking và delete/rebuild. Nếu không giới hạn concurrency và không quan sát
+          cache/trace, chi phí và latency sẽ tăng rất nhanh.
+        </p>
+
+        <ReportImage
+          src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/docs/LightRAG-API-Server.assets/image-20250323194750379.png"
+          alt="LightRAG WebUI screenshot về trạng thái hoặc cấu hình server"
+          caption="Operations không chỉ là backend code; WebUI/status/config giúp quan sát pipeline và workspace trong quá trình ingest/query."
+          source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/LightRAG-API-Server.md"
+          sourceLabel="LightRAG API Server docs"
+          bordered={true}
+        />
+
+        <Callout type="warn">
+          <strong>Nguyên tắc vận hành:</strong> tăng concurrency theo throughput thật của LLM backend, không theo số CPU.
+          Graph extraction dùng context dài và prompt nặng; local LLM hoặc API provider rate limits sẽ là bottleneck chính.
+        </Callout>
+      </Section>
+
+      <Section id="concurrency-map" title="Concurrency map" themeTag="Concurrency">
+        <MermaidDiagram
+          caption="Bốn tầng concurrency trong LightRAG, dựa trên docs/LightRAG_concurrent_explain.md."
+          chart={`flowchart TD
+    A["Documents queue"] --> B["Document-level semaphore<br/>max_parallel_insert"]
+    B --> C1["Doc A chunks"]
+    B --> C2["Doc B chunks"]
+    C1 --> D["Chunk extraction semaphore<br/>llm_model_max_async per doc"]
+    C2 --> D
+    D --> E["Global LLM priority queue<br/>query > merge > extraction"]
+    D --> F["Graph merge/rebuild<br/>llm_model_max_async * 2"]
+    F --> E
+    E --> G["LLM backend/API"]
+    F --> H["Graph + vector upsert"]`}
+        />
+
+        <ReportImage
+          src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/README.assets/iShot_2025-03-23_12.40.08.png"
+          alt="LightRAG WebUI screenshot minh họa graph và query interface trong server"
+          caption="Khi queue và merge đang hoạt động, WebUI là nơi kiểm tra graph output và query behavior sau từng batch."
+          source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/README.md"
+          sourceLabel="HKUDS/LightRAG README"
+          bordered={true}
+        />
+
+        <ReportImage
+          src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/README.assets/b2aaf634151b4706892693ffb43d9093.png"
+          alt="LightRAG architecture diagram liên kết indexing graph và retrieval"
+          caption="Concurrency phải bảo vệ cả hai phía của architecture: graph construction và graph-aware retrieval."
+          source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/README.md"
+          sourceLabel="HKUDS/LightRAG README"
+          bordered={true}
+        />
+      </Section>
+
+      <Section id="ops" title="Operational internals" themeTag="Ops">
+        <Technique id="t1" title="1. Document-level concurrency giữ insert không phá graph" tid="O.1" location="docs/LightRAG_concurrent_explain.md; lightrag/lightrag.py:1760-1900">
+          <WhyImportant>
+            <strong>Process nhiều documents cùng lúc có thể làm entity naming conflict tăng.</strong> LightRAG giới hạn
+            bằng <code>max_parallel_insert</code>; docs khuyến nghị 2-10 và thường là khoảng <code>llm_model_max_async / 3</code>.
+          </WhyImportant>
+
+          <CodeBlock caption="Semaphore giới hạn file processing" lang="python">
+            <Fragment is:raw>
+semaphore = asyncio.Semaphore(self.max_parallel_insert)
+
+async def process_document(..., semaphore: asyncio.Semaphore) -> None:
+    async with semaphore:
+        # resolve file path, check cancellation,
+        # chunk, extract, merge, update status
+        ...
+            </Fragment>
+          </CodeBlock>
+
+          <DataTable
+            richCells
+            headers={['Knob', 'Default/khuyến nghị', 'Tác động']}
+            rows={[
+              ['<code>MAX_PARALLEL_INSERT</code>', 'Docs khuyến nghị 2-10', 'Số documents xử lý đồng thời'],
+              ['<code>MAX_ASYNC</code>', 'Default source/docs quanh 4', 'LLM request concurrency và chunk extraction semaphore'],
+              ['Graph merge concurrency', '<code>llm_model_max_async * 2</code>', 'Merge/rebuild entities/relations, không phải bước nào cũng gọi LLM'],
+              ['LLM backend concurrency', 'Phụ thuộc provider/local server', 'Giới hạn thật; vượt quá sẽ retry hoặc latency tăng'],
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t2" title="2. Global LLM priority queue ưu tiên query hơn extraction" tid="O.2" location="lightrag/lightrag.py:742-753; docs/LightRAG_concurrent_explain.md">
+          <WhyImportant>
+            <strong>Server không được để background indexing làm user query chết đói.</strong> LightRAG wrap LLM function bằng priority/concurrency limiter; docs mô tả query được ưu tiên hơn merge và extraction.
+          </WhyImportant>
+
+          <CodeBlock caption="LLM function được wrap bằng priority limiter" lang="python">
+            <Fragment is:raw>
+self.llm_model_func = priority_limit_async_func_call(
+    self.llm_model_max_async,
+    llm_timeout=self.default_llm_timeout,
+    queue_name="LLM func",
+)(
+    partial(
+        self.llm_model_func,
+        hashing_kv=hashing_kv,
+        **self.llm_model_kwargs,
+    )
+)
+            </Fragment>
+          </CodeBlock>
+
+          <ProsCons
+            pros={[
+              'Giữ latency query ổn hơn khi đang ingest batch lớn.',
+              'Một điểm duy nhất để enforce timeout và concurrency.',
+              'Dễ reasoning hơn so với mỗi stage tự gọi LLM không kiểm soát.',
+            ]}
+            cons={[
+              'Nếu MAX_ASYNC quá thấp, indexing sẽ chậm rõ.',
+              'Nếu MAX_ASYNC quá cao, provider rate limit hoặc local GPU memory sẽ thành bottleneck.',
+              'Priority queue không sửa được model context length không đủ.',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t3" title="3. Delete + rebuild khó hơn insert" tid="O.3" location="lightrag/lightrag.py:3223+; lightrag/operate.py rebuild helpers">
+          <WhyImportant>
+            <strong>Xóa document trong graph RAG là consistency problem.</strong> Nếu chỉ xóa chunks, graph vẫn còn entity/relation cũ. LightRAG phải rebuild affected entity/relation từ source chunks còn lại.
+          </WhyImportant>
+
+          <Diagram>{`
+delete doc_id
+  -> acquire delete/pipeline state
+  -> remove full_doc + text_chunks + chunk vectors
+  -> find affected entity/relation source_ids
+  -> rebuild entity descriptions from remaining chunks/cache
+  -> rebuild relationship descriptions and VDB records
+  -> update doc_status/cache if requested
+          `}</Diagram>
+
+          <CodeBlock caption="Rebuild relationship cập nhật graph và relationship VDB" lang="python">
+            <Fragment is:raw>
+updated_relationship_data = {
+    **current_relationship,
+    "description": final_description,
+    "keywords": combined_keywords,
+    "weight": weight,
+    "source_id": GRAPH_FIELD_SEP.join(limited_chunk_ids),
+    "file_path": GRAPH_FIELD_SEP.join(file_paths_list),
+    "truncate": truncation_info,
+}
+await knowledge_graph_inst.upsert_edge(src, tgt, updated_relationship_data)
+await relationships_vdb.upsert(vdb_data)
+            </Fragment>
+          </CodeBlock>
+        </Technique>
+
+        <Technique id="t4" title="4. Cache + token tracking kiểm soát chi phí" tid="O.4" location="docs/AdvancedFeatures.md; lightrag/utils.py">
+          <WhyImportant>
+            <strong>Indexing graph gọi LLM nhiều lần, nên cache và token accounting là vận hành bắt buộc.</strong>
+            LightRAG có LLM response cache, extraction cache, query cache tools và TokenTracker.
+          </WhyImportant>
+
+          <CodeBlock caption="TokenTracker usage từ advanced docs" lang="python">
+            <Fragment is:raw>
+from lightrag.utils import TokenTracker
+
+token_tracker = TokenTracker()
+
+with token_tracker:
+    result1 = await llm_model_func("your question 1")
+    result2 = await llm_model_func("your question 2")
+
+print("Token usage:", token_tracker.get_usage())
+            </Fragment>
+          </CodeBlock>
+
+          <DataTable
+            richCells
+            headers={['Cache/tool', 'Dùng để làm gì', 'Lưu ý']}
+            rows={[
+              ['LLM response cache', 'Tránh gọi lại prompt giống nhau', 'Có thể làm debug nhầm nếu không biết cache hit'],
+              ['Entity extraction cache', 'Hữu ích khi rebuild/delete hoặc retry', 'Không nên xóa nếu còn cần reconstruct graph'],
+              ['Query cache cleanup tool', 'Selective cleanup theo mode/cache type', 'Khác với <code>aclear_cache()</code> toàn cục'],
+              ['TokenTracker', 'Đếm usage trong batch hoặc section', 'Nên bật trong benchmark/cost estimation'],
+              ['Export data', 'CSV/Excel/MD/TXT graph backup/audit', 'Không thay thế backup backend chính thức'],
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t5" title="5. Tracing + RAGAS evaluation đóng vòng feedback" tid="O.5" location="docs/AdvancedFeatures.md; lightrag/evaluation">
+          <WhyImportant>
+            <strong>RAG quality không thể đo bằng “answer nghe có vẻ đúng”.</strong> LightRAG tích hợp Langfuse tracing cho OpenAI-compatible calls và có RAGAS evaluation script để đánh giá retrieval/generation.
+          </WhyImportant>
+
+          <CodeBlock caption="Langfuse env config" lang="bash">
+            <Fragment is:raw>
+LANGFUSE_SECRET_KEY=""
+LANGFUSE_PUBLIC_KEY=""
+LANGFUSE_HOST="https://cloud.langfuse.com"
+LANGFUSE_ENABLE_TRACE=true
+            </Fragment>
+          </CodeBlock>
+
+          <Callout type="warn">
+            <strong>Giới hạn hiện tại:</strong> Advanced docs ghi Langfuse integration hiện tập trung vào
+            OpenAI-compatible API calls. Nếu dùng Ollama/Azure/AWS Bedrock, cần kiểm tra lại trace coverage
+            hoặc bọc thêm instrumentation ở app layer.
+          </Callout>
+        </Technique>
+      </Section>
+
+      <Section id="runbook" title="Runbook vận hành" themeTag="Runbook">
+        <DataTable
+          richCells
+          headers={['Triệu chứng', 'Nguyên nhân khả dĩ', 'Hành động']}
+          rows={[
+            ['Insert batch rất chậm', 'MAX_ASYNC thấp, LLM backend chậm, chunk quá lớn', 'Đo token usage, tăng concurrency thận trọng, giảm chunk size hoặc dùng model indexing nhanh hơn'],
+            ['Query latency tăng khi ingest', 'Background extraction/merge chiếm LLM queue', 'Giảm MAX_PARALLEL_INSERT, quan sát priority queue/provider rate limits'],
+            ['Graph nhiều duplicate nodes', 'Entity naming không ổn định', 'Siết entity types/prompt, review WebUI, thêm normalization domain-specific'],
+            ['Answer thiếu citation/reference', 'file_paths/source_ids thiếu hoặc chunks bị truncate', 'Truyền file_paths khi insert, bật include_references, inspect raw context'],
+            ['Delete xong vẫn thấy fact cũ', 'Rebuild affected entities/relations chưa hoàn tất hoặc cache cũ', 'Kiểm tra pipeline status, clean query cache nếu cần, export graph audit'],
+            ['Embedding query trả rỗng', 'Đổi embedding model/dimension sau index', 'Recreate vector storage hoặc migrate vectors đồng bộ'],
+          ]}
+        />
+      </Section>
+
+      <Section id="wrap" title="Tổng kết" themeTag="Wrap">
+        <KeyTakeaway
+          title="Operations takeaways"
+          items={[
+            'LightRAG production bottleneck thường là LLM concurrency/context, không phải CPU.',
+            'Delete/rebuild là consistency workflow; không được coi như xóa row đơn giản.',
+            'Cache giúp giảm cost nhưng làm debug khó hơn nếu không có cache visibility.',
+            'Trace/evaluation cần được setup từ đầu nếu muốn so sánh query modes hoặc rerank configs một cách nghiêm túc.',
+          ]}
+        />
+
+        <RefList items={[
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/LightRAG_concurrent_explain.md">LightRAG concurrent control strategy</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/AdvancedFeatures.md">Advanced Features</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/lightrag.py">lightrag.py pipeline/delete/query APIs</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/operate.py">operate.py rebuild/query context internals</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/evaluation/README_EVALUASTION_RAGAS.md">RAGAS evaluation README</a>',
+        ]} />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>
+

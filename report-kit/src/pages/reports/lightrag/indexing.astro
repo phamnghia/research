@@ -1,0 +1,351 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RefList from '../../../components/RefList.astro';
+import DataTable from '../../../components/DataTable.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+import ReportImage from '../../../components/ReportImage.astro';
+import KeyTakeaway from '../../../components/KeyTakeaway.astro';
+import StepList from '../../../components/StepList.astro';
+
+const title = 'Deep Dive: LightRAG Indexing Pipeline';
+const description = 'Phân tích chi tiết pipeline indexing của LightRAG: chunking, entity/relation extraction, parser hardening, merge, source tracking, vector upsert và incremental update.';
+---
+
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar
+      intro="Indexing"
+      groups={[
+        {
+          title: 'Context',
+          items: [
+            { href: '#intro', label: 'Tổng quan', section: true },
+            { href: '#flow', label: 'Flow tổng thể' },
+          ],
+        },
+        {
+          title: 'Pipeline',
+          items: [
+            { href: '#t1', label: '1. Enqueue + status' },
+            { href: '#t2', label: '2. Chunking' },
+            { href: '#t3', label: '3. Entity/relation extraction' },
+            { href: '#t4', label: '4. Merge nodes/edges' },
+            { href: '#t5', label: '5. Incremental update' },
+          ],
+        },
+        {
+          title: 'Kết luận',
+          items: [
+            { href: '#recipe', label: 'Implementation recipe', section: true },
+            { href: '#wrap', label: 'Tổng kết', section: true },
+          ],
+        },
+      ]}
+    />
+
+    <main>
+      <Breadcrumb href="/reports/lightrag/" label="← LightRAG Overview" />
+
+      <Hero
+        title={title}
+        subtitle={`Phân tích chi tiết từ báo cáo <a href="/reports/lightrag/">Tổng quan LightRAG</a> — document ingestion đến graph/vector index.`}
+        meta={[
+          { label: 'Báo cáo cha', value: '<a href="/reports/lightrag/">← LightRAG Overview</a>' },
+          { label: 'Topic', value: 'Indexing' },
+          { label: 'Source snapshot', value: '<code>v1.4.15</code>' },
+          { label: 'Ngày', value: '2026-04-22' },
+        ]}
+      />
+
+      <Section id="intro" title="Tổng quan" themeTag="Intro">
+        <p>
+          Indexing trong LightRAG là bước biến tài liệu thô thành một graph artifact có thể query.
+          Nếu NaiveRAG coi document là tập chunks, LightRAG coi document là nguồn để sinh entity nodes,
+          relation edges, entity/relation vector records, text chunks và doc processing state.
+        </p>
+
+        <ReportImage
+          src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/README.assets/b2aaf634151b4706892693ffb43d9093.png"
+          alt="Sơ đồ kiến trúc LightRAG với graph-based text indexing và dual-level retrieval"
+          caption="Indexing tạo graph từ raw text, sau đó graph này trở thành nền cho low-level và high-level retrieval."
+          source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/README.md"
+          sourceLabel="HKUDS/LightRAG README"
+          bordered={true}
+        />
+
+        <Callout type="unique">
+          <strong>Quan sát quan trọng:</strong> LightRAG không rebuild toàn graph khi có document mới. Nó
+          extract graph fragment của document mới rồi merge vào graph hiện tại bằng source IDs, descriptions
+          và vector records. Đây là phần làm nó phù hợp hơn GraphRAG cho knowledge base động.
+        </Callout>
+      </Section>
+
+      <Section id="flow" title="Flow tổng thể" themeTag="Flow">
+        <ReportImage
+          src="https://learnopencv.com/wp-content/uploads/2024/11/LightRAG-VectorDB-Json-KV-Store-Indexing-Flowchart-scaled.jpg"
+          alt="Flowchart indexing LightRAG từ input documents đến vector database, JSON KV store và graph"
+          caption="Flowchart indexing cho thấy LightRAG ghi nhiều artifact song song: full docs, chunks, vector records và graph nodes/edges."
+          source="https://learnopencv.com/lightrag/"
+          sourceLabel="LearnOpenCV"
+          bordered={true}
+        />
+
+        <Diagram>{`
+insert / ainsert
+  -> apipeline_enqueue_documents()
+  -> doc_status: PENDING
+  -> apipeline_process_enqueue_documents()
+  -> chunking_by_token_size()
+  -> chunks_vdb.upsert()
+  -> extract_entities()
+  -> merge_nodes_and_edges()
+  -> graph.upsert_node / graph.upsert_edge
+  -> entities_vdb / relationships_vdb upsert
+  -> doc_status: PROCESSED
+        `}</Diagram>
+
+        <ReportImage
+          src="https://raw.githubusercontent.com/HKUDS/LightRAG/v1.4.15/README.assets/iShot_2025-03-23_12.40.08.png"
+          alt="LightRAG WebUI screenshot hiển thị graph exploration sau khi indexing"
+          caption="Sau indexing, WebUI có thể visualize graph artifact. Đây là feedback loop quan trọng để phát hiện entity alias/noisy relation."
+          source="https://github.com/HKUDS/LightRAG/blob/v1.4.15/README.md"
+          sourceLabel="HKUDS/LightRAG README"
+          bordered={true}
+        />
+      </Section>
+
+      <Section id="pipeline" title="Pipeline internals" themeTag="Code">
+        <Technique id="t1" title="1. Enqueue + document status là checkpoint layer" tid="I.1" location="lightrag/lightrag.py:1201-1270, 1760-1872">
+          <WhyImportant>
+            <strong>Indexing không nên là một hàm fire-and-forget.</strong> LightRAG tách enqueue và process,
+            có track id, doc status, pipeline busy flag và cancellation flag. Đây là khác biệt lớn khi đưa RAG
+            vào server có upload nhiều file.
+          </WhyImportant>
+
+          <CodeBlock caption="insert chỉ bọc ainsert và trả track_id" lang="python">
+            <Fragment is:raw>
+async def ainsert(
+    self,
+    input: str | list[str],
+    split_by_character: str | None = None,
+    split_by_character_only: bool = False,
+    ids: str | list[str] | None = None,
+    file_paths: str | list[str] | None = None,
+    track_id: str | None = None,
+) -> str:
+    if track_id is None:
+        track_id = generate_track_id("insert")
+
+    await self.apipeline_enqueue_documents(input, ids, file_paths, track_id)
+    await self.apipeline_process_enqueue_documents(
+        split_by_character, split_by_character_only
+    )
+    return track_id
+            </Fragment>
+          </CodeBlock>
+
+          <ProsCons
+            pros={[
+              'Có thể monitor tiến trình insert qua track id và doc status.',
+              'Failed/pending/processing docs có thể được retry bởi pipeline.',
+              'Pipeline lock ngăn nhiều worker cùng mutate graph một cách nguy hiểm.',
+            ]}
+            cons={[
+              'Phức tạp hơn một ingestion script đơn giản.',
+              'Nếu doc_status bị corrupt, cần consistency check/recovery logic.',
+              'Cần expose status rõ ở API/UI để user hiểu file đang ở stage nào.',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t2" title="2. Chunking giữ thứ tự và source path" tid="I.2" location="lightrag/operate.py:88-126">
+          <WhyImportant>
+            <strong>Chunking là nơi quyết định granularity của graph.</strong> Chunk quá lớn làm extraction khó;
+            chunk quá nhỏ làm relation bị mất context. LightRAG default 1200 tokens và overlap 100 tokens.
+          </WhyImportant>
+
+          <CodeBlock caption="Token chunking" lang="python">
+            <Fragment is:raw>
+for index, start in enumerate(
+    range(0, len(tokens), chunk_token_size - chunk_overlap_token_size)
+):
+    chunk_content = tokenizer.decode(tokens[start : start + chunk_token_size])
+    results.append(
+        {
+            "tokens": min(chunk_token_size, len(tokens) - start),
+            "content": chunk_content.strip(),
+            "chunk_order_index": index,
+        }
+    )
+            </Fragment>
+          </CodeBlock>
+
+          <DataTable
+            richCells
+            headers={['Parameter', 'Default/ý nghĩa', 'Rủi ro nếu sai']}
+            rows={[
+              ['<code>chunk_token_size</code>', '1200 tokens trong docs/paper experiments', 'Quá lớn làm LLM extraction bỏ sót; quá nhỏ phá relation context'],
+              ['<code>chunk_overlap_token_size</code>', '100 tokens', 'Overlap thấp mất continuity; overlap cao tăng chi phí indexing'],
+              ['<code>file_paths</code>', 'Metadata citation/source tracking', 'Thiếu source path làm references và deletion/rebuild khó audit'],
+              ['<code>split_by_character_only</code>', 'Cho custom documents', 'Nếu chunk vẫn vượt limit thì pipeline phải fail rõ thay vì âm thầm truncate'],
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t3" title="3. Entity/relation extraction parser được harden cho output lỗi" tid="I.3" location="lightrag/operate.py:937-1062">
+          <WhyImportant>
+            <strong>LLM extraction không bao giờ sạch tuyệt đối.</strong> Source code LightRAG dành nhiều logic để sửa delimiter corruption,
+            normalize relation/entity marker và warning khi missing completion delimiter. Đây là dấu hiệu hệ thống đã va chạm thực tế.
+          </WhyImportant>
+
+          <CodeBlock caption="Parser sửa delimiter và tách entity/relation records" lang="python">
+            <Fragment is:raw>
+record = fix_tuple_delimiter_corruption(record, delimiter_core, tuple_delimiter)
+record_attributes = split_string_by_multi_markers(record, [tuple_delimiter])
+
+entity_data = _handle_single_entity_extraction(
+    record_attributes, chunk_key, timestamp, file_path
+)
+if entity_data is not None:
+    truncated_name = _truncate_entity_identifier(
+        entity_data["entity_name"],
+        DEFAULT_ENTITY_NAME_MAX_LENGTH,
+        chunk_key,
+        "Entity name",
+    )
+    maybe_nodes[truncated_name].append(entity_data)
+    continue
+
+relationship_data = _handle_single_relationship_extraction(
+    record_attributes, chunk_key, timestamp, file_path
+)
+            </Fragment>
+          </CodeBlock>
+
+          <Callout type="warn">
+            <strong>Prompt engineering chưa đủ.</strong> Production graph extraction cần cả parser hardening,
+            length limits, source tracking và observable warnings. Nếu chỉ tin output LLM đúng format, graph sẽ hỏng âm thầm.
+          </Callout>
+        </Technique>
+
+        <Technique id="t4" title="4. Merge nodes/edges vừa cập nhật graph vừa cập nhật vector records" tid="I.4" location="lightrag/operate.py:1623-1770, 1430-1596">
+          <WhyImportant>
+            <strong>Graph và vector index phải nhất quán.</strong> Node/edge được merge trong graph nhưng cũng phải có vector record tương ứng để retrieval tìm được entity/relation bằng semantic query.
+          </WhyImportant>
+
+          <CodeBlock caption="Relationship merge tạo content cho relationship VDB" lang="python">
+            <Fragment is:raw>
+rel_vdb_id = compute_mdhash_id(src + tgt, prefix="rel-")
+rel_content = f"{combined_keywords}\t{src}\n{tgt}\n{final_description}"
+vdb_data = {
+    rel_vdb_id: {
+        "src_id": src,
+        "tgt_id": tgt,
+        "source_id": updated_relationship_data["source_id"],
+        "content": rel_content,
+        "keywords": combined_keywords,
+        "description": final_description,
+        "weight": weight,
+        "file_path": updated_relationship_data["file_path"],
+    }
+}
+await relationships_vdb.upsert(vdb_data)
+            </Fragment>
+          </CodeBlock>
+
+          <ProsCons
+            pros={[
+              'Graph traversal và vector retrieval cùng nhìn một semantic artifact.',
+              'Descriptions được dedupe/summarize giúp relation content cô đọng hơn raw chunks.',
+              'Source IDs và file paths giữ khả năng trace về document/chunk gốc.',
+            ]}
+            cons={[
+              'Nếu graph write thành công nhưng vector write fail, retrieval có thể mất entity/relation.',
+              'Merge nhiều aliases của cùng entity vẫn phụ thuộc naming quality từ LLM.',
+              'Description summary dùng LLM nên có thể drift nếu model không ổn định.',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t5" title="5. Incremental update: union graph fragment thay vì rebuild toàn cục" tid="I.5" location="Paper §3.1; lightrag/lightrag.py delete/rebuild paths">
+          <WhyImportant>
+            <strong>Đây là lợi thế chính so với GraphRAG trong data động.</strong> GraphRAG có community reports nên update mới có thể kéo theo regeneration; LightRAG merge entities/relations mới vào graph hiện tại.
+          </WhyImportant>
+
+          <Diagram>{`
+Existing graph:  G = (V, E)
+New document:    D'
+Extracted graph: G' = (V', E')
+
+LightRAG update:
+  V := merge(V, V')
+  E := merge(E, E')
+  source_ids := source_ids + new_chunk_ids
+  descriptions := summarize_or_append()
+          `}</Diagram>
+
+          <Callout type="info">
+            <strong>Deletion là phép ngược khó hơn insertion.</strong> Xóa document phải rebuild affected
+            entities/relations từ chunks còn lại, không chỉ xóa chunk vectors. Vì vậy LightRAG lưu
+            `entity_chunks` và `relation_chunks` để biết entity/relation được chống đỡ bởi nguồn nào.
+          </Callout>
+        </Technique>
+      </Section>
+
+      <Section id="recipe" title="Implementation recipe" themeTag="Recipe">
+        <StepList
+          steps={[
+            {
+              title: 'Prototype bằng default storage',
+              description: 'Dùng JSON KV, NanoVectorDB, NetworkX để kiểm tra graph quality trước.',
+              code: 'uv pip install lightrag-hku\nexport OPENAI_API_KEY=...\npython examples/lightrag_openai_demo.py',
+              lang: 'bash',
+            },
+            {
+              title: 'Quan sát graph sau vài documents đầu',
+              description: 'Chạy server/WebUI, kiểm tra entity aliases, relation noise và source paths.',
+              code: 'uv tool install "lightrag-hku[api]"\nlightrag-server',
+              lang: 'bash',
+            },
+            {
+              title: 'Khóa schema trước khi scale',
+              description: 'Chọn embedding model, dimension, entity types, chunk size và backend storage trước khi ingest corpus lớn.',
+              code: 'EMBEDDING_MODEL=BAAI/bge-m3\nEMBEDDING_DIM=1024\nENTITY_TYPES=organization,person,location,event,concept',
+              lang: 'bash',
+            },
+          ]}
+        />
+      </Section>
+
+      <Section id="wrap" title="Tổng kết" themeTag="Wrap">
+        <KeyTakeaway
+          title="Indexing takeaways"
+          items={[
+            'LightRAG indexing là graph construction pipeline, không phải chỉ embedding chunks.',
+            'Parser hardening và source tracking là bắt buộc vì LLM extraction output không ổn định tuyệt đối.',
+            'Incremental update là lợi thế kiến trúc, nhưng vẫn cần kiểm soát entity alias và relation noise.',
+            'Trước khi production, hãy dùng WebUI để inspect graph quality trên sample corpus.',
+          ]}
+        />
+
+        <RefList items={[
+          '<a href="https://aclanthology.org/2025.findings-emnlp.568.pdf">LightRAG paper PDF</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/lightrag.py">lightrag.py</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/lightrag/operate.py">operate.py</a>',
+          '<a href="https://github.com/HKUDS/LightRAG/blob/v1.4.15/docs/Algorithm.md">Algorithm flowcharts</a>',
+        ]} />
+      </Section>
+    </main>
+  </div>
+</ReportLayout>
+
