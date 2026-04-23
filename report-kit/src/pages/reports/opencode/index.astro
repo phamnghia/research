@@ -3,12 +3,7 @@ import ReportLayout from '../../../layouts/ReportLayout.astro';
 import Sidebar from '../../../components/Sidebar.astro';
 import Hero from '../../../components/Hero.astro';
 import Breadcrumb from '../../../components/Breadcrumb.astro';
-import {
-  title,
-  description,
-  sidebarGroups,
-  heroMeta,
-} from '../../../data/reports/opencode-report';
+import { title, description, sidebarGroups, heroMeta } from './const';
 import OpencodeIntroSection from './_components/OpencodeIntroSection.astro';
 import OpencodeAgentLoopSection from './_components/OpencodeAgentLoopSection.astro';
 import OpencodeContextManagementSection from './_components/OpencodeContextManagementSection.astro';
@@ -18,6 +13,8 @@ import OpencodePermissionModelSection from './_components/OpencodePermissionMode
 import OpencodeSystemPromptSection from './_components/OpencodeSystemPromptSection.astro';
 import OpencodeConclusionSection from './_components/OpencodeConclusionSection.astro';
 import OpencodeSourcesSection from './_components/OpencodeSourcesSection.astro';
+
+
 ---
 
 <ReportLayout title={title} description={description}>

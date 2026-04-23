@@ -1,0 +1,201 @@
+- generic [ref=e2]:
+  - complementary [ref=e4]:
+    - link "DEVALAXY" [ref=e5] [cursor=pointer]:
+      - /url: /
+      - img "DEVALAXY" [ref=e6]
+    - generic [ref=e7]: ReAct / tool-augmented reasoning
+    - heading "Mở đầu" [level=3] [ref=e8]
+    - list [ref=e9]:
+      - listitem [ref=e10]:
+        - link "Tổng quan" [ref=e11] [cursor=pointer]:
+          - /url: "#intro"
+    - heading "Phân tích" [level=3] [ref=e12]
+    - list [ref=e13]:
+      - listitem [ref=e14]:
+        - link "Cơ chế" [ref=e15] [cursor=pointer]:
+          - /url: "#mechanics"
+      - listitem [ref=e16]:
+        - link "Khi dùng" [ref=e17] [cursor=pointer]:
+          - /url: "#usage"
+      - listitem [ref=e18]:
+        - link "Failure modes" [ref=e19] [cursor=pointer]:
+          - /url: "#failure"
+      - listitem [ref=e20]:
+        - link "So sánh" [ref=e21] [cursor=pointer]:
+          - /url: "#compare"
+    - heading "Kết luận" [level=3] [ref=e22]
+    - list [ref=e23]:
+      - listitem [ref=e24]:
+        - link "Tham khảo" [ref=e25] [cursor=pointer]:
+          - /url: "#refs"
+  - main [ref=e26]:
+    - link "← ← Prompt Engineering" [ref=e27] [cursor=pointer]:
+      - /url: /reports/prompt-engineering/
+    - generic [ref=e28]:
+      - 'heading "Deep Dive: ReAct / tool-augmented reasoning" [level=1] [ref=e29]'
+      - generic [ref=e30]:
+        - text: Phân tích sâu từ báo cáo
+        - link "Prompt Engineering" [ref=e31] [cursor=pointer]:
+          - /url: /reports/prompt-engineering/
+        - text: "— ReAct ghép reasoning với hành động, tạo proto-pattern cho agent loops hiện đại: think, act, observe, update."
+      - generic [ref=e32]:
+        - generic [ref=e33]:
+          - strong [ref=e34]: "Báo cáo cha:"
+          - link "← Prompt Engineering" [ref=e35] [cursor=pointer]:
+            - /url: /reports/prompt-engineering/
+        - generic [ref=e36]:
+          - strong [ref=e37]: "Topic:"
+          - text: ReAct / tool-augmented reasoning
+        - generic [ref=e38]:
+          - strong [ref=e39]: "Ngày:"
+          - text: 2026-04-22
+        - generic [ref=e40]:
+          - strong [ref=e41]: "Cấp độ:"
+          - text: Layer 2 / deep dive
+    - generic [ref=e42]:
+      - heading "Tổng quan Agents" [level=2] [ref=e43]:
+        - text: Tổng quan
+        - generic [ref=e44]: Agents
+      - paragraph [ref=e46]:
+        - strong [ref=e47]: ReAct là một trong những mẫu nền quan trọng nhất của agentic prompting.
+        - text: Nó cho model vừa reasoning vừa hành động, thay vì nhốt mọi thứ trong một đoạn CoT chỉ có text.
+      - paragraph [ref=e48]: "Ý tưởng cốt lõi rất thực dụng: nếu câu hỏi cần dữ kiện ngoài model, đừng bắt model tự đoán. Hãy cho nó hành động, quan sát kết quả, rồi cập nhật suy luận."
+      - paragraph [ref=e49]: ReAct mở ra một protocol rõ ràng giữa model và môi trường. Nhờ đó, tool use trở thành một phần của reasoning chứ không phải một add-on sau khi model đã nghĩ xong.
+      - table [ref=e50]:
+        - rowgroup [ref=e51]:
+          - row "Tín hiệu Giải thích Ý nghĩa" [ref=e52]:
+            - columnheader "Tín hiệu" [ref=e53]
+            - columnheader "Giải thích" [ref=e54]
+            - columnheader "Ý nghĩa" [ref=e55]
+        - rowgroup [ref=e56]:
+          - row "Thought Model tóm tắt ý định Tăng transparency" [ref=e57]:
+            - cell "Thought" [ref=e58]
+            - cell "Model tóm tắt ý định" [ref=e59]
+            - cell "Tăng transparency" [ref=e60]
+          - row "Action Model đề xuất tool call Biến suy luận thành hành động" [ref=e61]:
+            - cell "Action" [ref=e62]
+            - cell "Model đề xuất tool call" [ref=e63]
+            - cell "Biến suy luận thành hành động" [ref=e64]
+          - row "Observation Kết quả tool trả về Cập nhật state" [ref=e65]:
+            - cell "Observation" [ref=e66]
+            - cell "Kết quả tool trả về" [ref=e67]
+            - cell "Cập nhật state" [ref=e68]
+    - generic [ref=e69]:
+      - heading "Cơ chế Mechanics" [level=2] [ref=e70]:
+        - text: Cơ chế
+        - generic [ref=e71]: Mechanics
+      - paragraph [ref=e72]: "Một ReAct loop chuẩn thường có ba block: Thought → Action → Observation. Điều quan trọng không phải là format đẹp, mà là format ổn định để controller của bạn parse được."
+      - paragraph [ref=e73]: "Khi action trả về, model phải xử lý nó như untrusted input. Đây là điểm mà nhiều agent prototype thất bại: họ nghĩ tool output là “sự thật”, trong khi nó chỉ là một nguồn dữ liệu khác cần kiểm soát."
+      - heading "ReAct protocol" [level=4] [ref=e74]
+      - generic [ref=e75]:
+        - generic: TEXT
+        - button "Copy code" [ref=e76] [cursor=pointer]: Copy
+        - code [ref=e79]:
+          - generic [ref=e80]: "Thought: I should verify the latest source."
+          - generic [ref=e81]: "Action: search_docs[\"prompt engineering taxonomy\"]"
+          - generic [ref=e82]: "Observation: retrieved the 2026 taxonomy paper"
+          - generic [ref=e83]: "Thought: Now I can synthesize the result."
+      - generic [ref=e84]:
+        - paragraph [ref=e85]: ReAct là reasoning loop có tool use và observation update.
+        - generic [ref=e87]:
+          - document [ref=e89]:
+            - generic [ref=e91]:
+              - paragraph [ref=e104]: if tool not needed
+              - generic [ref=e105]:
+                - paragraph [ref=e112]: Thought
+                - paragraph [ref=e119]: Action / tool call
+                - paragraph [ref=e126]: Observation
+                - paragraph [ref=e133]: Update state
+                - paragraph [ref=e140]: Final answer
+          - button "Xem sơ đồ phóng to" [ref=e141] [cursor=pointer]: ⛶ View full image
+      - generic [ref=e142]:
+        - strong [ref=e143]: Tham khảo
+        - list [ref=e144]:
+          - listitem [ref=e145]:
+            - 'link "ReAct: Synergizing Reasoning and Acting in Language Models" [ref=e146] [cursor=pointer]':
+              - /url: https://arxiv.org/abs/2210.03629
+          - listitem [ref=e147]:
+            - link "OpenAI function calling" [ref=e148] [cursor=pointer]:
+              - /url: https://platform.openai.com/docs/guides/function-calling/parallel-function-calling-and-structured-outputs
+          - listitem [ref=e149]:
+            - link "Claude tool use" [ref=e150] [cursor=pointer]:
+              - /url: https://platform.claude.com/docs/en/docs/build-with-claude/tool-use
+    - generic [ref=e151]:
+      - heading "Khi dùng Fit" [level=2] [ref=e152]:
+        - text: Khi dùng
+        - generic [ref=e153]: Fit
+      - paragraph [ref=e154]: "ReAct phù hợp khi câu trả lời phụ thuộc vào tài nguyên ngoài model: search, database lookup, code execution, browser, MCP tool hay internal API."
+      - paragraph [ref=e155]: Nó cũng phù hợp khi bạn muốn model tự quyết định lúc nào nên act và lúc nào nên suy luận tiếp, thay vì hard-code toàn bộ orchestration.
+      - generic [ref=e156]:
+        - generic [ref=e157]:
+          - heading "Ưu điểm" [level=5] [ref=e158]
+          - list [ref=e159]:
+            - listitem [ref=e160]: Ghép reasoning với môi trường thật
+            - listitem [ref=e161]: Hợp với agentic workflows
+            - listitem [ref=e162]: Cho phép human/validator can thiệp giữa các bước
+        - generic [ref=e163]:
+          - heading "Nhược điểm" [level=5] [ref=e164]
+          - list [ref=e165]:
+            - listitem [ref=e166]: Tool output là untrusted input
+            - listitem [ref=e167]: Dễ sinh loop hoặc call tool thừa
+            - listitem [ref=e168]: Cần protocol và guardrails chặt
+    - generic [ref=e169]:
+      - heading "Failure modes Risk" [level=2] [ref=e170]:
+        - text: Failure modes
+        - generic [ref=e171]: Risk
+      - generic [ref=e173]: ReAct không tự động an toàn. Nếu không có structured outputs, approvals và input separation, bạn chỉ chuyển rủi ro từ “reasoning sai” sang “tool misuse”.
+      - group [ref=e174]:
+        - generic "Lỗi thường gặp trong ReAct" [ref=e175] [cursor=pointer]:
+          - generic [ref=e176]: Lỗi thường gặp trong ReAct
+          - generic [ref=e177]: ▸
+    - generic [ref=e178]:
+      - heading "So sánh Compare" [level=2] [ref=e179]:
+        - text: So sánh
+        - generic [ref=e180]: Compare
+      - table [ref=e181]:
+        - rowgroup [ref=e182]:
+          - row "Technique Khác biệt Khi nào dùng hơn ReAct" [ref=e183]:
+            - columnheader "Technique" [ref=e184]
+            - columnheader "Khác biệt" [ref=e185]
+            - columnheader "Khi nào dùng hơn ReAct" [ref=e186]
+        - rowgroup [ref=e187]:
+          - row "Prompt chaining Mỗi bước là một call riêng Khi muốn kiểm soát pipeline chặt" [ref=e188]:
+            - cell "Prompt chaining" [ref=e189]
+            - cell "Mỗi bước là một call riêng" [ref=e190]
+            - cell "Khi muốn kiểm soát pipeline chặt" [ref=e191]
+          - row "Structured outputs Schema hóa output Khi action phải parse được ngay" [ref=e192]:
+            - cell "Structured outputs" [ref=e193]
+            - cell "Schema hóa output" [ref=e194]
+            - cell "Khi action phải parse được ngay" [ref=e195]
+          - row "CoT Chỉ reasoning, không hành động Khi không cần tool use" [ref=e196]:
+            - cell "CoT" [ref=e197]
+            - cell "Chỉ reasoning, không hành động" [ref=e198]
+            - cell "Khi không cần tool use" [ref=e199]
+      - generic [ref=e200]:
+        - strong [ref=e201]: Tham khảo
+        - list [ref=e202]:
+          - listitem [ref=e203]:
+            - link "ReAct" [ref=e204] [cursor=pointer]:
+              - /url: https://arxiv.org/abs/2210.03629
+          - listitem [ref=e205]:
+            - link "Function calling & structured outputs" [ref=e206] [cursor=pointer]:
+              - /url: https://platform.openai.com/docs/guides/function-calling/parallel-function-calling-and-structured-outputs
+          - listitem [ref=e207]:
+            - 'link "Claude: chain complex prompts" [ref=e208] [cursor=pointer]':
+              - /url: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#chain-complex-prompts
+    - generic [ref=e209]:
+      - heading "Tham khảo chính Sources" [level=2] [ref=e210]:
+        - text: Tham khảo chính
+        - generic [ref=e211]: Sources
+      - generic [ref=e212]:
+        - strong [ref=e213]: Tham khảo
+        - list [ref=e214]:
+          - listitem [ref=e215]:
+            - 'link "ReAct: Synergizing Reasoning and Acting in Language Models" [ref=e216] [cursor=pointer]':
+              - /url: https://arxiv.org/abs/2210.03629
+          - listitem [ref=e217]:
+            - link "OpenAI function calling" [ref=e218] [cursor=pointer]:
+              - /url: https://platform.openai.com/docs/guides/function-calling/parallel-function-calling-and-structured-outputs
+          - listitem [ref=e219]:
+            - link "Claude tool use" [ref=e220] [cursor=pointer]:
+              - /url: https://platform.claude.com/docs/en/docs/build-with-claude/tool-use

@@ -1,0 +1,183 @@
+---
+import ReportLayout from '../layouts/ReportLayout.astro';
+import Sidebar, { type SidebarGroup } from './Sidebar.astro';
+import Hero, { type MetaItem } from './Hero.astro';
+import Breadcrumb from './Breadcrumb.astro';
+import Section from './Section.astro';
+import WhyImportant from './WhyImportant.astro';
+import Callout from './Callout.astro';
+import CodeBlock from './CodeBlock.astro';
+import Diagram from './Diagram.astro';
+import MermaidDiagram from './MermaidDiagram.astro';
+import ProsCons from './ProsCons.astro';
+import DataTable from './DataTable.astro';
+import Accordion from './Accordion.astro';
+import KeyTakeaway from './KeyTakeaway.astro';
+import RefList from './RefList.astro';
+import ReportImage from './ReportImage.astro';
+
+export interface PromptDeepDiveCodeBlock {
+  caption: string;
+  code: string;
+  lang?: string;
+}
+
+export interface PromptDeepDiveCallout {
+  type?: 'info' | 'warn' | 'unique' | 'success';
+  html: string;
+}
+
+export interface PromptDeepDiveTable {
+  headers: string[];
+  rows: string[][];
+  variant?: 'default' | 'compare';
+  richCells?: boolean;
+}
+
+export interface PromptDeepDiveImage {
+  src: string;
+  alt: string;
+  caption: string;
+  source: string;
+  sourceLabel?: string;
+  bordered?: boolean;
+}
+
+export interface PromptDeepDiveAccordion {
+  title: string;
+  items: string[];
+  defaultOpen?: boolean;
+}
+
+export interface PromptDeepDiveProsCons {
+  pros: string[];
+  cons: string[];
+  prosTitle?: string;
+  consTitle?: string;
+}
+
+export interface PromptDeepDiveSection {
+  id: string;
+  title: string;
+  themeTag: string;
+  whyImportant?: string;
+  paragraphs?: string[];
+  images?: PromptDeepDiveImage[];
+  callout?: PromptDeepDiveCallout;
+  codeBlocks?: PromptDeepDiveCodeBlock[];
+  diagram?: string;
+  mermaid?: string;
+  mermaidCaption?: string;
+  prosCons?: PromptDeepDiveProsCons;
+  table?: PromptDeepDiveTable;
+  accordion?: PromptDeepDiveAccordion;
+  keyTakeaway?: string[];
+  keyTakeawayTitle?: string;
+  refs?: string[];
+}
+
+export interface PromptDeepDiveTopic {
+  slug: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  parentHref: string;
+  parentLabel: string;
+  topicLabel: string;
+  meta: MetaItem[];
+  sidebarGroups: SidebarGroup[];
+  sections: PromptDeepDiveSection[];
+}
+
+interface Props {
+  topic: PromptDeepDiveTopic;
+}
+
+const { topic } = Astro.props as Props;
+---
+<ReportLayout title={topic.title} description={topic.description}>
+  <div class="layout">
+    <Sidebar intro={topic.topicLabel} groups={topic.sidebarGroups} />
+
+    <main>
+      <Breadcrumb href={topic.parentHref} label={`← ${topic.parentLabel}`} />
+
+      <Hero
+        title={topic.title}
+        subtitle={topic.subtitle}
+        meta={topic.meta}
+      />
+
+      {topic.sections.map((section) => (
+        <Section id={section.id} title={section.title} themeTag={section.themeTag}>
+          {section.whyImportant && (
+            <WhyImportant>
+              <p set:html={section.whyImportant} />
+            </WhyImportant>
+          )}
+
+          {section.paragraphs?.map((paragraph) => <p set:html={paragraph} />)}
+
+          {section.images?.map((image) => (
+            <ReportImage
+              src={image.src}
+              alt={image.alt}
+              caption={image.caption}
+              source={image.source}
+              sourceLabel={image.sourceLabel}
+              bordered={image.bordered}
+            />
+          ))}
+
+          {section.callout && (
+            <Callout type={section.callout.type ?? 'info'}>
+              <div set:html={section.callout.html} />
+            </Callout>
+          )}
+
+          {section.codeBlocks?.map((block) => (
+            <CodeBlock caption={block.caption} code={block.code} lang={block.lang} />
+          ))}
+
+          {section.diagram && <Diagram>{section.diagram}</Diagram>}
+
+          {section.mermaid && (
+            <MermaidDiagram chart={section.mermaid} caption={section.mermaidCaption} />
+          )}
+
+          {section.prosCons && (
+            <ProsCons
+              pros={section.prosCons.pros}
+              cons={section.prosCons.cons}
+              prosTitle={section.prosCons.prosTitle}
+              consTitle={section.prosCons.consTitle}
+            />
+          )}
+
+          {section.table && (
+            <DataTable
+              headers={section.table.headers}
+              rows={section.table.rows}
+              variant={section.table.variant}
+              richCells={section.table.richCells}
+            />
+          )}
+
+          {section.accordion && (
+            <Accordion title={section.accordion.title} defaultOpen={section.accordion.defaultOpen}>
+              <ul>
+                {section.accordion.items.map((item) => <li set:html={item} />)}
+              </ul>
+            </Accordion>
+          )}
+
+          {section.keyTakeaway && (
+            <KeyTakeaway items={section.keyTakeaway} title={section.keyTakeawayTitle} />
+          )}
+
+          {section.refs && <RefList items={section.refs} />}
+        </Section>
+      ))}
+    </main>
+  </div>
+</ReportLayout>

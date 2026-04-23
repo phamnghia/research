@@ -1,0 +1,1480 @@
+---
+import ReportLayout from '../../../layouts/ReportLayout.astro';
+import Sidebar from '../../../components/Sidebar.astro';
+import Hero from '../../../components/Hero.astro';
+import Breadcrumb from '../../../components/Breadcrumb.astro';
+import Section from '../../../components/Section.astro';
+import Subheading from '../../../components/Subheading.astro';
+import Technique from '../../../components/Technique.astro';
+import ProsCons from '../../../components/ProsCons.astro';
+import Callout from '../../../components/Callout.astro';
+import Chip from '../../../components/Chip.astro';
+import Diagram from '../../../components/Diagram.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import RefList from '../../../components/RefList.astro';
+import SummaryTable from '../../../components/SummaryTable.astro';
+import type { SummaryRow } from '../../../components/SummaryTable.astro';
+import DataTable from '../../../components/DataTable.astro';
+import LinkList from '../../../components/LinkList.astro';
+import WhyImportant from '../../../components/WhyImportant.astro';
+import DeepDiveLink from '../../../components/DeepDiveLink.astro';
+import Accordion from '../../../components/Accordion.astro';
+import KeyTakeaway from '../../../components/KeyTakeaway.astro';
+import StatGrid from '../../../components/StatGrid.astro';
+import MermaidDiagram from '../../../components/MermaidDiagram.astro';
+import Tabs from '../../../components/Tabs.astro';
+
+const title = 'Prompt Engineering — 4 nhóm lớn, 24 kỹ thuật hiện đại';
+const description =
+  'Báo cáo tổng hợp prompt engineering từ survey 2024-2026 và docs chính thức của OpenAI, Anthropic, Google, Microsoft: 4 nhóm lớn, 24 kỹ thuật cốt lõi, tập trung vào instruction, context, reasoning và reliability.';
+
+const sidebarGroups = [
+  {
+    title: 'Mở đầu',
+    items: [
+      { href: '#intro', label: 'Tổng quan', section: true },
+      { href: '#map', label: 'Taxonomy mới' },
+      { href: '#examples', label: 'Ví dụ thực chiến' },
+    ],
+  },
+  {
+    title: 'Nhóm 1 — Profile & instruction',
+    items: [
+      { href: '#t1', label: '1. Role / persona' },
+      { href: '#t2', label: '2. Task instruction' },
+      { href: '#t3', label: '3. Zero-shot' },
+      { href: '#t4', label: '4. Few-shot' },
+      { href: '#t5', label: '5. Example selection' },
+      { href: '#t6', label: '6. XML / delimiters' },
+    ],
+  },
+  {
+    title: 'Nhóm 2 — Knowledge & context',
+    items: [
+      { href: '#t7', label: '7. Basic RAG' },
+      { href: '#t8', label: '8. Query rewrite' },
+      { href: '#t9', label: '9. Multi-hop retrieval' },
+      { href: '#t10', label: '10. Post-retrieval shaping' },
+      { href: '#t11', label: '11. Long-context order' },
+      { href: '#t12', label: '12. Caching / compression' },
+    ],
+  },
+  {
+    title: 'Nhóm 3 — Reasoning & planning',
+    items: [
+      { href: '#t13', label: '13. CoT' },
+      { href: '#t14', label: '14. Plan-and-Solve' },
+      { href: '#t15', label: '15. ToT / GoT' },
+      { href: '#t16', label: '16. Self-consistency' },
+      { href: '#t17', label: '17. ReAct' },
+      { href: '#t18', label: '18. Prompt chaining' },
+      { href: '#t19', label: '19. PAL / PoT' },
+    ],
+  },
+  {
+    title: 'Nhóm 4 — Reliability & optimization',
+    items: [
+      { href: '#t20', label: '20. Self-refine' },
+      { href: '#t21', label: '21. Prompt ensembling' },
+      { href: '#t22', label: '22. Auto prompt optimization' },
+      { href: '#t23', label: '23. Structured outputs' },
+      { href: '#t24', label: '24. Safety & guardrails' },
+    ],
+  },
+  {
+    title: 'Kết luận',
+    items: [{ href: '#wrap', label: 'Tổng kết', section: true }],
+  },
+];
+
+const clusterRows: SummaryRow[] = [
+  {
+    id: '1',
+    title: '<a href="#profile">Profile & instruction</a>',
+    chipLabel: 'Instruction',
+    chipVariant: 'green',
+  },
+  {
+    id: '2',
+    title: '<a href="#context">Knowledge & context</a>',
+    chipLabel: 'Context',
+    chipVariant: 'cyan',
+  },
+  {
+    id: '3',
+    title: '<a href="#reasoning">Reasoning & planning</a>',
+    chipLabel: 'Reasoning',
+    chipVariant: 'purple',
+  },
+  {
+    id: '4',
+    title: '<a href="#reliability">Reliability & optimization</a>',
+    chipLabel: 'Reliability',
+    chipVariant: 'amber',
+  },
+];
+---
+
+<ReportLayout title={title} description={description}>
+  <div class="layout">
+    <Sidebar intro="Mục lục" groups={sidebarGroups} />
+
+    <main>
+      <Breadcrumb />
+
+      <Hero
+        title={title}
+        subtitle="Từ <a href='https://www.promptingguide.ai/'>PromptingGuide.ai</a> đến survey 2024-2026 và docs vendor mới: prompt engineering hiện đại là một stack gồm framing, context, reasoning và reliability, không phải danh sách magic phrases."
+        meta={[
+          { label: 'Cập nhật', value: '2026-04-22' },
+          { label: 'Phạm vi', value: '<code>text-first, inference-time</code>' },
+          { label: 'Kỹ thuật', value: '24' },
+          { label: 'Nguồn survey', value: '58 text techniques' },
+        ]}
+      />
+
+      <Section id="intro" title="Tổng quan" themeTag="Overview">
+        <Callout type="info">
+          <strong>Luận điểm chính:</strong> prompt engineering bây giờ phải đọc như một chuỗi quyết định
+          về instruction, context, reasoning scaffold và output reliability. Những “mẹo” cũ vẫn
+          đúng, nhưng chúng chỉ là một lát cắt hẹp của bức tranh hiện tại.
+        </Callout>
+
+        <StatGrid
+          columns={4}
+          stats={[
+            { value: '4', label: 'nhóm lớn', note: 'taxonomy layer-1 của report' },
+            { value: '24', label: 'kỹ thuật cốt lõi', note: 'được phân tích ngay trên layer 1' },
+            { value: '58', label: 'text techniques', note: 'baseline từ Prompt Report' },
+            { value: '2026', label: 'taxonomy mới nhất', note: '4 aspects: instruction, knowledge, reasoning, reliability' },
+          ]}
+        />
+
+        <MermaidDiagram
+          caption="Prompt engineering hiện đại là một stack. Mỗi layer giải một loại failure mode khác nhau."
+          chart={`flowchart TB
+  P["Prompt engineering"] --> A["1. Frame the job"]
+  P --> B["2. Load the right context"]
+  P --> C["3. Make the model think"]
+  P --> D["4. Keep outputs reliable"]
+
+  A --> A1["Role / task / examples / XML / schema"]
+  B --> B1["RAG / query rewrite / long context / caching"]
+  C --> C1["CoT / decomposition / search / tools / code"]
+  D --> D1["Critique / ensembles / evals / guardrails"]
+`}
+        />
+
+        <Callout type="unique">
+          <strong>Điểm cần giữ trong đầu khi đọc toàn report:</strong> phần lớn technique không cạnh
+          tranh trực tiếp với nhau. Chúng xếp chồng. Ví dụ: bạn có thể dùng role + few-shot + RAG +
+          CoT + self-consistency + structured outputs trong cùng một flow.
+        </Callout>
+      </Section>
+
+      <Section id="map" title="Taxonomy mới" themeTag="Taxonomy">
+        <SummaryTable headers={['ID', 'Nhóm lớn', 'Câu hỏi mà nhóm này giải quyết']} rows={clusterRows} />
+
+        <p>
+          Quick tags:
+          <Chip variant="green">instruction</Chip>{' '}
+          <Chip variant="cyan">context</Chip>{' '}
+          <Chip variant="purple">reasoning</Chip>{' '}
+          <Chip variant="amber">reliability</Chip>
+        </p>
+
+        <Callout type="warn">
+          <strong>Đừng đọc taxonomy như phân loại cứng.</strong> Một technique có thể nằm ở nhiều nhóm.
+          Ví dụ XML tags là instruction shaping, nhưng cũng là context shaping; prompt chaining là
+          reasoning, nhưng cũng là workflow orchestration.
+        </Callout>
+
+        <KeyTakeaway
+          title="Cách đọc report này"
+          items={[
+            'Nhóm 1 trả lời: <strong>model nên đóng vai gì và output phải trông như thế nào?</strong>',
+            'Nhóm 2 trả lời: <strong>cần nạp thêm context gì và context phải được shape ra sao?</strong>',
+            'Nhóm 3 trả lời: <strong>model nên suy luận, phân rã, gọi tool và ghép bước như thế nào?</strong>',
+            'Nhóm 4 trả lời: <strong>làm sao kiểm tra, siết, tối ưu và bảo vệ output?</strong>',
+          ]}
+        />
+      </Section>
+
+      <Section id="examples" title="Ví dụ thực chiến" themeTag="Examples">
+        <p>
+          Phần này nối 4 nhóm lớn với tình huống thật. Điểm chính không phải là prompt “hay” hơn,
+          mà là thấy được prompt engineering hoạt động như một contract có mục tiêu, input, output
+          và failure mode rõ ràng.
+        </p>
+
+        <DataTable
+          variant="compare"
+          richCells
+          headers={['Tình huống', 'Kỹ thuật chính', 'Output contract']}
+          rows={[
+            [
+              'Support triage',
+              '<code>Role</code> + <code>Task instruction</code> + <code>XML</code> + <code>Structured outputs</code>',
+              'Phân loại ticket, trả JSON, kèm customer reply ngắn.',
+            ],
+            [
+              'Docs Q&A',
+              '<code>RAG</code> + <code>Long-context order</code> + <code>Quote grounding</code>',
+              'Chỉ trả lời từ nguồn, quote evidence trước khi kết luận.',
+            ],
+            [
+              'Research synthesis',
+              '<code>Query rewrite</code> + <code>Multi-hop</code> + <code>Prompt chaining</code>',
+              'Tra từng hop, ghi note trung gian, rồi synthesize memo.',
+            ],
+            [
+              'Extraction / audit',
+              '<code>Structured outputs</code> + <code>Self-refine</code> + <code>Guardrails</code>',
+              'JSON strict, kiểm schema, từ chối input rủi ro.',
+            ],
+          ]}
+        />
+
+        <Tabs
+          tabs={[
+            { id: 'support', label: 'Support triage' },
+            { id: 'docs', label: 'Docs Q&A' },
+            { id: 'research', label: 'Research synthesis' },
+            { id: 'extract', label: 'Extraction' },
+          ]}
+        >
+          <div data-tab-panel="support">
+            <Subheading level="h4" text="Ví dụ 1: Triage ticket support" />
+            <p>
+              Mục tiêu: model đọc ticket, xác định mức độ ưu tiên, trích thông tin cần xử lý và
+              viết phản hồi ngắn theo đúng tone support. Đây là pattern rất điển hình cho
+              <strong>role + task instruction + structured outputs</strong>.
+            </p>
+
+            <CodeBlock
+              caption="Prompt mẫu cho support triage"
+              code={`<system>
+You are a support triage lead for a SaaS product.
+Classify each ticket, choose one priority, and draft a customer reply.
+</system>
+<ticket>
+Subject: Billing charged twice after upgrade
+Body: I upgraded yesterday and saw two charges on my card.
+</ticket>
+<rules>
+- Return valid JSON only.
+- Use priority one of: low, medium, high, urgent.
+- If billing is involved, add category "billing".
+- The customer reply must be under 80 words and empathetic.
+</rules>`}
+              lang="text"
+            />
+
+            <Callout type="info">
+              <strong>Output kỳ vọng:</strong> một JSON hợp lệ, parse được ngay vào workflow tự động.
+              Cùng một prompt này có thể đem đi gắn vào pipeline mà không cần parse tự do.
+            </Callout>
+
+            <CodeBlock
+              caption="Ví dụ output hợp lệ"
+              code={`{
+  "priority": "high",
+  "category": "billing",
+  "customer_reply": "Sorry about the duplicate charge. I’m checking this now and will update you shortly.",
+  "next_action": "Investigate billing logs and reconcile duplicate authorization"
+}`}
+              lang="json"
+            />
+          </div>
+
+          <div data-tab-panel="docs">
+            <Subheading level="h4" text="Ví dụ 2: Hỏi đáp trên bộ tài liệu" />
+            <p>
+              Mục tiêu: model trả lời đúng theo nguồn, không bịa thêm. Đây là chỗ mà
+              <strong>RAG + long-context ordering + quote grounding</strong> phát huy rõ nhất.
+            </p>
+
+            <CodeBlock
+              caption="Prompt mẫu cho docs Q&A"
+              code={`<instructions>
+Use only the documents below.
+If the answer is missing, say "not found".
+Quote the relevant evidence before the final answer.
+</instructions>
+<documents>
+  <document id="1" source="policy.md">
+    All enterprise accounts must rotate API keys every 90 days.
+  </document>
+  <document id="2" source="faq.md">
+    Billing resets happen at the beginning of each month.
+  </document>
+</documents>
+<question>
+When do enterprise accounts need to rotate API keys?
+</question>`}
+              lang="text"
+            />
+
+            <Callout type="unique">
+              <strong>Output tốt không chỉ đúng, mà còn traceable.</strong> Người đọc phải nhìn ra ngay
+              câu nào đến từ `policy.md` và câu nào là inference của model.
+            </Callout>
+          </div>
+
+          <div data-tab-panel="research">
+            <Subheading level="h4" text="Ví dụ 3: Tổng hợp research nhiều hop" />
+            <p>
+              Mục tiêu: biến một câu hỏi rộng thành chuỗi bước nhỏ, mỗi bước có evidence riêng.
+              Đây là phối hợp của <strong>query rewrite + multi-hop retrieval + prompt chaining</strong>.
+            </p>
+
+            <CodeBlock
+              caption="Prompt chain cho research synthesis"
+              code={`Step 1: Rewrite the user's question into 3 search queries.
+Step 2: Retrieve evidence for each query and write short notes.
+Step 3: Merge the notes into a 1-paragraph memo with caveats.
+
+Question: What changed in prompt engineering after 2024?`}
+              lang="text"
+            />
+
+            <Diagram>
+Query rewrite -> hop 1 evidence -> hop 2 evidence -> memo
+            </Diagram>
+
+            <Callout type="info">
+              <strong>Điểm lợi:</strong> bạn thấy ngay hop nào thiếu evidence. Nếu bước 1 rewrite kém,
+              cả pipeline sẽ lộ ra sớm thay vì ẩn trong một câu trả lời dài.
+            </Callout>
+          </div>
+
+          <div data-tab-panel="extract">
+            <Subheading level="h4" text="Ví dụ 4: Trích xuất và kiểm soát đầu ra" />
+            <p>
+              Mục tiêu: model chuyển text lộn xộn thành JSON hợp lệ, rồi tự kiểm tra trước khi trả.
+              Đây là nơi <strong>structured outputs + self-refine + guardrails</strong> cực kỳ hữu ích.
+            </p>
+
+            <CodeBlock
+              caption="Prompt mẫu cho extraction"
+              code={`<task>
+Extract the incident fields and return strict JSON.
+</task>
+<schema>
+{
+  "severity": "low|medium|high|critical",
+  "owner_team": "string",
+  "summary": "string",
+  "needs_followup": "boolean"
+}
+</schema>
+<input>
+PagerDuty alert: latency spiked after deploy 2.1.4...
+</input>
+<verification>
+Check that every required field exists and no extra properties are added.
+</verification>`}
+              lang="text"
+            />
+
+            <Callout type="warn">
+              <strong>Đừng để freeform text lọt vào bước downstream.</strong> Nếu workflow có action
+              thật, output phải là contract, không phải prose.
+            </Callout>
+          </div>
+        </Tabs>
+
+        <KeyTakeaway
+          title="Ví dụ thực chiến"
+          items={[
+            'Support triage là case tốt nhất để thấy role/instruction/schema ghép với nhau.',
+            'Docs Q&A cho thấy retrieval + ordering quan trọng không kém wording.',
+            'Research synthesis và extraction là hai nơi nên dùng chaining, self-refine và guardrails sớm.',
+          ]}
+        />
+      </Section>
+
+      <Section id="profile" title="Nhóm 1 — Profile & instruction" themeTag="Instruction">
+        <p>
+          Đây là lớp nền của mọi prompt. Nếu lớp này yếu, các lớp sau sẽ phải sửa chữa quá nhiều.
+          Bốn câu hỏi của nhóm này là: ai đang nói, đang làm việc gì, cần mức cụ thể nào, và
+          format đầu ra ra sao.
+        </p>
+
+        <Accordion title="Failure modes phổ biến của nhóm instruction">
+          <ul>
+            <li>Role quá chung chung nên chỉ làm model “văn vẻ” hơn mà không tăng độ đúng.</li>
+            <li>Task nhồi quá nhiều mục tiêu vào một lượt làm prompt trông “đủ ý” nhưng khó thực thi.</li>
+            <li>Ví dụ lẫn format hoặc label space khiến few-shot học sai pattern.</li>
+            <li>Delimiter mơ hồ khiến context, instruction và data bị trộn vào nhau.</li>
+          </ul>
+        </Accordion>
+
+        <Technique id="t1" title="1. Role / persona prompting" tid="1" location="Sources: 2026 taxonomy, OpenAI, Google, Anthropic">
+          <WhyImportant>
+            Role đặt “lăng kính” cho model. Nó không thêm kiến thức mới, nhưng nó thay đổi cách model
+            ưu tiên thông tin, giọng điệu và mức độ chi tiết.
+          </WhyImportant>
+
+          <p>
+            Dùng khi bạn cần model trả lời như một chuyên gia có bối cảnh rõ ràng: reviewer,
+            lawyer, tutor, analyst, planner. Trong taxonomy 2026, đây là phần “profile”.
+            Trong thực tế, nó là cách rẻ nhất để giới hạn không gian trả lời trước khi bạn
+            phải thêm examples hay tools.
+          </p>
+
+          <CodeBlock
+            caption="Role + task skeleton"
+            code={`<system>
+You are a senior technical editor.
+</system>
+<user>
+Review the draft for clarity, factuality, and missing assumptions.
+</user>`}
+            lang="text"
+          />
+
+          <ProsCons
+            pros={[
+              'Tạo ngữ cảnh nhanh, ít token',
+              'Giữ tone và mức detail ổn định',
+              'Phù hợp cho phong cách chuyên gia hoặc quy trình lặp lại',
+            ]}
+            cons={[
+              'Có thể tạo bias không cần thiết',
+              'Không thay thế được data/context thật',
+              'Role quá “đậm” dễ làm model sa vào persona hơn là task',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — personality information</a>',
+              '<a href="https://platform.openai.com/docs/guides/prompt-engineering/tactics-to-improve-reliability">OpenAI prompting guide — roles and clear instructions</a>',
+              '<a href="https://cloud.google.com/vertex-ai/generative-ai/docs/learn/prompts/prompt-design-strategies">Google prompt design strategies — assign a role</a>',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t2" title="2. Task instruction: intent, domain, demand" tid="2" location="Sources: OpenAI, Google, 2026 taxonomy">
+          <WhyImportant>
+            Đây là kỹ thuật “nói rõ việc cần làm”. Nếu role trả lời câu hỏi “ai”, thì task instruction
+            trả lời “làm gì, trên dữ liệu nào, với ràng buộc nào”.
+          </WhyImportant>
+
+          <p>
+            2026 taxonomy chia instruction thành intent, domain và demand. Cách viết tốt là nêu
+            mục tiêu trước, nguồn dữ liệu sau, rồi chốt constraint ở cuối. Tránh dồn nhiều tác vụ
+            cognitive vào một prompt nếu output cần chính xác.
+          </p>
+
+          <CodeBlock
+            caption="Instruction viết rõ intent / domain / demand"
+            code={`You are writing a release note.
+Intent: explain what changed.
+Domain: an internal developer audience.
+Demand: keep it under 120 words, mention only user-visible changes, and use 3 bullets.`}
+            lang="text"
+          />
+
+          <Callout type="warn">
+            <strong>Đừng để “chi tiết” biến thành “mơ hồ dài hơn”.</strong> Nếu prompt có 3 hành động
+            khác nhau mà không có cấu trúc, model sẽ xử lý như một bài văn chứ không phải một task.
+          </Callout>
+
+          <RefList
+            items={[
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — task instruction</a>',
+              '<a href="https://cloud.google.com/vertex-ai/generative-ai/docs/learn/prompts/prompt-design-strategies">Google overview of prompting strategies</a>',
+              '<a href="https://learn.microsoft.com/en-us/semantic-kernel/concepts/prompts/">Semantic Kernel prompts — specificity and iteration</a>',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t3" title="3. Zero-shot prompting" tid="3" location="Sources: Prompt Report, OpenAI, Google">
+          <WhyImportant>
+            Zero-shot là baseline. Nó cho bạn câu trả lời nhanh nhất, ít token nhất, và là điểm khởi
+            đầu tốt khi task đủ rõ hoặc model đã mạnh ở domain đó.
+          </WhyImportant>
+
+          <p>
+            Trong survey hiện đại, zero-shot không phải “cách làm thấp cấp”; nó là điểm tham chiếu để
+            đo xem instruction, context hay examples có thực sự tạo ra giá trị hay không. Nếu một
+            task đơn giản mà zero-shot đã ổn, thêm few-shot đôi khi chỉ làm prompt nặng và chậm hơn.
+          </p>
+
+          <ProsCons
+            pros={[
+              'Rẻ, nhanh, ít overhead',
+              'Không bị example bias',
+              'Hợp với câu hỏi đơn giản hoặc model đã hiểu domain',
+            ]}
+            cons={[
+              'Dễ thiếu format discipline',
+              'Không đủ cho task label-space hẹp',
+              'Hiệu năng biến động mạnh khi task mơ hồ',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://arxiv.org/abs/2406.06608">The Prompt Report — zero-shot prompting</a>',
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — zero-shot prompting</a>',
+              '<a href="https://ai.google.dev/gemini-api/docs/system-instructions">Gemini system instructions — zero-shot basics</a>',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t4" title="4. Few-shot prompting" tid="4" location="Sources: Prompt Report, OpenAI, Anthropic, Google">
+          <WhyImportant>
+            Few-shot vẫn là một trong các kỹ thuật mạnh nhất khi task có output shape rõ ràng: phân
+            loại, trích xuất, formatting, style transfer, hoặc mapping giữa input và output.
+          </WhyImportant>
+
+          <p>
+            Chất lượng examples thường quan trọng hơn số lượng. Hai đến năm ví dụ tốt, đúng format
+            và sát task thường hiệu quả hơn nhiều ví dụ nhưng loạn tiêu chuẩn. 2026 taxonomy cũng
+            nhấn mạnh rằng demonstrations vừa giúp hiểu intent, vừa giúp model học output format.
+          </p>
+
+          <CodeBlock
+            caption="Few-shot format với input/output rõ ràng"
+            code={`<examples>
+  <example>
+    <input>Return the sentiment of: The release is late but still promising.</input>
+    <output>mixed</output>
+  </example>
+  <example>
+    <input>Return the sentiment of: The update is excellent and stable.</input>
+    <output>positive</output>
+  </example>
+</examples>`}
+            lang="text"
+          />
+
+          <ProsCons
+            pros={[
+              'Tăng độ đúng và tính nhất quán',
+              'Giúp model học format một cách trực tiếp',
+              'Thường giảm nhu cầu viết instruction quá dài',
+            ]}
+            cons={[
+              'Tốn token',
+              'Dễ mang bias từ examples',
+              'Chọn ví dụ tệ là tự bóp chất lượng',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://arxiv.org/abs/2406.06608">The Prompt Report — few-shot prompting</a>',
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — demonstration information</a>',
+              '<a href="https://platform.openai.com/docs/guides/prompt-engineering/tactics-to-improve-reliability">OpenAI prompting guide — example outputs</a>',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t5" title="5. Example selection and ordering" tid="5" location="Sources: Prompt Report, 2026 taxonomy">
+          <WhyImportant>
+            Một vài ví dụ đúng chưa đủ. Prompt engineering hiện đại quan tâm đến ví dụ nào được chọn,
+            theo thứ tự nào, và chúng có đại diện đủ cho task distribution hay không.
+          </WhyImportant>
+
+          <p>
+            Survey mới chỉ ra rằng lấy ví dụ tương tự query, đa dạng hoá ví dụ, và cân bằng label space
+            đều ảnh hưởng đáng kể. Order cũng quan trọng: nếu examples được sắp xếp kém, model có thể
+            bám vào ví dụ cuối hoặc học sai ưu tiên.
+          </p>
+
+          <Callout type="unique">
+            <strong>Điều này thường bị bỏ qua.</strong> Nhiều đội chỉ hỏi “có few-shot chưa?” mà không
+            hỏi “few-shot nào, theo thứ tự nào, và có bias label nào không?”.
+          </Callout>
+
+          <Accordion title="Khi example selection làm hỏng prompt">
+            <ul>
+              <li>Ví dụ quá giống nhau làm model học một pattern hẹp.</li>
+              <li>Ví dụ chứa edge case hiếm nhưng lại được đặt quá gần task chính.</li>
+              <li>Ví dụ có formatting noise hoặc lời giải thích dài hơn output thực.</li>
+            </ul>
+          </Accordion>
+
+          <RefList
+            items={[
+              '<a href="https://arxiv.org/abs/2406.06608">The Prompt Report — example selection, label bias, formatting effects</a>',
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — KNN / Vote-K style example selection</a>',
+              '<a href="https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/prompt-engineering">Azure OpenAI prompt engineering — order matters</a>',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t6" title="6. XML tags, delimiters, and sectioning" tid="6" location="Sources: Anthropic, OpenAI, Google">
+          <WhyImportant>
+            Khi prompt có nhiều phần, cấu trúc rõ ràng thường quan trọng hơn wording khéo léo. XML tags
+            và delimiters giúp model biết đâu là instruction, đâu là context, đâu là example.
+          </WhyImportant>
+
+          <p>
+            Anthropic coi XML tags là một trong các công cụ thực dụng nhất để tách thành phần của
+            prompt. Nó tăng parseability, giảm nhầm lẫn giữa instruction và data, và đặc biệt hợp với
+            multi-document tasks hoặc output cần post-processing.
+          </p>
+
+          <Diagram>
+┌──────────────────────┐
+│ <instructions>       │
+│   what to do         │
+│ </instructions>      │
+├──────────────────────┤
+│ <context>            │
+│   untrusted data     │
+│ </context>           │
+├──────────────────────┤
+│ <examples>           │
+│   I/O pairs          │
+│ </examples>          │
+└──────────────────────┘
+          </Diagram>
+
+          <Callout type="info">
+            <strong>XML tags không phải “đúng vì Claude thích XML”.</strong> Chúng đúng vì bất kỳ
+            model nào cũng tốt hơn khi input được phân vùng rõ ràng.
+          </Callout>
+
+          <RefList
+            items={[
+              '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#structure-prompts-with-xml-tags">Anthropic XML tags</a>',
+              '<a href="https://ai.google.dev/guide/prompt_best_practices">Google prompt design strategies — structure prompts</a>',
+              '<a href="https://platform.openai.com/docs/guides/prompt-engineering/tactics-to-improve-reliability">OpenAI prompting guide — structure and clear instructions</a>',
+            ]}
+          />
+        </Technique>
+
+        <KeyTakeaway
+          title="Nhóm 1 — điều đáng nhớ"
+          items={[
+            'Role + instruction + examples + structure là bốn lớp khác nhau, không phải một thứ.',
+            'Few-shot hiệu quả nhất khi examples được chọn và sắp xếp có chủ đích.',
+            'XML / delimiters là cách rẻ nhất để giảm ambiguity trước khi phải dùng RAG hay tools.',
+          ]}
+        />
+      </Section>
+
+      <Section id="context" title="Nhóm 2 — Knowledge & context" themeTag="Context">
+        <p>
+          Nhóm này trả lời câu hỏi: model còn thiếu gì để trả lời đúng? Trong các hệ thống hiện đại,
+          đây không chỉ là “nhét thêm docs”, mà là một chuỗi quyết định về retrieval, ordering,
+          compression, cacheability và memory.
+        </p>
+
+        <Accordion title="Failure modes phổ biến của nhóm context">
+          <ul>
+            <li>Context quá dài nhưng không có structure, làm model không biết ưu tiên gì.</li>
+            <li>Retrieval tốt nhưng post-retrieval shaping kém nên evidence bị lẫn rác.</li>
+            <li>Query ngắn / mơ hồ nhưng không rewrite trước khi đi search.</li>
+            <li>Static prefix bị thay đổi liên tục, làm cache hit rate tụt.</li>
+          </ul>
+        </Accordion>
+
+        <Technique id="t7" title="7. Basic RAG / grounding" tid="7" location="Sources: 2026 taxonomy, context engineering survey">
+          <WhyImportant>
+            Đây là lớp grounding cơ bản nhất: lấy tài liệu ngoài model, đưa vào prompt, và bắt model
+            trả lời dựa trên evidence đó. Nếu câu hỏi có tính thời sự, domain-specific, hoặc đòi citation,
+            RAG thường là lựa chọn đầu tiên.
+          </WhyImportant>
+
+          <p>
+            2026 taxonomy coi RAG là kỹ thuật knowledge augmentation. Context engineering survey thì
+            đẩy nó thành một component của hệ thống: retrieval/generation, processing, management.
+            Điều quan trọng là prompt phải chỉ ra rõ nguồn nào là ground truth và nguồn nào chỉ là hỗ trợ.
+          </p>
+
+          <CodeBlock
+            caption="RAG prompt skeleton"
+            code={`Use only the provided sources.
+If the answer is not in the sources, say "not found".
+
+<sources>
+  ...
+</sources>
+
+<question>
+  ...
+</question>`}
+            lang="text"
+          />
+
+          <ProsCons
+            pros={[
+              'Giảm hallucination bằng evidence ngoài model',
+              'Cập nhật được theo thời gian thực',
+              'Hợp với citation và auditability',
+            ]}
+            cons={[
+              'Phụ thuộc retrieval quality',
+              'Tăng latency và chi phí',
+              'Source stuffing tệ có thể làm answer kém hơn prompt ngắn',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — basic RAG techniques</a>',
+              '<a href="https://arxiv.org/abs/2507.13334">Context engineering survey — retrieval and generation</a>',
+              '<a href="https://platform.openai.com/docs/guides/prompt-engineering/tactics-to-improve-reliability">OpenAI prompting guide — include relevant context</a>',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t8" title="8. Query rewriting / HyDE / Query2doc" tid="8" location="Sources: 2026 taxonomy, RAG research">
+          <WhyImportant>
+            Nhiều retrieval thất bại không phải vì corpus kém, mà vì query quá ngắn, quá mơ hồ, hoặc
+            không mang ontology mà corpus đang dùng. Rewrite query là cách rẻ nhất để sửa mismatch.
+          </WhyImportant>
+
+          <p>
+            Query rewriting có nhiều biến thể: paraphrase query, sinh pseudo-document kiểu HyDE,
+            hoặc Query2doc-style expansion. Mục tiêu là đẩy prompt về “ngôn ngữ của corpus” trước khi
+            search, thay vì hy vọng retriever tự hiểu ý người dùng.
+          </p>
+
+          <Callout type="unique">
+            <strong>Điểm mấu chốt:</strong> khi user query là “hỏi cái gì?”, retrieval query phải là
+            “hỏi bằng từ nào thì corpus mới trả lời được?”.
+          </Callout>
+
+          <RefList
+            items={[
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — query rewriting</a>',
+              '<a href="https://arxiv.org/abs/2507.13334">Context engineering survey — context retrieval and generation</a>',
+              '<a href="https://cloud.google.com/vertex-ai/generative-ai/docs/learn/prompts/prompt-design-strategies">Google prompting strategies — adding contextual information</a>',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t9" title="9. Multi-hop retrieval and query decomposition" tid="9" location="Sources: 2026 taxonomy, context engineering survey">
+          <WhyImportant>
+            Câu hỏi khó thường không thất bại ở bước “trả lời”, mà thất bại ở bước “không biết phải tra
+            cái gì trước”. Multi-hop retrieval tách vấn đề ra thành các hop trung gian.
+          </WhyImportant>
+
+          <p>
+            Dùng cho câu hỏi so sánh, suy luận nhiều bước, hoặc phụ thuộc vào nhiều tài liệu khác nhau.
+            Query được decomposed thành các sub-queries, mỗi sub-query tìm evidence riêng, sau đó model
+            hợp nhất các mảnh lại thành câu trả lời cuối.
+          </p>
+
+          <Diagram>
+Query ──▶ Hop 1 evidence ──▶ Sub-answer 1
+      └──▶ Hop 2 evidence ──▶ Sub-answer 2
+      └──▶ Hop 3 evidence ──▶ Final synthesis
+          </Diagram>
+
+          <RefList
+            items={[
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — MultiHop-RAG and query standardization</a>',
+              '<a href="https://arxiv.org/abs/2507.13334">Context engineering survey — complex retrieval workflows</a>',
+              '<a href="https://arxiv.org/abs/2305.04091">Plan-and-Solve prompting — decomposition mindset</a>',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t10" title="10. Post-retrieval restructuring" tid="10" location="Sources: 2026 taxonomy, RAG literature">
+          <WhyImportant>
+            Retrieval xong chưa phải xong. Documents thường vẫn còn rác, thứ tự không tối ưu, và không
+            phải đoạn nào cũng nên được model nhìn thấy với cùng trọng số.
+          </WhyImportant>
+
+          <p>
+            Đây là bước trộn content adjusting, structure adjusting và attention refocusing. Một số
+            paper cho thấy việc phân loại lại tài liệu theo mức relevance, hoặc rút gọn/viết lại
+            retrieved context trước khi generation có thể cải thiện mạnh.
+          </p>
+
+          <ProsCons
+            pros={[
+              'Làm retrieved evidence “dễ đọc” hơn cho model',
+              'Có thể tăng factuality đáng kể',
+              'Giảm bớt noise từ docs dài hoặc lẫn tài liệu phụ',
+            ]}
+            cons={[
+              'Nếu reshape quá tay thì mất traceability',
+              'Có thể vô tình làm méo evidence',
+              'Pipeline phức tạp hơn basic RAG',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — post-retrieval optimization</a>',
+              '<a href="https://arxiv.org/abs/2507.13334">Context engineering survey — context processing</a>',
+              '<a href="https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/prompt-engineering">Azure OpenAI prompt engineering — provide grounding context</a>',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t11" title="11. Long-context ordering and quote grounding" tid="11" location="Sources: Anthropic, OpenAI, Google">
+          <WhyImportant>
+            Khi context dài lên, thứ tự và placement của thông tin trở thành một phần của prompt
+            engineering. Nói cách khác: bạn đang điều khiển attention, không chỉ text.
+          </WhyImportant>
+
+          <p>
+            Anthropic khuyên đặt longform data lên đầu, query ở cuối, và yêu cầu model quote đoạn liên
+            quan trước khi giải quyết task. Kết hợp XML tags với metadata giúp nhiều-document tasks
+            ít bị “tan chảy” hơn.
+          </p>
+
+          <CodeBlock
+            caption="Long-context prompt skeleton"
+            code={`<documents>
+  <document index="1">
+    <source>paper-a.pdf</source>
+    <content>...</content>
+  </document>
+  <document index="2">
+    <source>paper-b.pdf</source>
+    <content>...</content>
+  </document>
+</documents>
+
+<task>
+  Quote the relevant evidence first, then answer the question.
+</task>`}
+            lang="text"
+          />
+
+          <ProsCons
+            pros={[
+              'Giúp model neo vào source thay vì hallucinate',
+              'Hợp với multi-document synthesis',
+              'Đơn giản nhưng hiệu quả trong long context',
+            ]}
+            cons={[
+              'Vẫn bị giới hạn bởi context window',
+              'Nếu docs không có structure thì chỉ “đổ thêm token”',
+              'Queries đặt sai chỗ có thể giảm chất lượng rõ rệt',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#long-context-prompting">Anthropic long context prompting</a>',
+              '<a href="https://platform.openai.com/docs/guides/prompt-caching/prompt-caching">OpenAI prompt caching — static prefix first</a>',
+              '<a href="https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/design-multimodal-prompts">Google multimodal prompt design — structure matters</a>',
+            ]}
+          />
+        </Technique>
+
+        <Technique id="t12" title="12. Prompt caching and compression" tid="12" location="Sources: OpenAI, prompt compression survey">
+          <WhyImportant>
+            Đây là layer engineering “lợi ích thật” nhưng hay bị gọi nhầm là prompt trick. Caching và
+            compression giúp giảm latency/cost và biến prompt thành một artifact có thể tối ưu hóa.
+          </WhyImportant>
+
+          <p>
+            OpenAI cache dựa trên exact prefix match: content tĩnh, instruction và examples nên đặt
+            trước, variable content để sau. Prompt compression literature thì đi xa hơn: giảm prompt
+            length trong khi giữ semantic content cần thiết.
+          </p>
+
+          <Callout type="unique">
+            <strong>Điểm mới của 2025-2026:</strong> prompt engineering không chỉ là “đúng hơn” mà còn
+            là “rẻ hơn và ổn định hơn”.
+          </Callout>
+
+          <Accordion title="Khi compression làm hỏng prompt">
+            <ul>
+              <li>Giảm token nhưng mất ngoại lệ quan trọng.</li>
+              <li>Nén quá mức khiến schema hoặc policy bị mờ.</li>
+              <li>Static prefix không ổn định làm cache hit rate tụt.</li>
+            </ul>
+          </Accordion>
+
+          <RefList
+            items={[
+              '<a href="https://platform.openai.com/docs/guides/prompt-caching/prompt-caching">OpenAI prompt caching</a>',
+              '<a href="https://aclanthology.org/2025.naacl-long.368/">Prompt Compression for Large Language Models: A Survey</a>',
+              '<a href="https://arxiv.org/abs/2507.13334">Context engineering survey — context management</a>',
+            ]}
+          />
+        </Technique>
+
+        <KeyTakeaway
+          title="Nhóm 2 — điều đáng nhớ"
+          items={[
+            'Retrieval tốt chưa đủ; post-retrieval shaping quyết định model có đọc đúng evidence không.',
+            'Long-context tasks là bài toán về ordering, not just length.',
+            'Caching và compression là phần economics của prompt engineering hiện đại.',
+          ]}
+        />
+      </Section>
+
+      <Section id="reasoning" title="Nhóm 3 — Reasoning & planning" themeTag="Reasoning">
+        <Subheading level="h3" text="Khi instruction và context đã đủ, lớp này quyết định model sẽ đi qua vấn đề như thế nào." />
+
+        <p>
+          Đây là nhóm kỹ thuật giúp model phân rã bài toán, thử nhiều đường suy luận, gọi tool, và
+          ghép lại thành câu trả lời cuối. Đặc điểm chung là chúng không chỉ viết prompt tốt hơn;
+          chúng thay đổi <em>thứ tự xử lý</em> của model.
+        </p>
+
+        <Accordion title="Failure modes phổ biến của nhóm reasoning">
+          <ul>
+            <li>Đòi model giải quyết task lớn bằng một lần trả lời tuyến tính.</li>
+            <li>Không có bước tách subproblem nên thought process bị chậm hoặc loạn.</li>
+            <li>Tool có nhưng không có protocol rõ ràng để reason, act và observe.</li>
+            <li>Không biết khi nào cần branching search thay vì linear CoT.</li>
+          </ul>
+        </Accordion>
+
+        <Technique id="t13" title="13. Chain-of-thought / zero-shot CoT" tid="13" location="Sources: CoT paper, OpenAI, Anthropic">
+          <WhyImportant>
+            CoT là kỹ thuật nền tảng nhất của reasoning prompting. Nó cho model “không gian nghĩ” để
+            đi qua các bước trung gian trước khi chốt answer.
+          </WhyImportant>
+
+          <p>
+            Dùng CoT khi task cần math, logic, multi-step synthesis, hoặc reasoning có cấu trúc. Zero-shot
+            CoT với một gợi ý như “Let's think step by step” vẫn là một trick đơn giản nhưng có tác dụng
+            thật trên nhiều baseline model, đặc biệt khi task không đòi tool.
+          </p>
+
+          <CodeBlock
+            caption="Zero-shot CoT prompt"
+            code={`Solve the problem step by step.
+Show the intermediate reasoning only if it helps the final answer.
+Then give the final answer in one sentence.`}
+            lang="text"
+          />
+
+          <ProsCons
+            pros={[
+              'Cải thiện reasoning trên task nhiều bước',
+              'Đơn giản và dễ áp dụng',
+              'Tạo đường đi rõ hơn để debug prompt',
+            ]}
+            cons={[
+              'Tăng latency và token',
+              'Không phải task nào cũng cần CoT',
+              'Có thể làm model “nói dài nhưng không đúng hơn”',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://arxiv.org/abs/2201.11903">Chain-of-Thought Prompting Elicits Reasoning in Large Language Models</a>',
+              '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#chain-complex-prompts">Anthropic prompt chaining and thinking guidance</a>',
+              '<a href="https://platform.openai.com/docs/guides/prompt-engineering/tactics-to-improve-reliability">OpenAI prompting guide — instruct the model to explain its reasoning</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/cot/">
+            Phân tích sâu: Chain-of-Thought / zero-shot CoT — reasoning scaffold, monitorability và controllability
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t14" title="14. Plan-and-Solve / Least-to-Most" tid="14" location="Sources: plan-first papers, 2026 taxonomy">
+          <WhyImportant>
+            Đây là decomposition prompting theo kiểu “lập kế hoạch trước, giải sau”. Nó giảm tải working
+            memory và giúp model không nhảy thẳng vào lời giải khi bài toán còn chưa được chia nhỏ.
+          </WhyImportant>
+
+          <p>
+            Least-to-Most tách bài toán thành chuỗi subproblems; Plan-and-Solve thêm một bước lập kế
+            hoạch rõ ràng trước khi triển khai. Với những task có dependency rõ, đây thường là cách
+            ổn định hơn so với việc hỏi model viết CoT tự do ngay từ đầu.
+          </p>
+
+          <Diagram>
+Plan -> Subproblem 1 -> Subproblem 2 -> Merge -> Final answer
+          </Diagram>
+
+          <RefList
+            items={[
+              '<a href="https://arxiv.org/abs/2205.10625">Least-to-Most Prompting Enables Complex Reasoning in Large Language Models</a>',
+              '<a href="https://arxiv.org/abs/2305.04091">Plan-and-Solve Prompting</a>',
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — plan-execute decomposition</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/plan-solve/">
+            Phân tích sâu: Plan-and-Solve / Least-to-Most — decomposition-first reasoning, easy-to-hard generalization
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t15" title="15. Tree-of-Thought / Graph-of-Thought" tid="15" location="Sources: ToT, GoT, reasoning survey">
+          <WhyImportant>
+            Khi bài toán không có một đường suy luận tuyến tính tốt, branching search thường mạnh hơn
+            CoT thuần. ToT và GoT biến reasoning thành một không gian tìm kiếm.
+          </WhyImportant>
+
+          <p>
+            ToT cho model thử nhiều thought branches, đánh giá, backtrack và chọn đường tốt hơn.
+            GoT mở rộng ý tưởng này bằng cấu trúc graph. Đây là lựa chọn phù hợp cho planning,
+            creative search, puzzle, hoặc các task mà “đúng theo từng bước” chưa chắc là tối ưu toàn cục.
+          </p>
+
+          <ProsCons
+            pros={[
+              'Tăng khả năng tìm được đường đi tốt hơn',
+              'Hợp với problem solving khó và planning',
+              'Cho phép search + evaluation rõ ràng hơn',
+            ]}
+            cons={[
+              'Đắt token và controller logic',
+              'Khó triển khai nếu không có scoring rõ',
+              'Có thể overkill với task đơn giản',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://arxiv.org/abs/2305.10601">Tree of Thoughts</a>',
+              '<a href="https://arxiv.org/abs/2308.09687">Graph of Thoughts</a>',
+              '<a href="https://arxiv.org/abs/2406.06608">The Prompt Report — reasoning techniques</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/tot-got/">
+            Phân tích sâu: Tree-of-Thought / Graph-of-Thought — branching search, scoring và backtracking
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t16" title="16. Self-consistency" tid="16" location="Sources: CoT + ensemble literature">
+          <WhyImportant>
+            Self-consistency là cách làm reasoning bớt phụ thuộc vào một đường suy luận duy nhất: sample
+            nhiều chains rồi vote trên answer cuối.
+          </WhyImportant>
+
+          <p>
+            Nó đặc biệt hữu ích khi câu trả lời cuối ổn định hơn các lý do trung gian. Nói đơn giản:
+            đừng tin một đường CoT ngẫu nhiên; lấy nhiều đường, rồi chọn đáp án đồng thuận cao nhất.
+          </p>
+
+          <CodeBlock
+            caption="Self-consistency sketch"
+            code={`for each question:
+  sample N reasoning paths
+  extract final answers
+  vote / aggregate
+  return the consensus answer`}
+            lang="text"
+          />
+
+          <ProsCons
+            pros={[
+              'Tăng robustness mà không đổi model',
+              'Rất hợp cho reasoning nhiều bước',
+              'Dễ ghép với CoT hoặc tool use',
+            ]}
+            cons={[
+              'Đắt vì phải sample nhiều lần',
+              'Vote có thể che bias chung của model',
+              'Không sửa được reasoning sai một cách hệ thống',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://arxiv.org/abs/2203.11171">Self-Consistency Improves Chain of Thought Reasoning in Language Models</a>',
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — bagging prompt / Self-Consistency</a>',
+              '<a href="https://arxiv.org/abs/2406.06608">The Prompt Report — self-consistency case studies</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/self-consistency/">
+            Phân tích sâu: Self-consistency — sampling nhiều reasoning path rồi vote trên final answer
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t17" title="17. ReAct / tool-augmented reasoning" tid="17" location="Sources: ReAct paper, OpenAI, Anthropic">
+          <WhyImportant>
+            ReAct ghép reasoning với hành động. Nó không chỉ “nghĩ”; nó còn biết khi nào phải gọi tool,
+            quan sát kết quả và cập nhật kế hoạch.
+          </WhyImportant>
+
+          <p>
+            Đây là một trong các mẫu nền của agentic prompting hiện đại. Prompt thường có protocol rõ:
+            thought, action, observation. Cái hay là model vừa không bị nhốt trong CoT thuần, vừa không
+            phung phí tool calls khi chưa cần.
+          </p>
+
+          <CodeBlock
+            caption="ReAct protocol"
+            code={`Thought: I should verify the latest source.
+Action: search_docs["prompt engineering taxonomy"]
+Observation: retrieved 2026 taxonomy paper
+Thought: I can now synthesize the result.`}
+            lang="text"
+          />
+
+          <Callout type="warn">
+            <strong>ReAct không tự động an toàn.</strong> Tool outputs vẫn là untrusted inputs; nếu không
+            có structured outputs và approvals, bạn chỉ thay một loại rủi ro bằng một loại rủi ro khác.
+          </Callout>
+
+          <RefList
+            items={[
+              '<a href="https://arxiv.org/abs/2210.03629">ReAct: Synergizing Reasoning and Acting in Language Models</a>',
+              '<a href="https://platform.openai.com/docs/guides/function-calling/parallel-function-calling-and-structured-outputs">OpenAI function calling</a>',
+              '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#chain-complex-prompts">Anthropic chain complex prompts</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/react/">
+            Phân tích sâu: ReAct / tool-augmented reasoning — thought, action, observation loop
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t18" title="18. Prompt chaining" tid="18" location="Sources: Anthropic, Google, agent workflows">
+          <WhyImportant>
+            Khi task có nhiều bước rõ ràng và bạn cần kiểm tra kết quả trung gian, prompt chaining thường
+            tốt hơn một prompt dài. Nó biến output của bước trước thành input có trách nhiệm cho bước sau.
+          </WhyImportant>
+
+          <p>
+            Prompt chaining hữu ích cho research synthesis, document analysis, content pipelines, và
+            nhiều workflow có thể tách thành stages: extract -> transform -> judge -> format. Nó
+            cũng giúp debug vì mỗi link trong chain có một mục tiêu duy nhất.
+          </p>
+
+          <Diagram>
+Prompt 1: gather facts
+  ↓
+Prompt 2: normalize / compare
+  ↓
+Prompt 3: synthesize / format
+          </Diagram>
+
+          <Accordion title="Khi nào chaining thắng CoT đơn lẻ">
+            <ul>
+              <li>Khi bạn cần xem intermediate outputs.</li>
+              <li>Khi mỗi bước có format khác nhau.</li>
+              <li>Khi một bước sai có thể được sửa trước khi sang bước tiếp theo.</li>
+            </ul>
+          </Accordion>
+
+          <RefList
+            items={[
+              '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#chain-complex-prompts">Anthropic chain complex prompts</a>',
+              '<a href="https://cloud.google.com/vertex-ai/generative-ai/docs/learn/prompts/prompt-design-strategies">Google prompt engineering workflow</a>',
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — iterative decomposition / feedback</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/prompt-chaining/">
+            Phân tích sâu: Prompt chaining — inspectable multi-step pipelines với artifact trung gian
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t19" title="19. PAL / Program-of-Thought" tid="19" location="Sources: PAL, program-of-thought literature">
+          <WhyImportant>
+            Với các bài toán symbolic, arithmetic, tabular, hoặc logic có thể mã hóa được, code là một
+            intermediate representation mạnh hơn tự nhiên ngữ.
+          </WhyImportant>
+
+          <p>
+            PAL / Program-of-Thought bảo model sinh chương trình hoặc pseudo-code thay vì prose reasoning.
+            Cái được là tính chính xác của computation; cái mất là bạn phải có runtime hoặc executor.
+          </p>
+
+          <CodeBlock
+            caption="PAL-style prompt"
+            code={`Write Python to solve the problem.
+Use comments for reasoning.
+Return the final numeric answer after executing the code.`}
+            lang="text"
+          />
+
+          <ProsCons
+            pros={[
+              'Rất mạnh cho symbolic reasoning và toán',
+              'Tách reasoning khỏi computation',
+              'Code dễ kiểm tra hơn prose',
+            ]}
+            cons={[
+              'Phụ thuộc runtime',
+              'Có rủi ro an toàn nếu execute code bừa bãi',
+              'Không hợp cho mọi domain',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://arxiv.org/abs/2211.10435">PAL: Program-aided Language Models</a>',
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — code interpreter / integration tools</a>',
+              '<a href="https://arxiv.org/abs/2406.06608">The Prompt Report — code-based prompting techniques</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/pal-pot/">
+            Phân tích sâu: PAL / Program-of-Thought — code as intermediate representation
+          </DeepDiveLink>
+        </Technique>
+
+        <KeyTakeaway
+          title="Nhóm 3 — điều đáng nhớ"
+          items={[
+            'CoT là nền, nhưng decomposition, branching search và tool use mới là lớp mở rộng thực dụng.',
+            'Self-consistency là cách rẻ nhất để biến một reasoning path thành một ensemble.',
+            'Prompt chaining và PAL cho thấy prompt engineering đang tiến sát workflow orchestration.',
+          ]}
+        />
+      </Section>
+
+      <Section id="reliability" title="Nhóm 4 — Reliability & optimization" themeTag="Reliability">
+        <Subheading level="h3" text="Nhóm này làm cho prompt system không chỉ thông minh hơn, mà còn ổn định hơn, parseable hơn và an toàn hơn." />
+
+        <p>
+          Đây là nơi prompt engineering gặp evaluation, guardrails và tool governance. Nếu ba nhóm
+          trước nói về cách để model trả lời tốt, thì nhóm này nói về cách để câu trả lời có thể dùng
+          được trong production.
+        </p>
+
+        <Accordion title="Failure modes phổ biến của nhóm reliability">
+          <ul>
+            <li>Prompt chạy tốt một lần nhưng không ổn định qua nhiều input.</li>
+            <li>Output đúng về mặt nội dung nhưng không parse được bởi downstream.</li>
+            <li>Model tự tin nhưng sai, hoặc tự tối ưu theo format mà hy sinh generality.</li>
+            <li>Untrusted input len vào developer context hoặc tool call mà không bị chặn.</li>
+          </ul>
+        </Accordion>
+
+        <Technique id="t20" title="20. Self-refine + external verification" tid="20" location="Sources: Self-Refine, CRITIC, OpenAI safety">
+          <WhyImportant>
+            Self-refine biến model thành reviewer của chính nó. External verification đưa thêm một lớp
+            kiểm tra từ tool hoặc model khác để giảm sai sót.
+          </WhyImportant>
+
+          <p>
+            Đây là pattern rất hữu ích cho drafting, summarization, extraction và các task mà một vòng
+            phản hồi ngắn có thể sửa lỗi lớn. Nhưng nó không phải phép màu: khi bản chất reasoning sai,
+            việc tự sửa đôi khi chỉ làm câu trả lời đẹp hơn chứ không đúng hơn.
+          </p>
+
+          <CodeBlock
+            caption="Self-refine loop"
+            code={`Draft -> Critique -> Revise -> Verify -> Finalize`}
+            lang="text"
+          />
+
+          <ProsCons
+            pros={[
+              'Tốt cho polishing và error reduction',
+              'Có thể dùng tool để verify fact / code / search',
+              'Dễ nhúng vào pipeline production',
+            ]}
+            cons={[
+              'Có thể tăng verbosity mà không tăng correctness',
+              'Nếu critique kém thì refinement kém',
+              'Tốn thêm latency',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://arxiv.org/abs/2303.17651">Self-Refine</a>',
+              '<a href="https://arxiv.org/abs/2305.11738">CRITIC</a>',
+              '<a href="https://platform.openai.com/docs/guides/agent-builder-safety">OpenAI safety in building agents — trace graders and evals</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/self-refine/">
+            Phân tích sâu: Self-refine + external verification — draft, critique, revise, verify
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t21" title="21. Prompt ensembling / bagging / boosting" tid="21" location="Sources: 2026 taxonomy, Prompt Report">
+          <WhyImportant>
+            Khi một prompt đơn lẻ không đủ ổn định, ensemble prompts là cách tăng reliability bằng
+            redundancy: nhiều prompt, nhiều đường, rồi hợp nhất kết quả.
+          </WhyImportant>
+
+          <p>
+            2026 taxonomy mô tả bagging và boosting cho LLM prompting. Self-consistency là một biến thể
+            bagging; các cách như DiVeRSe hay AMA cho thấy hệ thống có thể dùng vote, verifier, hoặc
+            weighting để đánh đổi giữa độ mạnh và chi phí.
+          </p>
+
+          <Callout type="unique">
+            <strong>Đây là reliability bằng thống kê, không phải bằng lời hứa.</strong> Thay vì cố tìm
+            một prompt thần kỳ, ta dùng nhiều prompt vừa đủ tốt để triệt bớt may rủi.
+          </Callout>
+
+          <RefList
+            items={[
+              '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy — prompt ensembling</a>',
+              '<a href="https://arxiv.org/abs/2406.06608">The Prompt Report — ensemble-style prompting</a>',
+              '<a href="https://arxiv.org/abs/2203.11171">Self-Consistency as bagging style reasoning</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/prompt-ensembling/">
+            Phân tích sâu: Prompt ensembling — bagging/boosting style reliability at inference time
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t22" title="22. Automatic prompt optimization" tid="22" location="Sources: OpenAI, Anthropic, Google, RL/optimization surveys">
+          <WhyImportant>
+            Đây là bước trưởng thành của prompt engineering: không chỉ viết prompt, mà còn có hệ thống
+            để cải thiện prompt bằng dữ liệu, grader, feedback và iteration.
+          </WhyImportant>
+
+          <p>
+            OpenAI prompt optimizer, Anthropic prompt improver và Google Vertex prompt optimizer đều
+            đi theo logic chung: lấy prompt hiện tại + dataset + feedback, rồi đề xuất phiên bản tốt hơn.
+            Không có evaluator tốt thì tối ưu chỉ là đoán mò có hệ thống.
+          </p>
+
+          <CodeBlock
+            caption="Optimization flywheel"
+            code={`prompt -> dataset / eval -> optimizer -> manual review -> redeploy`}
+            lang="text"
+          />
+
+          <Accordion title="Điểm cần giữ kỷ luật">
+            <ul>
+              <li>Optimizer không thay thế human review.</li>
+              <li>Grader phải narrow và rõ.</li>
+              <li>Prompt tốt cho benchmark chưa chắc tốt cho production edge cases.</li>
+            </ul>
+          </Accordion>
+
+          <RefList
+            items={[
+              '<a href="https://platform.openai.com/docs/guides/prompt-optimizer/">OpenAI prompt optimizer</a>',
+              '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-tools">Anthropic prompt improver</a>',
+              '<a href="https://cloud.google.com/vertex-ai/generative-ai/docs/learn/prompts/prompt-optimizer">Google Vertex AI prompt optimizer</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/prompt-optimization/">
+            Phân tích sâu: Automatic prompt optimization — dataset, graders và review loop
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t23" title="23. Structured outputs / strict mode / allowed tools" tid="23" location="Sources: OpenAI GPT-5.4, function calling, structured outputs">
+          <WhyImportant>
+            Nếu downstream cần machine-readable output, structured outputs là cách biến prompt từ “nói
+            chuyện” thành “giao thức”. Đây là kỹ thuật reliability quan trọng nhất trong agentic systems.
+          </WhyImportant>
+
+          <p>
+            JSON schema, strict mode, allowed tools và CFG constraints làm cho output space hữu hạn và
+            dễ kiểm tra. Điều này không chỉ giúp parsing; nó giảm rủi ro prompt injection vì model
+            không được tự do phát minh command text ngoài schema.
+          </p>
+
+          <CodeBlock
+            caption="Structured output sketch"
+            code={`{
+  "type": "object",
+  "properties": {
+    "decision": { "type": "string", "enum": ["approve", "reject"] },
+    "reason": { "type": "string" }
+  },
+  "required": ["decision", "reason"],
+  "additionalProperties": false
+}` }
+            lang="json"
+          />
+
+          <ProsCons
+            pros={[
+              'Parseable và deterministic hơn',
+              'Tốt cho tool calling và downstream automation',
+              'Giảm freeform channels cho injection',
+            ]}
+            cons={[
+              'Schema quá chặt có thể làm giảm linh hoạt',
+              'Cần thiết kế tốt nếu muốn model không bị bó tay',
+              'Một số task sáng tạo không nên quá constrained',
+            ]}
+          />
+
+          <RefList
+            items={[
+              '<a href="https://platform.openai.com/docs/guides/function-calling/parallel-function-calling-and-structured-outputs">OpenAI function calling</a>',
+              '<a href="https://platform.openai.com/docs/guides/structured-outputs/avoid-json-schema-divergence%3F.zst">OpenAI structured outputs</a>',
+              '<a href="https://developers.openai.com/api/docs/guides/latest-model">GPT-5.4 allowed tools / CFG / preambles</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/structured-outputs/">
+            Phân tích sâu: Structured outputs / strict mode / allowed tools — contract hóa output
+          </DeepDiveLink>
+        </Technique>
+
+        <Technique id="t24" title="24. Safety and injection defenses" tid="24" location="Sources: OpenAI, Anthropic, AWS">
+          <WhyImportant>
+            Prompt engineering hiện đại phải coi untrusted text là nguy cơ, không chỉ là input. Khi model
+            được nối với tools, safety là một phần của prompt design.
+          </WhyImportant>
+
+          <p>
+            Nguyên tắc cốt lõi: đừng cho untrusted input đi thẳng vào developer message; tách data khỏi
+            instruction; giữ tool approvals; và dùng guardrails hoặc validators để hạn chế dữ liệu trôi
+            qua các node. Đây là lớp “không để prompt đẹp mà hệ thống vẫn dễ bị thao túng”.
+          </p>
+
+          <Accordion title="Anti-patterns cần tránh">
+            <ul>
+              <li>Nhét raw user text vào developer context.</li>
+              <li>Cho model tự do sinh tool arguments không có schema.</li>
+              <li>Cho phép tool approval mặc định là tắt trong workflow rủi ro cao.</li>
+              <li>Không có evals / trace grading cho các quyết định quan trọng.</li>
+            </ul>
+          </Accordion>
+
+          <RefList
+            items={[
+              '<a href="https://platform.openai.com/docs/guides/agent-builder-safety">OpenAI safety in building agents</a>',
+              '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#long-context-prompting">Anthropic prompting best practices</a>',
+              '<a href="https://docs.aws.amazon.com/pdfs/prescriptive-guidance/latest/llm-prompt-engineering-best-practices/llm-prompt-engineering-best-practices.pdf">AWS prompt engineering best practices against prompt injection</a>',
+            ]}
+          />
+
+          <DeepDiveLink href="/reports/prompt-engineering/safety-guardrails/">
+            Phân tích sâu: Safety and injection defenses — defense-in-depth cho agentic prompts
+          </DeepDiveLink>
+        </Technique>
+
+        <KeyTakeaway
+          title="Nhóm 4 — điều đáng nhớ"
+          items={[
+            'Reliability không phải lớp “sau cùng cho đẹp”; nó là điều kiện để prompt usable trong production.',
+            'Structured outputs và safety guardrails là hai kỹ thuật nên được đưa vào sớm, không phải cuối.',
+            'Optimization tooling làm prompt engineering chuyển từ craft sang flywheel có thể lặp lại.',
+          ]}
+        />
+      </Section>
+
+      <Section id="wrap" title="Kết luận" themeTag="Wrap">
+        <Callout type="success">
+          <strong>Khuyến nghị thực dụng:</strong> nếu một prompt chưa tốt, hãy sửa theo thứ tự
+          instruction → context → reasoning scaffold → reliability. Đừng nhảy thẳng vào “CoT”, “RAG”
+          hay “agents” nếu lớp trước còn mơ hồ.
+        </Callout>
+
+        <Subheading level="h3" text="Reading order cho người muốn học nhanh" />
+        <LinkList
+          title="Nguồn nên đọc theo thứ tự"
+          items={[
+            '<a href="https://arxiv.org/abs/2406.06608">The Prompt Report</a>',
+            '<a href="https://journal.hep.com.cn/fcs/EN/10.1007/s11704-025-50058-z">2026 taxonomy of prompt engineering</a>',
+            '<a href="https://arxiv.org/abs/2507.13334">Context engineering survey</a>',
+            '<a href="https://platform.openai.com/docs/guides/prompt-engineering/tactics-to-improve-reliability">OpenAI prompting guide</a>',
+            '<a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#structure-prompts-with-xml-tags">Anthropic XML tags and long-context guidance</a>',
+          ]}
+        />
+
+        <p>
+          Nếu phải rút gọn toàn bộ report thành một câu: prompt engineering hiện đại là việc thiết kế
+          <strong>đầu vào, ngữ cảnh, đường suy luận và output contract</strong> sao cho model không chỉ
+          trả lời “có vẻ đúng”, mà còn trả lời ổn định, kiểm tra được và dùng được trong hệ thống.
+        </p>
+      </Section>
+    </main>
+  </div>
+</ReportLayout>

@@ -9,7 +9,7 @@ import {
   techStackHeaders,
   techStackRows,
   opencodeSummaryRows,
-} from "../../../../data/reports/opencode-report";
+} from "../const";
 ---
 
 <Section id={"intro"} title={"1. Tổng quan opencode"} themeTag={"Intro"}>
@@ -77,7 +77,8 @@ import {
   </Callout>
   <Subheading level="h3" id="architecture" text="Kiến trúc tổng thể" />
   <Diagram>
-    <Fragment is:raw>{`      ┌─────────────────────────────────────────────────────────────────────┐
+    <Fragment is:raw>      
+      ┌─────────────────────────────────────────────────────────────────────┐
       │                          User input / CLI / TUI                     │
       └────────────────────────────────┬────────────────────────────────────┘
                                        │
@@ -106,7 +107,7 @@ import {
                │  session/compaction.ts (overflow → prune)    │
                │  session/retry.ts (exp backoff + headers)    │
                └──────────────────────────────────────────────┘
-    `}</Fragment>
+    </Fragment>
   </Diagram>
   <Subheading level="h3" id="tech-stack" text="Tech stack" />
   <DataTable headers={techStackHeaders} rows={techStackRows} richCells />

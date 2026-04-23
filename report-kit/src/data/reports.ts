@@ -50,7 +50,162 @@ export function getReportThumbnail(r: Report): string {
 }
 
 export const reports: Report[] = [
-  // ── LightRAG — HKUDS ─────────────────────────────────────────────────────
+  {
+    slug: 'prompt-engineering',
+    title: 'Prompt Engineering — 4 nhóm lớn, 24 kỹ thuật hiện đại',
+    description:
+      'Báo cáo tổng hợp prompt engineering từ survey 2024-2026 và docs chính thức của OpenAI, Anthropic, Google, Microsoft: 4 nhóm lớn, 24 kỹ thuật cốt lõi, tập trung vào instruction, context, reasoning và reliability.',
+    date: '2026-04-23',
+    techniqueCount: 24,
+    status: 'stable',
+    tags: ['prompt-engineering', 'prompting', 'context-engineering', 'reasoning', 'reliability', 'rag'],
+    kind: 'overview',
+    thumbnail: '/thumbnails/prompt-engineering.jpg',
+  },
+  {
+    slug: 'prompt-engineering/cot',
+    title: 'Deep Dive: Chain-of-Thought / zero-shot CoT',
+    description:
+      'CoT là reasoning scaffold nền tảng cho math, logic và synthesis; deep dive này phân tích token cost, monitorability và controllability trong 2026.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'Chain-of-Thought / zero-shot CoT',
+    tags: ['prompt-engineering', 'reasoning', 'chain-of-thought', 'cot'],
+  },
+  {
+    slug: 'prompt-engineering/plan-solve',
+    title: 'Deep Dive: Plan-and-Solve / Least-to-Most',
+    description:
+      'Decomposition-first prompting: lập kế hoạch trước, rồi giải từng subproblem theo thứ tự; phù hợp với tasks có dependency rõ.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'Plan-and-Solve / Least-to-Most',
+    tags: ['prompt-engineering', 'reasoning', 'planning', 'decomposition'],
+  },
+  {
+    slug: 'prompt-engineering/tot-got',
+    title: 'Deep Dive: Tree-of-Thought / Graph-of-Thought',
+    description:
+      'Branching search over thoughts: generate, score, prune, backtrack và merge; hợp cho planning và search khó.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'Tree-of-Thought / Graph-of-Thought',
+    tags: ['prompt-engineering', 'reasoning', 'search', 'tree-of-thought', 'graph-of-thought'],
+  },
+  {
+    slug: 'prompt-engineering/self-consistency',
+    title: 'Deep Dive: Self-consistency',
+    description:
+      'Sampling nhiều reasoning paths rồi vote trên final answer để giảm variance và tăng robustness cho CoT.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'Self-consistency',
+    tags: ['prompt-engineering', 'reasoning', 'ensemble', 'self-consistency'],
+  },
+  {
+    slug: 'prompt-engineering/react',
+    title: 'Deep Dive: ReAct / tool-augmented reasoning',
+    description:
+      'Reasoning + acting + observation loop cho agentic systems: thought, tool call, observation, update.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'ReAct / tool-augmented reasoning',
+    tags: ['prompt-engineering', 'reasoning', 'agents', 'tool-use', 'react'],
+  },
+  {
+    slug: 'prompt-engineering/prompt-chaining',
+    title: 'Deep Dive: Prompt chaining',
+    description:
+      'Sequential prompt calls với artifact trung gian có thể inspect, validate và branch ở từng bước.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'Prompt chaining',
+    tags: ['prompt-engineering', 'workflow', 'orchestration', 'chaining'],
+  },
+  {
+    slug: 'prompt-engineering/pal-pot',
+    title: 'Deep Dive: PAL / Program-of-Thought',
+    description:
+      'Dùng code làm intermediate representation, tách reasoning khỏi computation và đẩy computation sang runtime.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'PAL / Program-of-Thought',
+    tags: ['prompt-engineering', 'reasoning', 'program-of-thought', 'pal', 'code'],
+  },
+  {
+    slug: 'prompt-engineering/self-refine',
+    title: 'Deep Dive: Self-refine',
+    description:
+      'Draft → critique → revise với self-feedback, thường kết hợp external verification để giảm lỗi và polish output.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'Self-refine + external verification',
+    tags: ['prompt-engineering', 'reliability', 'self-refine', 'critique'],
+  },
+  {
+    slug: 'prompt-engineering/prompt-ensembling',
+    title: 'Deep Dive: Prompt ensembling',
+    description:
+      'Bagging/boosting-style prompting với nhiều prompt variants và aggregator để giảm variance.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'Prompt ensembling / bagging / boosting',
+    tags: ['prompt-engineering', 'reliability', 'ensemble', 'bagging', 'boosting'],
+  },
+  {
+    slug: 'prompt-engineering/prompt-optimization',
+    title: 'Deep Dive: Automatic prompt optimization',
+    description:
+      'Dataset + graders + optimizer + human review: prompt engineering như một flywheel có thể lặp lại.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'Automatic prompt optimization',
+    tags: ['prompt-engineering', 'optimization', 'evals', 'grader'],
+  },
+  {
+    slug: 'prompt-engineering/structured-outputs',
+    title: 'Deep Dive: Structured outputs',
+    description:
+      'JSON schema, strict mode, function calling và allowed tools: biến prompt thành contract parse được.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'Structured outputs / strict mode / allowed tools',
+    tags: ['prompt-engineering', 'reliability', 'structured-outputs', 'schema'],
+  },
+  {
+    slug: 'prompt-engineering/safety-guardrails',
+    title: 'Deep Dive: Safety and injection defenses',
+    description:
+      'Prompt injection, data leakage, tool approvals và guardrails cho agentic workflows có untrusted text.',
+    date: '2026-04-22',
+    status: 'stable',
+    kind: 'deep-dive',
+    parentSlug: 'prompt-engineering',
+    topicLabel: 'Safety and injection defenses',
+    tags: ['prompt-engineering', 'safety', 'guardrails', 'prompt-injection'],
+  },
   {
     slug: 'lightrag',
     title: 'LightRAG — Graph RAG nhẹ, nhanh và cập nhật tăng dần',
@@ -112,7 +267,6 @@ export const reports: Report[] = [
     topicLabel: 'Operations, Concurrency & Evaluation',
     tags: ['lightrag', 'operations', 'concurrency', 'cache', 'observability'],
   },
-  // ── LLM Wiki — Andrej Karpathy ────────────────────────────────────────────
   {
     slug: 'llm-wiki',
     title: 'LLM Wiki — Andrej Karpathy',
@@ -173,7 +327,6 @@ export const reports: Report[] = [
     topicLabel: 'Implementation & Use Cases',
     tags: ['llm-wiki', 'obsidian', 'claude-code', 'tutorial', 'use-cases'],
   },
-  // ─────────────────────────────────────────────────────────────────────────
   {
     slug: 'opencode',
     title: 'opencode — Harness Engineering',
@@ -186,7 +339,6 @@ export const reports: Report[] = [
     tags: ['harness', 'typescript', 'effect-ts', 'bun', 'agent-loop', 'opencode'],
     thumbnail: '/thumbnails/opencode.jpg',
   },
-  // ── opencode deep-dives: Theme C — Tool Design (t13–t20) ──────────────────
   {
     slug: 'opencode/t13',
     title: 'T13 — Tool description .txt pattern',
@@ -275,7 +427,6 @@ export const reports: Report[] = [
     topicLabel: 'Plugin tool dynamic discovery',
     tags: ['tool-design', 'plugin', 'extensibility', 'opencode'],
   },
-  // ── opencode deep-dives: Theme D — Provider Abstraction (t21–t23) ──────────
   {
     slug: 'opencode/t21',
     title: 'T21 — Multi-provider SDK lazy loading',
@@ -309,7 +460,6 @@ export const reports: Report[] = [
     topicLabel: 'Overflow detection + retry',
     tags: ['provider-abstraction', 'error-handling', 'retry', 'opencode'],
   },
-  // ── opencode deep-dives: Theme E — Permission Model (t24–t26) ─────────────
   {
     slug: 'opencode/t24',
     title: 'T24 — Wildcard last-match-wins permission evaluation',
@@ -343,7 +493,6 @@ export const reports: Report[] = [
     topicLabel: 'Arity-based command normalization',
     tags: ['permission', 'ux', 'bash', 'opencode'],
   },
-  // ── opencode deep-dives: Theme F — System Prompt (t27–t28) ───────────────
   {
     slug: 'opencode/t27',
     title: 'T27 — Model-specific system prompt dispatch + dynamic env',

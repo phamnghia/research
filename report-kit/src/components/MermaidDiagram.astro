@@ -23,11 +23,16 @@ interface Props {
 
 const { chart, caption } = Astro.props;
 const uid = 'mmd-' + Math.random().toString(36).slice(2, 9);
+const captionAttr = caption ? encodeURIComponent(caption) : '';
 ---
 
 <div class="mermaid-wrap">
   {caption && <p class="mmd-caption">{caption}</p>}
-  <div class="mermaid-container" id={uid}>
+  <div
+    class="mermaid-container"
+    id={uid}
+    data-mmd-caption={captionAttr || undefined}
+  >
     <pre class="mermaid-src">{chart}</pre>
     <div class="mmd-loading" aria-hidden="true">Loading diagram…</div>
   </div>
@@ -52,6 +57,7 @@ const uid = 'mmd-' + Math.random().toString(36).slice(2, 9);
   }
 
   .mermaid-container {
+    position: relative;
     background: var(--bg-elev);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -73,13 +79,236 @@ const uid = 'mmd-' + Math.random().toString(36).slice(2, 9);
     font-style: italic;
   }
 
-  .mmd-svg {
+</style>
+
+<style is:global>
+  /*
+   * Client-rendered Mermaid: DOM do bootMermaidDiagrams chèn không có data-astro của scoped —
+   * dùng is:global + prefix .mermaid-container để style áp dụng.
+   */
+  .mermaid-container .mmd-diagram-inner {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .mermaid-container .mmd-svg {
     width: 100%;
     text-align: center;
   }
 
-  .mmd-svg :global(svg) {
+  .mermaid-container .mmd-svg svg {
     max-width: 100%;
     height: auto;
+  }
+
+  /* Góc trên phải của vùng sơ đồ (khung .mermaid-container / .mmd-diagram-inner), không fixed theo viewport */
+  .mermaid-container .mmd-toolbar {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    z-index: 4;
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-start;
+  }
+
+  .mermaid-container .mmd-diagram-inner .mmd-svg {
+    padding-top: 40px;
+  }
+
+  /* Icon-only, trung tính — nội dung glyph qua ::before */
+  .mermaid-container .mmd-view-full {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+
+  .mermaid-container .mmd-view-full::before {
+    content: '⛶';
+    font-size: 15px;
+    line-height: 1;
+    opacity: 0.88;
+  }
+
+  .mermaid-container .mmd-view-full:hover {
+    background: color-mix(in srgb, var(--accent) 6%, var(--bg));
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+  }
+
+  .mermaid-container .mmd-view-full:hover::before {
+    opacity: 1;
+  }
+
+  .mermaid-container .mmd-view-full:active {
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  }
+
+  .mermaid-container .mmd-view-full:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    outline-offset: 2px;
+  }
+</style>
+
+<style is:global>
+  #mmd-lightbox {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #mmd-lightbox.open {
+    display: flex;
+  }
+
+  .mmd-lb-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  .mmd-lb-content {
+    position: relative;
+    z-index: 1;
+    max-width: 92vw;
+    max-height: 92vh;
+    padding-bottom: 88px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .mmd-lb-zoom-dock {
+    position: fixed;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9002;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    padding: 10px 18px;
+    border-radius: 999px;
+    background: rgba(22, 22, 28, 0.82);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55);
+    pointer-events: auto;
+    user-select: none;
+  }
+
+  #mmd-lightbox.open .mmd-lb-zoom-dock {
+    display: flex;
+  }
+
+  .mmd-lb-zoom-dock button {
+    min-width: 34px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+
+  .mmd-lb-zoom-dock button:hover {
+    background: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.35);
+  }
+
+  .mmd-lb-zoom-reset {
+    font-size: 12px !important;
+    font-weight: 500;
+  }
+
+  .mmd-lb-zoom-label {
+    min-width: 52px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mmd-lb-svg-wrap {
+    max-width: 100%;
+    max-height: 88vh;
+    overflow: auto;
+    border-radius: 8px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+    background: var(--bg-elev, #fff);
+    padding: 16px;
+    box-sizing: border-box;
+  }
+
+  .mmd-lb-svg-wrap :global(svg) {
+    display: block;
+    max-width: min(1200px, 88vw);
+    width: auto;
+    height: auto;
+    margin: 0 auto;
+  }
+
+  .mmd-lb-caption {
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 13px;
+    text-align: center;
+    max-width: 640px;
+    margin: 0;
+  }
+
+  .mmd-lb-close {
+    position: fixed;
+    top: calc(14px + env(safe-area-inset-top, 0px));
+    right: calc(14px + env(safe-area-inset-right, 0px));
+    z-index: 9003;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: white;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+  }
+
+  #mmd-lightbox.open .mmd-lb-close {
+    display: flex;
+  }
+
+  .mmd-lb-close:hover {
+    background: rgba(255, 255, 255, 0.2);
   }
 </style>
